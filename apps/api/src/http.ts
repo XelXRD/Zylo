@@ -21,9 +21,9 @@ export async function fetchJson<T>(service: string, url: string, init: RequestIn
     return fetchJson(service, url, init, attempt + 1);
   }
   if (!res.ok) {
-    // TMDB: status_message; OAuth servers (Trakt): error + error_description.
-    const body = (await res.json().catch(() => ({}))) as { status_message?: string; message?: string; error?: string; error_description?: string };
-    throw new UpstreamError(service, res.status, body.status_message ?? body.message ?? body.error_description ?? body.error ?? `${service} returned ${res.status}.`);
+    // TMDB: status_message; OAuth servers (Trakt): error + error_description; TorBox: detail.
+    const body = (await res.json().catch(() => ({}))) as { status_message?: string; message?: string; error?: string; error_description?: string; detail?: string };
+    throw new UpstreamError(service, res.status, body.status_message ?? body.message ?? body.detail ?? body.error_description ?? body.error ?? `${service} returned ${res.status}.`);
   }
   // Some endpoints answer 204 or an empty body; anything else must be JSON.
   const text = await res.text();

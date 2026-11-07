@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus, type AddonView, type PlaybackPrefs } from "@/lib/api";
+import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus, type AddonView, type PlaybackPrefs, type DebridStatus } from "@/lib/api";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
 import { Avatar, Button, Field, FormError, Loading, Select } from "@/lib/ui";
@@ -61,6 +61,10 @@ export default function SettingsPage() {
 
         <Section id="addons" title="Addons" lead="Stremio-compatible addons add streams, and sometimes catalogues, to Zylo. They're shared by every profile on this account. Zylo comes with none: you choose your own.">
           <Addons />
+        </Section>
+
+        <Section id="debrid" title="Debrid" lead="A debrid service plays torrent sources from your addons as ordinary links, so nothing downloads to this server. Connect any you subscribe to; they're shared by every profile on this account.">
+          <Debrid />
         </Section>
 
         <Section title="Preferences" lead="Your region decides which age ratings you see, and later what's available where you live.">
@@ -936,6 +940,93 @@ function PlaybackSettings() {
       <p role="status" className="text-xs text-ink-3 sm:col-span-2">
         {status ?? "Changes save automatically. Higher qualities are still used when nothing else is available."}
       </p>
+    </div>
+  );
+}
+
+const DEBRID_HELP: Record<DebridStatus["service"], { href: string; where: string }> = {
+  torbox: { href: "https://torbox.app/settings", where: "torbox.app/settings" },
+  realdebrid: { href: "https://real-debrid.com/apitoken", where: "real-debrid.com/apitoken" },
+  premiumize: { href: "https://www.premiumize.me/account", where: "premiumize.me/account" },
+};
+
+function Debrid() {
+  const [list, setList] = useState<DebridStatus[]>();
+  const [error, setError] = useState<string>();
+  const load = () => api<DebridStatus[]>("/debrid").then(setList, (e) => setError(e.message));
+  useEffect(() => void load(), []);
+  if (error) return <FormError message={error} />;
+  if (!list) return <Loading />;
+  return (
+    <div className="flex flex-col gap-4">
+      {list.map((d) => (
+        <DebridCard key={d.service} d={d} onChange={load} />
+      ))}
+    </div>
+  );
+}
+
+function DebridCard({ d, onChange }: { d: DebridStatus; onChange: () => void }) {
+  const [key, setKey] = useState("");
+  const { busy, run, feedback } = useAction(onChange);
+  const help = DEBRID_HELP[d.service];
+  const until = d.until ? new Date(d.until).toLocaleDateString("en-GB", { dateStyle: "medium" }) : null;
+  const status = !d.connected ? (
+    <span className="text-xs text-ink-3">Not connected</span>
+  ) : d.error ? (
+    <span className="text-xs text-danger">Connected, but {d.name} says: {d.error}</span>
+  ) : d.premium ? (
+    <span className="text-xs text-accent">Premium{until ? ` until ${until}` : ""}</span>
+  ) : (
+    <span className="text-xs text-danger">Connected, but the subscription has ended</span>
+  );
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-semibold">{d.name}</h3>
+        {status}
+      </div>
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run("save", async () => {
+            await api(`/debrid/${d.service}`, { method: "PUT", body: { apiKey: key } });
+            setKey("");
+            return `${d.name} connected.`;
+          });
+        }}
+      >
+        <Field
+          label={d.connected ? "Replace API key" : "API key"}
+          type="password"
+          autoComplete="off"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          required
+          minLength={10}
+          hint={
+            <>
+              Copy it from{" "}
+              <a href={help.href} target="_blank" rel="noreferrer" className="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink">
+                {help.where}
+              </a>
+              . Zylo checks it with {d.name}, then keeps it encrypted.
+            </>
+          }
+        />
+        {feedback}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" variant={d.connected ? "quiet" : "primary"} busy={busy === "save"}>
+            {d.connected ? "Replace key" : `Connect ${d.name}`}
+          </Button>
+          {d.connected && (
+            <Button type="button" variant="danger" busy={busy === "remove"} onClick={() => run("remove", async () => void (await api(`/debrid/${d.service}`, { method: "DELETE" })))}>
+              Remove
+            </Button>
+          )}
+        </div>
+      </form>
     </div>
   );
 }

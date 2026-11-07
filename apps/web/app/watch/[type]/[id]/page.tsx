@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { activeProfileId, api, clock, img, watchHref, type PlaybackOption, type PlaybackStart, type RankedOption, type Title } from "@/lib/api";
+import { activeProfileId, api, clock, DEBRID_NAMES, img, watchHref, type PlaybackOption, type PlaybackStart, type RankedOption, type Title } from "@/lib/api";
 import { useUser } from "@/lib/session";
 
 type Sub = { id: string; lang: string; label: string | null; url: string };
@@ -90,6 +90,14 @@ function Watch() {
     setPhase("playing");
   };
 
+  // VLC gets a playlist file; a torrent source needs its link first, and a failure shows like a playback one.
+  const vlc = (o: RankedOption) =>
+    openInVlc(o, title?.title ?? "Zylo", base).catch((e: Error) => {
+      setCurrent(o);
+      setProblem(e.message);
+      setPhase("failed");
+    });
+
   const next = start && current ? start.ranked[start.ranked.findIndex((o) => o.id === current.id) + 1] : undefined;
   const nextEp = nextEpisode(title, ep);
   const titleHref = `/title/${type}/${id}`;
@@ -138,7 +146,7 @@ function Watch() {
       <main className="mx-auto max-w-6xl px-0 sm:px-6">
         <div className="relative aspect-video w-full overflow-hidden bg-black sm:rounded-xl">
           {phase === "playing" && current && (
-            <Player
+            <Resolved
               key={current.id}
               option={current}
               where={base}
@@ -182,7 +190,19 @@ function Watch() {
 
                 {phase === "choose" && (
                   <p className="max-w-md text-center text-sm text-[#a3a3ad]">
-                    {start?.ranked.length ? "Pick a source below to start." : "None of your addons have a stream Zylo can play here. Other options are listed below."}
+                    {start?.ranked.length ? (
+                      "Pick a source below to start."
+                    ) : start?.waiting ? (
+                      <>
+                        Your addons only found torrents here. A debrid service plays them once it has them ready:{" "}
+                        <Link href="/settings#debrid" className="font-medium text-[#ececef] underline underline-offset-2">
+                          connect one in Settings
+                        </Link>
+                        .
+                      </>
+                    ) : (
+                      "None of your addons have a stream Zylo can play here. Other options are listed below."
+                    )}
                   </p>
                 )}
 
@@ -197,7 +217,7 @@ function Watch() {
                         </BigButton>
                       )}
                       {current && (
-                        <BigButton quiet onClick={() => openInVlc(current, title?.title ?? "Zylo")}>
+                        <BigButton quiet onClick={() => vlc(current)}>
                           Open in VLC
                         </BigButton>
                       )}
@@ -239,7 +259,7 @@ function Watch() {
         )}
 
         {start && (showSources || phase === "choose" || phase === "failed") && (
-          <Sources start={start} current={current} failed={phase === "failed"} onPick={choose} title={title?.title ?? "Zylo"} />
+          <Sources start={start} current={current} failed={phase === "failed"} onPick={choose} onVlc={vlc} />
         )}
         {current && phase === "playing" && !showSources && (
           <p className="px-4 py-4 text-xs text-[#74747e] sm:hidden">
@@ -282,7 +302,7 @@ function Player({
   onEnded,
 }: {
   option: RankedOption;
-  where: object;
+  where: Where;
   poster: string | null;
   subs: Sub[];
   startAt: number;
@@ -366,7 +386,7 @@ function Player({
 
 // --- source list -------------------------------------------------------------------
 
-function Sources({ start, current, failed, onPick, title }: { start: PlaybackStart; current?: RankedOption; failed: boolean; onPick: (o: RankedOption) => void; title: string }) {
+function Sources({ start, current, failed, onPick, onVlc }: { start: PlaybackStart; current?: RankedOption; failed: boolean; onPick: (o: RankedOption) => void; onVlc: (o: RankedOption) => void }) {
   return (
     <section className="px-4 py-6 sm:px-0" aria-labelledby="sources">
       <h2 id="sources" className="text-sm font-semibold">
@@ -383,20 +403,25 @@ function Sources({ start, current, failed, onPick, title }: { start: PlaybackSta
                   {o.id === current?.id && (failed ? <span className="ml-2 text-xs font-normal text-[#ef7a70]">Didn't play</span> : <span className="ml-2 text-xs font-normal text-[#52c4b3]">Playing</span>)}
                 </p>
                 <p className="mt-0.5 truncate text-xs text-[#74747e]">
-                  {[o.source.name, o.quality, ...o.hdr, o.size, o.browserFriendly ? null : "may not play in a browser"].filter(Boolean).join(" · ")}
+                  {[o.source.name, o.debrid && `via ${DEBRID_NAMES[o.debrid.service]}${o.debrid.cached ? "" : " (if it has it)"}`, o.quality, ...o.hdr, o.size, o.browserFriendly ? null : "may not play in a browser"].filter(Boolean).join(" · ")}
                 </p>
               </div>
               <div className="flex gap-2">
                 <button type="button" onClick={() => onPick(o)} className="h-9 rounded-lg border border-[#3b3b44] px-3 text-sm transition-[border-color] duration-150 hover:border-[#74747e]">
                   Play
                 </button>
-                <button type="button" onClick={() => openInVlc(o, title)} className="h-9 rounded-lg px-3 text-sm text-[#a3a3ad] transition-colors duration-150 hover:text-[#ececef]">
+                <button type="button" onClick={() => onVlc(o)} className="h-9 rounded-lg px-3 text-sm text-[#a3a3ad] transition-colors duration-150 hover:text-[#ececef]">
                   VLC
                 </button>
               </div>
             </li>
           ))}
         </ul>
+      )}
+      {start.waiting > 0 && (
+        <p className="mt-3 text-xs text-[#74747e]">
+          {start.waiting === 1 ? "1 torrent source is hidden: no connected debrid service has it" : `${start.waiting} torrent sources are hidden: no connected debrid service has them`} ready to stream.
+        </p>
       )}
       {start.others.length > 0 && (
         <>
@@ -434,9 +459,32 @@ function sendProgress(body: object) {
 
 const externalHref = (o: PlaybackOption) => (o.kind === "youtube" ? `https://www.youtube.com/watch?v=${o.ytId}` : o.externalUrl);
 
+type Where = { type: string; id: number; season?: number; episode?: number };
+
+/** Torrent sources become a link only now, right before playing: debrid links expire. */
+async function linkFor(o: RankedOption, where: Where) {
+  if (o.url) return o.url;
+  const body = { service: o.debrid!.service, infoHash: o.infoHash, filename: o.filename, fileIdx: o.fileIdx, season: where.season, episode: where.episode };
+  return (await api<{ url: string }>("/playback/resolve", { method: "POST", body })).url;
+}
+
+/** Plays a torrent source once its debrid service hands over the link; failures show like any other. */
+function Resolved(props: React.ComponentProps<typeof Player>) {
+  const [url, setUrl] = useState(props.option.url);
+  useEffect(() => {
+    if (!url) linkFor(props.option, props.where).then(setUrl, (e: Error) => props.onFail(e.message));
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  if (url) return <Player {...props} option={{ ...props.option, url }} />;
+  return (
+    <p role="status" className="grid size-full place-items-center text-sm text-[#a3a3ad]">
+      Getting the link from {DEBRID_NAMES[props.option.debrid!.service]}…
+    </p>
+  );
+}
+
 /** A tiny playlist file VLC (or any desktop player) opens. Progress isn't tracked there. */
-function openInVlc(o: RankedOption, title: string) {
-  const m3u = `#EXTM3U\n#EXTINF:-1,${title.replace(/[\r\n]/g, " ")}\n${o.url}\n`;
+async function openInVlc(o: RankedOption, title: string, where: Where) {
+  const m3u = `#EXTM3U\n#EXTINF:-1,${title.replace(/[\r\n]/g, " ")}\n${await linkFor(o, where)}\n`;
   const a = document.createElement("a");
   a.href = URL.createObjectURL(new Blob([m3u], { type: "audio/x-mpegurl" }));
   a.download = `${title.replace(/[^\w\s-]/g, "").trim() || "zylo"}.m3u`;

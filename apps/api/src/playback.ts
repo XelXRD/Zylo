@@ -2,6 +2,7 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { PrismaClient } from "./generated/prisma/client.js";
 import { collectStreams } from "./addons.js";
+import { withDebrid, type DebridBases } from "./debrid.js";
 import { cardOf, type MetadataService } from "./metadata.js";
 import { safeFetchJson, safeFetchText, UnsafeUrl, type SafeFetchOptions } from "./safe-fetch.js";
 import { decrypt } from "./secrets.js";
@@ -17,15 +18,17 @@ export const DEFAULT_PREFS: PlaybackPrefs = { maxQuality: "1080p", autoPlay: tru
 
 /** Containers browsers play natively. MKV/AVI often fail (codec support varies), so they rank lower. */
 const browserFriendly = (o: PlaybackOption) => {
-  if (o.kind !== "url" || o.notWebReady || o.proxyHeaders) return false;
-  const name = (o.filename ?? new URL(o.url!).pathname).toLowerCase();
-  return !/\.(mkv|avi|wmv|flv|ts|m2ts|iso)$/.test(name);
+  if ((o.kind !== "url" && !o.debrid) || o.notWebReady || o.proxyHeaders) return false;
+  const name = (o.filename ?? (o.url ? new URL(o.url).pathname : `${o.label} ${o.description ?? ""}`)).toLowerCase();
+  return !/\.(mkv|avi|wmv|flv|ts|m2ts|iso)\b/.test(name);
 };
 
 /**
- * Order sources for the built-in player. Only direct links are auto-play candidates (YouTube entries are
- * usually trailers; websites can't be embedded). Order: what this profile picked last time for this title,
- * then what the browser can play, then quality at or under the profile's limit (best first), then addon order.
+ * Order sources for the built-in player. Only direct links and torrents a debrid service will stream are
+ * auto-play candidates (YouTube entries are usually trailers; websites can't be embedded). Order: what this
+ * profile picked last time for this title, then anything not known to be ready (Real-Debrid can't say ahead
+ * of time), then what the browser can play, then quality at or under the profile's limit (best first),
+ * then addon order.
  */
 export function rankOptions(options: PlaybackOption[], prefs: PlaybackPrefs, choice?: { addonId: string; quality: string | null } | null, bingeGroup?: string) {
   const cap = QUALITIES.indexOf(prefs.maxQuality);
@@ -36,11 +39,12 @@ export function rankOptions(options: PlaybackOption[], prefs: PlaybackPrefs, cho
   };
   return options
     .map((o, i) => ({ o, i }))
-    .filter(({ o }) => o.kind === "url")
+    .filter(({ o }) => o.kind === "url" || !!o.debrid)
     .sort((a, b) => {
       const k = (x: PlaybackOption) => [
         bingeGroup && x.bingeGroup === bingeGroup ? 0 : 1,
         choice && x.source.id === choice.addonId && x.quality === choice.quality ? 0 : 1,
+        x.debrid && !x.debrid.cached ? 1 : 0,
         browserFriendly(x) ? 0 : 1,
         qualityRank(x.quality),
       ];
@@ -80,7 +84,7 @@ export function registerPlaybackRoutes(
   app: FastifyInstance,
   db: PrismaClient,
   guards: Guards,
-  deps: { metadata: MetadataService; trakt: TraktService; fetchOptions?: SafeFetchOptions },
+  deps: { metadata: MetadataService; trakt: TraktService; fetchOptions?: SafeFetchOptions; debridBases?: DebridBases },
 ) {
   const { requireUser, requireProfile } = guards;
   const fetchOptions: SafeFetchOptions = deps.fetchOptions ?? { allowPrivate: process.env.ZYLO_ALLOW_PRIVATE_ADDONS === "true" };
@@ -115,14 +119,15 @@ export function registerPlaybackRoutes(
         collectStreams(db, deps.metadata, fetchOptions, req.profile.userId, w.type, w.id, w.season, w.episode),
       ]);
       const prefs = prefsOf(req.profile.settings);
-      const all = streams.addons.flatMap((a) => a.options);
+      const all = await withDebrid(db, req.profile.userId, streams.addons.flatMap((a) => a.options), deps.debridBases);
       const ranked = rankOptions(all, prefs, choice, w.bingeGroup);
       return {
         prefs,
         // Offer to resume past the first minute, unless it was finished.
         resumeAt: progress && !progress.completed && progress.position > 60 ? progress.position : null,
         ranked,
-        others: all.filter((o) => o.kind !== "url" && o.playable), // YouTube, websites: listed, never auto-played
+        waiting: all.filter((o) => o.kind === "torrent" && !o.debrid).length, // torrents no connected service has ready
+        others: all.filter((o) => (o.kind === "youtube" || o.kind === "external") && o.playable), // listed, never auto-played
         addonErrors: streams.addons.filter((a) => a.status === "error").map((a) => ({ name: a.name, error: a.error })),
       };
     },

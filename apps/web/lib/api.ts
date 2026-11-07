@@ -167,12 +167,25 @@ export type PlaybackOption = {
   url?: string;
   ytId?: string;
   externalUrl?: string;
+  infoHash?: string;
+  fileIdx?: number;
+  debrid?: { service: DebridStatus["service"]; cached: boolean };
   quality: string | null;
   hdr: string[];
   size: string | null;
   playable: boolean;
   note: string | null;
 };
+
+export type DebridStatus = {
+  service: "torbox" | "realdebrid" | "premiumize";
+  name: string;
+  connected: boolean;
+  premium?: boolean;
+  until?: string | null;
+  error?: string;
+};
+export const DEBRID_NAMES: Record<DebridStatus["service"], string> = { torbox: "TorBox", realdebrid: "Real-Debrid", premiumize: "Premiumize" };
 
 export type StreamResults = {
   addons: { id: string; name: string; logo: string | null; status: "ok" | "error"; error?: string; options: PlaybackOption[] }[];
@@ -195,6 +208,7 @@ export type PlaybackStart = {
   prefs: PlaybackPrefs;
   resumeAt: number | null;
   ranked: RankedOption[];
+  waiting: number;
   others: PlaybackOption[];
   addonErrors: { name: string; error?: string }[];
 };

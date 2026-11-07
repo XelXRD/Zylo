@@ -80,16 +80,27 @@ export function metadataService(db: PrismaClient, bases: { tmdb?: string; tvdb?:
     extraIds: { system: string; value: string }[] = [],
   ) {
     const data = { ...fields, data: fields.data ?? {}, refreshedAt: new Date() };
-    const existing = await db.externalId.findUnique({ where: { system_type_value: { system: "tmdb", type, value: String(tmdbId) } } });
+    const key = { system_type_value: { system: "tmdb", type, value: String(tmdbId) } };
+    // Two requests for a title Zylo hasn't seen (the player asks for the title and its sources at once) can both
+    // try to create it. The loser's create is rolled back as a whole; it updates the winner's record instead.
+    const sameId = (e: unknown) => (e as { code?: string }).code === "P2002";
+    const existing = await db.externalId.findUnique({ where: key });
     const item = existing
       ? await db.mediaItem.update({ where: { id: existing.mediaItemId }, data })
-      : await db.mediaItem.create({ data: { ...data, type, externalIds: { create: { system: "tmdb", type, value: String(tmdbId) } } } });
+      : await db.mediaItem.create({ data: { ...data, type, externalIds: { create: { system: "tmdb", type, value: String(tmdbId) } } } }).catch(async (e) => {
+          if (!sameId(e)) throw e;
+          return db.mediaItem.update({ where: { id: (await db.externalId.findUniqueOrThrow({ where: key })).mediaItemId }, data });
+        });
     for (const x of extraIds) {
-      await db.externalId.upsert({
-        where: { system_type_value: { system: x.system, type, value: x.value } },
-        create: { ...x, type, mediaItemId: item.id },
-        update: {}, // never steal an ID that another record already owns
-      });
+      await db.externalId
+        .upsert({
+          where: { system_type_value: { system: x.system, type, value: x.value } },
+          create: { ...x, type, mediaItemId: item.id },
+          update: {}, // never steal an ID that another record already owns
+        })
+        .catch((e) => {
+          if (!sameId(e)) throw e; // the other request saved it first: same outcome
+        });
     }
     return item;
   }

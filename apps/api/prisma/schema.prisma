@@ -17,6 +17,7 @@ model User {
   profiles     Profile[]
   sessions     Session[]
   addons       Addon[]
+  debrid       DebridAccount[]
 }
 
 // Stremio addons, per account (shared by its profiles). The transport URL often carries the user's
@@ -242,4 +243,16 @@ model TraktOutbox {
   attempts  Int      @default(0)
   lastError String?
   createdAt DateTime @default(now())
+}
+
+// Debrid services (TorBox, Real-Debrid, Premiumize), per account. The API key is encrypted.
+model DebridAccount {
+  id        String   @id @default(uuid())
+  userId    String
+  user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  service   String // torbox | realdebrid | premiumize
+  secret    String
+  createdAt DateTime @default(now())
+
+  @@unique([userId, service])
 }

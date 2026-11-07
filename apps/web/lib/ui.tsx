@@ -40,7 +40,7 @@ export function Field({
   hint,
   error,
   ...props
-}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: string; error?: string }) {
+}: InputHTMLAttributes<HTMLInputElement> & { label: string; hint?: ReactNode; error?: string }) {
   const id = useId();
   return (
     <div className="flex flex-col gap-1.5">

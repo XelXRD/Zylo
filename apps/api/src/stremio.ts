@@ -137,6 +137,7 @@ export type PlaybackOption = {
   notWebReady: boolean;
   proxyHeaders?: Record<string, Record<string, string>>;
   bingeGroup: string | null;
+  debrid?: { service: "torbox" | "realdebrid" | "premiumize"; cached: boolean }; // torrent a debrid service will stream
   playable: boolean; // something Zylo can hand to a player today
   note: string | null; // why not, in plain English
 };
@@ -182,7 +183,7 @@ export function normaliseStream(raw: RawStream, source: PlaybackOption["source"]
   if (ytId && /^[\w-]{6,20}$/.test(ytId)) return { ...base, kind: "youtube", ytId, playable: true, note: null };
   const infoHash = str(raw.infoHash, 64);
   if (infoHash && /^[a-f0-9]{40}$/i.test(infoHash)) {
-    return { ...base, kind: "torrent", infoHash: infoHash.toLowerCase(), fileIdx: typeof raw.fileIdx === "number" ? raw.fileIdx : undefined, playable: false, note: "Torrent source: Zylo will play these through a debrid service once those are added." };
+    return { ...base, kind: "torrent", infoHash: infoHash.toLowerCase(), fileIdx: typeof raw.fileIdx === "number" ? raw.fileIdx : undefined, playable: false, note: "Torrent source: connect a debrid service (Settings > Debrid) to play it." };
   }
   const externalUrl = str(raw.externalUrl, 4000);
   if (externalUrl && /^https?:\/\//i.test(externalUrl)) return { ...base, kind: "external", externalUrl, playable: true, note: "Opens on the provider's website." };

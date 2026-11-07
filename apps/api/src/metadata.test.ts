@@ -141,7 +141,11 @@ test("phase 2: connect TMDB/TVDB, search, titles, seasons, refresh", async () =>
 
   // Film detail, certification for the viewer's region, cached after first fetch.
   const before = calls.length;
-  const film = (await call("GET", "/titles/movie/550", undefined, member)).json;
+  // Two first loads at once (the player does this) both succeed and share one record.
+  const pair = await Promise.all([call("GET", "/titles/movie/550", undefined, member), call("GET", "/titles/movie/550", undefined, member)]);
+  assert.deepEqual(pair.map((r) => r.status), [200, 200]);
+  assert.equal(pair[0].json.id, pair[1].json.id);
+  const film = pair[0].json;
   assert.equal(film.title, "Fight Club");
   assert.equal(film.certification, "18");
   assert.equal(film.trailerKey, "trail1");
@@ -149,7 +153,7 @@ test("phase 2: connect TMDB/TVDB, search, titles, seasons, refresh", async () =>
   assert.equal(film.cast[0].name, "Edward Norton");
   assert.equal(film.recommendations[0].title, "Pulp Fiction");
   assert.equal((await call("GET", "/titles/movie/550", undefined, member)).json.id, film.id);
-  assert.equal(calls.length - before, 1, "second view is served from the database");
+  assert.equal(calls.length - before, 2, "one fetch per first load; the next view is served from the database");
 
   await client.query(`UPDATE "User" SET settings = '{"region":"US"}' WHERE id = 'u2'`);
   assert.equal((await call("GET", "/titles/movie/550", undefined, member)).json.certification, "R");

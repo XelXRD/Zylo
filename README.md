@@ -2,7 +2,7 @@
 
 One interface. Your entire media world.
 
-Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways) **Phase 4, Addons** (Stremio-compatible addons: streams on film and episode pages, addon catalogues on the home page) and **Phase 5, Playback** (built-in player, automatic source choice, resume on any device, Continue watching, Trakt scrobbling, subtitles). The full plan is in the master specification.
+Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways) **Phase 4, Addons** (Stremio-compatible addons: streams on film and episode pages, addon catalogues on the home page) **Phase 5, Playback** (built-in player, automatic source choice, resume on any device, Continue watching, Trakt scrobbling, subtitles) and **Phase 6, Debrid** (TorBox, Real-Debrid and Premiumize play torrent sources as ordinary links). The full plan is in the master specification.
 
 ## Run it
 
@@ -18,6 +18,8 @@ Open http://localhost:3000. The first visit asks you to create the admin account
 Then connect metadata: **Settings > Integrations > TMDB**. Create a free account at themoviedb.org, open Settings > API, and paste the *API Read Access Token*. TheTVDB is optional and adds DVD, absolute and other episode orders.
 
 To use Trakt: create an app at app.trakt.tv/settings/apps with `http://localhost` as the Redirect URI (Zylo never visits it), paste its Client ID (there is no secret) under **Settings > Integrations > Trakt**, then each profile connects its own account under **Settings > Trakt** with a short code at auth.trakt.tv/activate. Profiles connected before Trakt's October 2026 sign-in change need to connect once more.
+
+To play torrent sources from your addons, connect a debrid service you subscribe to under **Settings > Debrid**: paste the API key from torbox.app/settings, real-debrid.com/apitoken or premiumize.me/account.
 
 Update later with `docker compose up -d --build`. Database migrations run automatically when `zylo-core` starts.
 
@@ -100,3 +102,12 @@ TEST_DATABASE_URL=postgresql://zylo:zylo@localhost:5432/zylo_test pnpm test
 - **Next episode:** when an episode ends, **Play next episode** prefers the same source group (Stremio's `bingeGroup`), so you stay on the same addon and quality.
 - **Subtitles** come from the stream itself and from any subtitle addons, fetched through Zylo with the same network protections, converted from SRT to WebVTT, and Latin-1 files decoded properly.
 - Not yet: progress from external players (VLC can't report back), streams that need custom headers, and HLS where the browser has no native support.
+
+## Phase 6 decisions
+
+- **Per account, by API key.** Each household account connects TorBox, Real-Debrid and/or Premiumize with the key from the service's own page. Zylo checks the key with the service before saving, stores it encrypted, and never sends it back to the browser. Settings shows Premium status and the expiry date live.
+- **Nothing downloads to Zylo's server.** A torrent source becomes playable only when a connected service can stream it. Zylo asks each service which torrents it already has (TorBox and Premiumize can say; Real-Debrid switched that off in 2024, so its sources are tried after known-ready ones, and it says plainly if it has to download first).
+- **Links are fetched only when you press Play**, because debrid links expire. Zylo picks the right file in the torrent: the file the addon named, then its file number, then the episode (S01E02 or 1x02), then the largest video. A torrent already in your debrid account is reused rather than added again (TorBox limits adds to 50 an hour).
+- **Real-Debrid:** Zylo selects every video file, so a season pack is ready for every episode, not just the one you played first.
+- Torrents no connected service has ready are hidden from the player, with a line saying how many.
+- Not yet: Real-Debrid's device sign-in (an API key does the same job and never expires), and showing or managing what's in each debrid account's library.

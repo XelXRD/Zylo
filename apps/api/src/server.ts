@@ -28,6 +28,7 @@ const app = buildApp({
   logger: true,
   // Only for testing against a mock; normally unset.
   bases: { tmdb: process.env.TMDB_BASE_URL, tvdb: process.env.TVDB_BASE_URL, trakt: process.env.TRAKT_BASE_URL },
+  debridBases: { torbox: process.env.TORBOX_BASE_URL, realdebrid: process.env.REALDEBRID_BASE_URL, premiumize: process.env.PREMIUMIZE_BASE_URL },
 });
 await app.listen({ host: "0.0.0.0", port: Number(process.env.PORT ?? 4000) });
 
