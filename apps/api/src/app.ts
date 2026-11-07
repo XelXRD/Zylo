@@ -7,6 +7,7 @@ import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { PrismaClient, type Profile, type User } from "./generated/prisma/client.js";
 import { registerAddonRoutes } from "./addons.js";
+import { animeService, registerAnimeRoutes, type AnimeBases } from "./anime.js";
 import { registerDebridRoutes, type DebridBases } from "./debrid.js";
 import { registerLibraryRoutes } from "./library.js";
 import { registerPlaybackRoutes } from "./playback.js";
@@ -90,6 +91,7 @@ export function buildApp(opts: {
   /** Tests run mock addons on localhost. */
   addonFetch?: SafeFetchOptions;
   debridBases?: DebridBases; // tests point these at a mock
+  animeBases?: AnimeBases;
 }) {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: opts.databaseUrl }) });
   const app = Fastify({ logger: opts.logger ?? false });
@@ -305,9 +307,11 @@ export function buildApp(opts: {
       if (opts.enqueueTraktSync) return opts.enqueueTraktSync(profileId);
       await trakt.sync(profileId).catch(() => {}); // errors are recorded on the account
     };
-    registerLibraryRoutes(app, db, { requireUser, requireAdmin, requireProfile }, { metadata, trakt, enqueueSync, traktBase: opts.bases?.trakt });
+    const anime = animeService(db, metadata, opts.animeBases);
+    registerAnimeRoutes(app, db, { requireAdmin, requireProfile }, anime);
+    registerLibraryRoutes(app, db, { requireUser, requireAdmin, requireProfile }, { metadata, trakt, anime, enqueueSync, traktBase: opts.bases?.trakt });
     registerAddonRoutes(app, db, { requireUser }, { metadata, fetchOptions: opts.addonFetch });
-    registerPlaybackRoutes(app, db, { requireUser, requireProfile }, { metadata, trakt, fetchOptions: opts.addonFetch, debridBases: opts.debridBases });
+    registerPlaybackRoutes(app, db, { requireUser, requireProfile }, { metadata, trakt, anime, fetchOptions: opts.addonFetch, debridBases: opts.debridBases });
     registerDebridRoutes(app, db, { requireUser, requireProfile }, opts.debridBases);
 
     // --- settings ---

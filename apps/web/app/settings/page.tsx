@@ -1,11 +1,12 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus, type AddonView, type PlaybackPrefs, type DebridStatus } from "@/lib/api";
+import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus, type AddonView, type PlaybackPrefs, type DebridStatus, type AnimeStatus, type Tracker, TRACKER_NAMES, animeRedirect } from "@/lib/api";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
 import { Avatar, Button, Field, FormError, Loading, Select } from "@/lib/ui";
 
+const INTEGRATIONS_CHANGED = "zylo:integrations-changed";
 const LANGUAGES = ["en-GB", "en-US", "de-DE", "es-ES", "fr-FR", "it-IT", "ja-JP", "pt-BR"];
 const REGIONS = ["GB", "IE", "US", "CA", "AU", "DE", "ES", "FR", "IT", "JP", "BR"];
 const langName = new Intl.DisplayNames(["en-GB"], { type: "language" });
@@ -50,6 +51,12 @@ export default function SettingsPage() {
         {current && (
           <Section id="trakt" title={`Trakt for ${current.name}`} lead="Bring this profile's watch history, ratings, watchlist and lists from Trakt, and keep them in sync both ways.">
             <TraktConnection isAdmin={user.isAdmin} />
+          </Section>
+        )}
+
+        {current && (
+          <Section id="anime" title={`Anime for ${current.name}`} lead="Bring this profile's AniList or MyAnimeList list into Zylo. Episodes you finish here move your list on, once, matched to the right season or part even when the tracker splits a season in two.">
+            <AnimeConnection isAdmin={user.isAdmin} />
           </Section>
         )}
 
@@ -332,7 +339,8 @@ function SignOut() {
 
 function Integrations() {
   const [list, setList] = useState<Integration[]>();
-  const reload = () => api<Integration[]>("/integrations").then(setList);
+  // Sections above (Trakt, Anime) read these too: tell them when something changes.
+  const reload = () => api<Integration[]>("/integrations").then((l) => (setList(l), window.dispatchEvent(new Event(INTEGRATIONS_CHANGED))));
   useEffect(() => {
     reload();
   }, []);
@@ -343,6 +351,8 @@ function Integrations() {
       <TmdbCard integration={byId("tmdb")} onChange={reload} />
       <TraktAppCard integration={byId("trakt")} onChange={reload} />
       <TvdbCard integration={byId("tvdb")} onChange={reload} />
+      <AniListAppCard integration={byId("anilist")} onChange={reload} />
+      <MalAppCard integration={byId("mal")} onChange={reload} />
     </>
   );
 }
@@ -572,6 +582,8 @@ function TraktConnection({ isAdmin }: { isAdmin: boolean }) {
 
   useEffect(() => {
     load();
+    window.addEventListener(INTEGRATIONS_CHANGED, load);
+    return () => window.removeEventListener(INTEGRATIONS_CHANGED, load);
   }, []);
 
   // While a sync is queued or running, check back every few seconds.
@@ -1027,6 +1039,257 @@ function DebridCard({ d, onChange }: { d: DebridStatus; onChange: () => void }) 
           )}
         </div>
       </form>
+    </div>
+  );
+}
+
+// --- Anime: the server's AniList / MAL apps (admin) and each profile's connection ---
+
+const linkClass = "font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink";
+
+/** The exact address to register as the app's redirect, with a copy button. */
+function RedirectUrl({ tracker }: { tracker: Tracker }) {
+  const [url, setUrl] = useState("");
+  const [copied, setCopied] = useState(false);
+  useEffect(() => setUrl(animeRedirect(tracker)), [tracker]);
+  return (
+    <div className="flex flex-col gap-1.5">
+      <span className="text-sm font-medium">Redirect URL</span>
+      <div className="flex gap-2">
+        <code className="flex h-10 min-w-0 flex-1 items-center truncate rounded-lg border border-line bg-sunken px-3 text-sm">{url}</code>
+        <Button
+          type="button"
+          variant="quiet"
+          onClick={() => navigator.clipboard.writeText(url).then(() => (setCopied(true), setTimeout(() => setCopied(false), 2000)))}
+        >
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      <span className="text-xs text-ink-3">Open Zylo at the address your household uses before copying this: the sign-in comes back here.</span>
+    </div>
+  );
+}
+
+function AniListAppCard({ integration, onChange }: { integration: Integration; onChange: () => void }) {
+  const [clientId, setClientId] = useState("");
+  const { busy, run, feedback } = useAction(onChange);
+  return (
+    <IntegrationCard
+      name="AniList"
+      integration={integration}
+      blurb={
+        <>
+          Lets each profile link its AniList. At{" "}
+          <a href="https://anilist.co/settings/developer" target="_blank" rel="noreferrer" className={linkClass}>
+            anilist.co/settings/developer
+          </a>
+          , create a client with the Redirect URL below, then paste its Client ID (a number) here. No secret is needed.
+        </>
+      }
+    >
+      <RedirectUrl tracker="anilist" />
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run("save", async () => {
+            await api("/integrations/anilist", { method: "PUT", body: { clientId } });
+            setClientId("");
+            return "AniList app saved. Each profile can now connect in Settings > Anime.";
+          });
+        }}
+      >
+        <Field label="Client ID" inputMode="numeric" autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)} required pattern="\s*\d+\s*" title="AniList Client IDs are numbers" />
+        {feedback}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" busy={busy === "save"}>
+            {integration.connected ? "Replace Client ID" : "Save AniList app"}
+          </Button>
+          <DisconnectButtons id="anilist" connected={integration.connected} run={run} busy={busy} />
+        </div>
+      </form>
+    </IntegrationCard>
+  );
+}
+
+function MalAppCard({ integration, onChange }: { integration: Integration; onChange: () => void }) {
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const { busy, run, feedback } = useAction(onChange);
+  return (
+    <IntegrationCard
+      name="MyAnimeList"
+      integration={integration}
+      blurb={
+        <>
+          Lets each profile link its MyAnimeList. At{" "}
+          <a href="https://myanimelist.net/apiconfig" target="_blank" rel="noreferrer" className={linkClass}>
+            myanimelist.net/apiconfig
+          </a>
+          , create an ID with App Type <strong className="font-medium text-ink">other</strong> and the Redirect URL below, then paste its Client ID here.
+        </>
+      }
+    >
+      <RedirectUrl tracker="mal" />
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run("save", async () => {
+            await api("/integrations/mal", { method: "PUT", body: { clientId, ...(clientSecret && { clientSecret }) } });
+            setClientId("");
+            setClientSecret("");
+            return "MyAnimeList app saved. Each profile can now connect in Settings > Anime.";
+          });
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Client ID" autoComplete="off" spellCheck={false} value={clientId} onChange={(e) => setClientId(e.target.value)} required minLength={20} />
+          <Field label="Client Secret" type="password" autoComplete="off" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} hint="Only if you chose App Type “web”." />
+        </div>
+        {feedback}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" busy={busy === "save"}>
+            {integration.connected ? "Replace Client ID" : "Save MyAnimeList app"}
+          </Button>
+          <DisconnectButtons id="mal" connected={integration.connected} run={run} busy={busy} />
+        </div>
+      </form>
+    </IntegrationCard>
+  );
+}
+
+function AnimeConnection({ isAdmin }: { isAdmin: boolean }) {
+  const [status, setStatus] = useState<AnimeStatus>();
+  const [note, setNote] = useState<{ ok: boolean; text: string }>();
+  const [busy, setBusy] = useState<string>();
+  const load = () => api<AnimeStatus>("/anime").then(setStatus, (e) => setNote({ ok: false, text: e.message }));
+
+  useEffect(() => {
+    load();
+    window.addEventListener(INTEGRATIONS_CHANGED, load);
+    // Back from AniList / MAL: say so, and tidy the address bar.
+    const just = new URLSearchParams(location.search).get("connected") as Tracker | null;
+    if (just && TRACKER_NAMES[just]) {
+      setNote({ ok: true, text: `${TRACKER_NAMES[just]} connected. Your list is coming in now.` });
+      history.replaceState(null, "", "/settings#anime");
+    }
+    return () => window.removeEventListener(INTEGRATIONS_CHANGED, load);
+  }, []);
+
+  // The first import runs in the background: check back until it has finished (or failed).
+  useEffect(() => {
+    if (!status?.accounts.some((a) => !a.lastSyncedAt && !a.lastError)) return;
+    const t = setTimeout(load, 3000);
+    return () => clearTimeout(t);
+  }, [status]);
+
+  const act = async (key: string, fn: () => Promise<string | void>) => {
+    setBusy(key);
+    setNote(undefined);
+    try {
+      const text = await fn();
+      if (text) setNote({ ok: true, text });
+      await load();
+    } catch (e) {
+      setNote({ ok: false, text: (e as Error).message });
+    }
+    setBusy(undefined);
+  };
+
+  if (!status) return <p className="text-sm text-ink-3">Loading…</p>;
+  const both = status.accounts.length === 2;
+
+  return (
+    <div className="flex flex-col gap-4">
+      {(["anilist", "mal"] as const).map((t) => {
+        const a = status.accounts.find((x) => x.tracker === t);
+        const name = TRACKER_NAMES[t];
+        return (
+          <div key={t} className="flex flex-col gap-3 rounded-xl border border-line bg-surface p-4">
+            <div className="flex flex-wrap items-baseline justify-between gap-2">
+              <h3 className="font-semibold">{name}</h3>
+              {a ? (
+                a.lastError ? (
+                  <span className="text-xs text-danger">{a.lastError}</span>
+                ) : (
+                  <span className="text-xs text-accent tabular-nums">
+                    {a.userName} · {a.lastSyncedAt ? `${a.entries} ${a.entries === 1 ? "title" : "titles"} · synced ${new Date(a.lastSyncedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}` : "importing…"}
+                  </span>
+                )
+              ) : (
+                <span className="text-xs text-ink-3">Not connected</span>
+              )}
+            </div>
+            {!status.available[t] ? (
+              <p className="text-sm text-ink-2">
+                {isAdmin ? (
+                  <>
+                    Add the {name} app in{" "}
+                    <a href="#integrations" className={linkClass}>
+                      Integrations
+                    </a>{" "}
+                    first.
+                  </>
+                ) : (
+                  `${name} isn't set up on this server yet. Ask whoever runs Zylo to add it.`
+                )}
+              </p>
+            ) : (
+              <div className="flex flex-wrap gap-2">
+                {a ? (
+                  <>
+                    <Button type="button" variant="quiet" busy={busy === `sync-${t}`} onClick={() => act(`sync-${t}`, async () => void (await api(`/anime/${t}/sync`, { method: "POST" })))}>
+                      Sync now
+                    </Button>
+                    <Button type="button" variant="danger" busy={busy === `off-${t}`} onClick={() => act(`off-${t}`, async () => (await api(`/anime/${t}`, { method: "DELETE" }), `${name} disconnected. Your list on ${name} is unchanged.`))}>
+                      Disconnect
+                    </Button>
+                  </>
+                ) : (
+                  <Button
+                    type="button"
+                    variant={status.accounts.length ? "quiet" : "primary"}
+                    busy={busy === `on-${t}`}
+                    onClick={() =>
+                      act(`on-${t}`, async () => {
+                        const { url } = await api<{ url: string }>(`/anime/${t}/authorize`, { method: "POST", body: { redirectUri: animeRedirect(t) } });
+                        window.location.href = url;
+                      })
+                    }
+                  >
+                    Connect {name}
+                  </Button>
+                )}
+              </div>
+            )}
+          </div>
+        );
+      })}
+      {both && (
+        <fieldset className="flex flex-col gap-2">
+          <legend className="text-sm font-medium">Episodes you finish in Zylo update</legend>
+          <div className="flex flex-wrap gap-2">
+            {status.accounts.map((a) => (
+              <label key={a.tracker} className="flex h-10 cursor-pointer items-center gap-2 rounded-lg border border-line bg-surface px-3 text-sm has-[:checked]:border-accent">
+                <input
+                  type="radio"
+                  name="anime-primary"
+                  checked={status.primary === a.tracker}
+                  onChange={() => {
+                    setStatus({ ...status, primary: a.tracker }); // show the choice now; the reload confirms it
+                    act("primary", async () => void (await api("/anime/primary", { method: "PUT", body: { primary: a.tracker } })));
+                  }}
+                  className="accent-accent"
+                />
+                {a.name}
+              </label>
+            ))}
+          </div>
+          <span className="text-xs text-ink-3">The other list still comes into Zylo; it just isn't updated from here.</span>
+        </fieldset>
+      )}
+      {note && (note.ok ? <p role="status" className="text-sm text-accent">{note.text}</p> : <FormError message={note.text} />)}
     </div>
   );
 }

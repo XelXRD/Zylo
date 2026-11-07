@@ -128,6 +128,8 @@ model Profile {
   ratings        Rating[]
   collections    Collection[]
   traktOutbox    TraktOutbox[]
+  animeAccounts  AnimeAccount[]
+  animeEntries   AnimeEntry[]
 
   @@unique([userId, name])
 }
@@ -255,4 +257,39 @@ model DebridAccount {
   createdAt DateTime @default(now())
 
   @@unique([userId, service])
+}
+
+// AniList / MyAnimeList, per profile. The token (and MAL's refresh token) is encrypted.
+model AnimeAccount {
+  id           String    @id @default(uuid())
+  profileId    String
+  profile      Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  tracker      String // anilist | mal
+  userName     String
+  token        String
+  lastSyncedAt DateTime?
+  lastError    String?
+  createdAt    DateTime  @default(now())
+
+  @@unique([profileId, tracker])
+}
+
+// One anime on a profile's tracker list. progress > pushedProgress = watched in Zylo, not yet sent.
+model AnimeEntry {
+  id             String   @id @default(uuid())
+  profileId      String
+  profile        Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  tracker        String
+  remoteId       Int // AniList or MAL id
+  title          String
+  status         String // watching | completed | paused | dropped | planning
+  progress       Int      @default(0)
+  pushedProgress Int      @default(0)
+  episodes       Int?
+  score          Float?
+  mediaItemId    String? // the Zylo film or series, once matched
+  mapped         Boolean  @default(false) // a match was attempted
+  updatedAt      DateTime @updatedAt
+
+  @@unique([profileId, tracker, remoteId])
 }

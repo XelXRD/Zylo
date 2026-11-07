@@ -2,6 +2,7 @@
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { PrismaClient } from "./generated/prisma/client.js";
 import { collectStreams } from "./addons.js";
+import type { AnimeService } from "./anime.js";
 import { withDebrid, type DebridBases } from "./debrid.js";
 import { cardOf, type MetadataService } from "./metadata.js";
 import { safeFetchJson, safeFetchText, UnsafeUrl, type SafeFetchOptions } from "./safe-fetch.js";
@@ -84,7 +85,7 @@ export function registerPlaybackRoutes(
   app: FastifyInstance,
   db: PrismaClient,
   guards: Guards,
-  deps: { metadata: MetadataService; trakt: TraktService; fetchOptions?: SafeFetchOptions; debridBases?: DebridBases },
+  deps: { metadata: MetadataService; trakt: TraktService; anime: AnimeService; fetchOptions?: SafeFetchOptions; debridBases?: DebridBases },
 ) {
   const { requireUser, requireProfile } = guards;
   const fetchOptions: SafeFetchOptions = deps.fetchOptions ?? { allowPrivate: process.env.ZYLO_ALLOW_PRIVATE_ADDONS === "true" };
@@ -200,6 +201,7 @@ export function registerPlaybackRoutes(
         });
         const scrobbled = await deps.trakt.scrobble(req.profile.id, "stop", t, Math.max(pct, 90));
         if (!scrobbled) await deps.trakt.push(req.profile.id, "/sync/history", syncBody(t, { watched_at: watchedAt.toISOString() }));
+        await deps.anime.watched(req.profile.id, item, w.season, w.episode);
       } else if (!nowComplete && (w.event === "start" || w.event === "pause" || w.event === "stop")) {
         // Live status only; nothing is recorded on Trakt until it's finished. Fire and forget.
         void deps.trakt.scrobble(req.profile.id, w.event === "start" ? "start" : "pause", t, pct);

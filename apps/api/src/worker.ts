@@ -1,4 +1,4 @@
-// Background worker: keeps cached metadata fresh. Later phases add Trakt, tracker and library syncs here.
+// Background worker: keeps cached metadata fresh, and syncs Trakt and the anime trackers.
 import { secretProblem } from "./secrets.js";
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
@@ -6,6 +6,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/prisma/client.js";
 import { metadataService, NotConfigured } from "./metadata.js";
 import { traktService } from "./trakt.js";
+import { animeService, type Tracker } from "./anime.js";
 
 // Fail fast on a bad secret: otherwise the first integration save fails with a confusing error.
 const secretError = secretProblem();
@@ -23,6 +24,7 @@ const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: database
 const bases = { tmdb: process.env.TMDB_BASE_URL, tvdb: process.env.TVDB_BASE_URL };
 const metadata = metadataService(db, bases);
 const trakt = traktService(db, metadata, process.env.TRAKT_BASE_URL);
+const anime = animeService(db, metadata, { anilist: process.env.ANILIST_BASE_URL, malApi: process.env.MAL_API_URL, malAuth: process.env.MAL_AUTH_URL, ids: process.env.ANIME_IDS_URL });
 
 const handlers: Record<string, (data: { profileId?: string }) => Promise<unknown>> = {
   async "refresh-metadata"() {
@@ -46,11 +48,20 @@ const handlers: Record<string, (data: { profileId?: string }) => Promise<unknown
     for (const a of accounts) await trakt.sync(a.profileId).then(() => ok++, () => {});
     return { synced: ok, of: accounts.length };
   },
+  // AniList / MyAnimeList: import lists, send progress that didn't get through at the time, match new titles.
+  async "anime-sync-all"() {
+    const accounts = await db.animeAccount.findMany({ select: { profileId: true, tracker: true } });
+    let ok = 0;
+    for (const a of accounts) await anime.sync(a.profileId, a.tracker as Tracker).then(() => ok++, () => {});
+    const filled = await metadata.refreshStale().catch(() => 0);
+    return { synced: ok, of: accounts.length, filled };
+  },
 };
 
 const queue = new Queue("zylo", { connection });
 await queue.upsertJobScheduler("refresh-metadata", { every: 15 * 60 * 1000 }, { name: "refresh-metadata" });
 await queue.upsertJobScheduler("trakt-sync-all", { every: 15 * 60 * 1000 }, { name: "trakt-sync-all" });
+await queue.upsertJobScheduler("anime-sync-all", { every: 30 * 60 * 1000 }, { name: "anime-sync-all" }); // AniList allows 30-90 requests a minute
 
 const worker = new Worker(
   "zylo",

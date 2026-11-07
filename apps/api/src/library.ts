@@ -1,5 +1,6 @@
 // Per-profile library: watch history, ratings, watchlist, lists, Trakt connection.
 // Everything works without Trakt; when a profile is connected, changes are pushed to Trakt too.
+import type { AnimeService } from "./anime.js";
 import { UpstreamError } from "./http.js";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { PrismaClient } from "./generated/prisma/client.js";
@@ -27,7 +28,7 @@ export function registerLibraryRoutes(
   app: FastifyInstance,
   db: PrismaClient,
   guards: Guards,
-  deps: { metadata: MetadataService; trakt: TraktService; enqueueSync: (profileId: string) => Promise<void>; traktBase?: string },
+  deps: { metadata: MetadataService; trakt: TraktService; anime: AnimeService; enqueueSync: (profileId: string) => Promise<void>; traktBase?: string },
 ) {
   const { requireAdmin, requireProfile } = guards;
   const { metadata, trakt, enqueueSync } = deps;
@@ -226,8 +227,11 @@ export function registerLibraryRoutes(
       }
       const item = await metadata.title(req.params.type, req.params.id);
       const watchedAt = new Date(Math.floor(Date.now() / 1000) * 1000); // Trakt keeps whole seconds
-      await db.watchEvent.create({ data: { profileId: req.profile.id, mediaItemId: item.id, ...epKey(req.params, body), watchedAt, source: "zylo" } });
+      // A double-click lands in the same second: that's one viewing, not an error.
+      const key = { profileId: req.profile.id, mediaItemId: item.id, ...epKey(req.params, body), watchedAt };
+      await db.watchEvent.upsert({ where: { profileId_mediaItemId_seasonNumber_episodeNumber_watchedAt: key }, create: { ...key, source: "zylo" }, update: {} });
       await trakt.push(req.profile.id, "/sync/history", syncBody(target(req.params, body), { watched_at: watchedAt.toISOString() }));
+      await deps.anime.watched(req.profile.id, item, body.season, body.episode);
       return reply.code(204).send();
     },
   );

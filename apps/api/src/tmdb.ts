@@ -115,6 +115,8 @@ export function tmdbClient(credential: string, base = TMDB_BASE) {
     trending: (language: string) => get<{ results: ListItem[] }>("/trending/all/week", { language }),
     /** TMDB ids for an IMDb id (used for addon catalogue items, which are keyed by IMDb). */
     findByImdb: (imdbId: string) => get<{ movie_results: { id: number }[]; tv_results: { id: number }[] }>(`/find/${imdbId}`, { external_source: "imdb_id" }),
+    /** TMDB series for a TVDB series id (anime mappings are keyed by TVDB). */
+    findByTvdb: (tvdbId: number) => get<{ tv_results: { id: number }[] }>(`/find/${tvdbId}`, { external_source: "tvdb_id" }),
   };
 }
 

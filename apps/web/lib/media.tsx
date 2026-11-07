@@ -9,7 +9,8 @@ export function Poster({ path, title, size = "w342", className = "" }: { path: s
       {src ? (
         <img src={src} alt="" loading="lazy" className="size-full object-cover" />
       ) : (
-        <span className="flex size-full items-center justify-center p-3 text-center text-xs text-ink-3">{title}</span>
+        // Thumbnails sit beside the title already: a single initial reads better than a clipped name.
+        <span className="flex size-full items-center justify-center p-3 text-center text-xs text-ink-3">{size === "w92" ? title.trim().charAt(0).toUpperCase() : title}</span>
       )}
     </span>
   );

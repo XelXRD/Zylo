@@ -95,7 +95,7 @@ export type Episode = {
   runtime: number | null;
   stillPath?: string | null;
 };
-export type Integration = { id: "tmdb" | "tvdb" | "trakt"; connected: boolean; settings: { language?: string }; lastCheckedAt: string | null; lastError: string | null };
+export type Integration = { id: "tmdb" | "tvdb" | "trakt" | "anilist" | "mal"; connected: boolean; settings: { language?: string }; lastCheckedAt: string | null; lastError: string | null };
 
 /** TMDB image URL. Sizes: w92 w154 w185 w342 w500 w780 original (posters); w300 w780 w1280 (backdrops). */
 export const img = (path: string | null | undefined, size: string) => (path ? `https://image.tmdb.org/t/p/${size}${path}` : null);
@@ -176,6 +176,26 @@ export type PlaybackOption = {
   playable: boolean;
   note: string | null;
 };
+
+export type Tracker = "anilist" | "mal";
+export const TRACKER_NAMES: Record<Tracker, string> = { anilist: "AniList", mal: "MyAnimeList" };
+export type AnimeStatus = {
+  available: Record<Tracker, boolean>;
+  primary: Tracker | null;
+  accounts: { tracker: Tracker; name: string; userName: string; lastSyncedAt: string | null; lastError: string | null; entries: number }[];
+};
+export type AnimeListEntry = {
+  id: number;
+  title: string;
+  status: "watching" | "completed" | "paused" | "dropped" | "planning";
+  progress: number;
+  episodes: number | null;
+  score: number | null;
+  card: Card | null;
+  url: string;
+};
+/** Where AniList / MyAnimeList send the browser back to after sign-in. Must match the app registered there. */
+export const animeRedirect = (t: Tracker) => `${window.location.origin}/connect/${t}`;
 
 export type DebridStatus = {
   service: "torbox" | "realdebrid" | "premiumize";

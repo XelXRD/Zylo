@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, shortDate, titleHref, type Library } from "@/lib/api";
+import { api, shortDate, titleHref, TRACKER_NAMES, type AnimeListEntry, type Library, type Tracker } from "@/lib/api";
 import { Poster, PosterGrid, TmdbAttribution } from "@/lib/media";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
@@ -81,6 +81,8 @@ export default function LibraryPage() {
               </section>
             )}
 
+            <AnimeShelf />
+
             <section className="mt-14" aria-labelledby="history">
               <h2 id="history" className="text-lg font-semibold">
                 Recently watched
@@ -113,5 +115,92 @@ export default function LibraryPage() {
       </main>
       <TmdbAttribution />
     </>
+  );
+}
+
+const STATUS_TABS = [
+  ["watching", "Watching"],
+  ["planning", "Planning"],
+  ["completed", "Completed"],
+  ["paused", "Paused"],
+  ["dropped", "Dropped"],
+] as const;
+
+/** The profile's AniList or MyAnimeList list (whichever it updates from Zylo), by status. */
+function AnimeShelf() {
+  const [data, setData] = useState<{ tracker: Tracker | null; entries: AnimeListEntry[] }>();
+  const [tab, setTab] = useState<AnimeListEntry["status"]>("watching");
+  useEffect(() => {
+    api<{ tracker: Tracker | null; entries: AnimeListEntry[] }>("/anime/list").then(setData, () => {});
+  }, []);
+  if (!data?.tracker) return null;
+  const name = TRACKER_NAMES[data.tracker];
+  const shown = data.entries.filter((e) => e.status === tab);
+  return (
+    <section className="mt-14" aria-labelledby="anime">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h2 id="anime" className="text-lg font-semibold">
+          Anime
+        </h2>
+        <span className="text-xs text-ink-3">From {name}</span>
+      </div>
+      <div role="tablist" aria-label="Anime by status" className="mt-4 flex flex-wrap gap-1">
+        {STATUS_TABS.map(([key, label]) => {
+          const n = data.entries.filter((e) => e.status === key).length;
+          return (
+            <button
+              key={key}
+              role="tab"
+              aria-selected={tab === key}
+              onClick={() => setTab(key)}
+              className="h-8 rounded-lg px-3 text-sm text-ink-2 transition-[background-color,color] duration-150 hover:text-ink aria-selected:bg-sunken aria-selected:font-medium aria-selected:text-ink"
+            >
+              {label} <span className="tabular-nums text-ink-3">{n}</span>
+            </button>
+          );
+        })}
+      </div>
+      {shown.length ? (
+        <ul className="mt-4 divide-y divide-line rounded-xl border border-line bg-surface">
+          {shown.map((e) => {
+            const body = (
+              <>
+                <Poster path={e.card?.posterPath ?? null} title={e.title} size="w92" className="w-10 shrink-0" />
+                <span className="min-w-0 flex-1">
+                  <span className="block truncate font-medium">{e.title}</span>
+                  <span className="mt-1 flex items-center gap-2 text-xs text-ink-3 tabular-nums">
+                    {e.episodes ? (
+                      <span className="h-1 w-24 overflow-hidden rounded-full bg-sunken" aria-hidden>
+                        <span className="block h-full bg-accent" style={{ width: `${Math.min(100, (e.progress / e.episodes) * 100)}%` }} />
+                      </span>
+                    ) : null}
+                    {e.progress}
+                    {e.episodes ? ` of ${e.episodes}` : ""} {e.episodes === 1 ? "episode" : "episodes"}
+                    {e.score ? ` · scored ${e.score}` : ""}
+                    {!e.card && " · not matched to a Zylo title"}
+                  </span>
+                </span>
+              </>
+            );
+            return (
+              <li key={e.id}>
+                {e.card ? (
+                  <Link href={titleHref(e.card)} className="flex items-center gap-4 p-3 transition-[background-color] duration-150 hover:bg-sunken">
+                    {body}
+                  </Link>
+                ) : (
+                  <a href={e.url} target="_blank" rel="noreferrer" className="flex items-center gap-4 p-3 transition-[background-color] duration-150 hover:bg-sunken">
+                    {body}
+                    <span className="shrink-0 text-xs text-ink-3">{name} ↗</span>
+                  </a>
+                )}
+              </li>
+            );
+          })}
+        </ul>
+      ) : (
+        <p className="mt-4 text-sm text-ink-2">Nothing here on your {name} list.</p>
+      )}
+    </section>
   );
 }

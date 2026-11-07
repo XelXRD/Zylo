@@ -22,7 +22,7 @@ export class NotConfigured extends Error {
 type TmdbSecret = { token: string };
 type TvdbSecret = { apikey: string; pin?: string };
 type TitleType = "movie" | "series";
-type TitleData = {
+export type TitleData = {
   genres?: string[];
   cast?: { name: string; character: string | null; profilePath: string | null }[];
   directors?: string[];
@@ -365,7 +365,7 @@ export function registerMetadataRoutes(
 ) {
   const { requireUser, requireAdmin } = guards;
   const svc = metadataService(db, bases);
-  const INTEGRATIONS = ["tmdb", "tvdb", "trakt"] as const;
+  const INTEGRATIONS = ["tmdb", "tvdb", "trakt", "anilist", "mal"] as const; // anime.ts has its own /test routes for the last two
   const idParam = { type: "object", required: ["id"], properties: { id: { type: "integer", minimum: 1 } } } as const;
   const regionOf = (req: { user: { settings: unknown } }) => ((req.user.settings as { region?: string }).region ?? "GB");
 

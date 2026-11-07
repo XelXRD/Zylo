@@ -2,7 +2,7 @@
 
 One interface. Your entire media world.
 
-Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways) **Phase 4, Addons** (Stremio-compatible addons: streams on film and episode pages, addon catalogues on the home page) **Phase 5, Playback** (built-in player, automatic source choice, resume on any device, Continue watching, Trakt scrobbling, subtitles) and **Phase 6, Debrid** (TorBox, Real-Debrid and Premiumize play torrent sources as ordinary links). The full plan is in the master specification.
+Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways) **Phase 4, Addons** (Stremio-compatible addons: streams on film and episode pages, addon catalogues on the home page) **Phase 5, Playback** (built-in player, automatic source choice, resume on any device, Continue watching, Trakt scrobbling, subtitles) and **Phase 6, Debrid** (TorBox, Real-Debrid and Premiumize play torrent sources as ordinary links) and **Phase 7, Anime** (AniList and MyAnimeList lists, kept up to date as you watch). The full plan is in the master specification.
 
 ## Run it
 
@@ -18,6 +18,8 @@ Open http://localhost:3000. The first visit asks you to create the admin account
 Then connect metadata: **Settings > Integrations > TMDB**. Create a free account at themoviedb.org, open Settings > API, and paste the *API Read Access Token*. TheTVDB is optional and adds DVD, absolute and other episode orders.
 
 To use Trakt: create an app at app.trakt.tv/settings/apps with `http://localhost` as the Redirect URI (Zylo never visits it), paste its Client ID (there is no secret) under **Settings > Integrations > Trakt**, then each profile connects its own account under **Settings > Trakt** with a short code at auth.trakt.tv/activate. Profiles connected before Trakt's October 2026 sign-in change need to connect once more.
+
+For anime tracking: an admin adds an AniList and/or MyAnimeList app under **Settings > Integrations** (each card shows the exact Redirect URL to register, plus where to create the app), then each profile connects under **Settings > Anime**.
 
 To play torrent sources from your addons, connect a debrid service you subscribe to under **Settings > Debrid**: paste the API key from torbox.app/settings, real-debrid.com/apitoken or premiumize.me/account.
 
@@ -111,3 +113,14 @@ TEST_DATABASE_URL=postgresql://zylo:zylo@localhost:5432/zylo_test pnpm test
 - **Real-Debrid:** Zylo selects every video file, so a season pack is ready for every episode, not just the one you played first.
 - Torrents no connected service has ready are hidden from the player, with a line saying how many.
 - Not yet: Real-Debrid's device sign-in (an API key does the same job and never expires), and showing or managing what's in each debrid account's library.
+
+## Phase 7 decisions
+
+- **Per profile, either or both.** Each profile connects AniList and/or MyAnimeList and picks which one Zylo updates (the *primary*); both lists come into Zylo and show under **Library > Anime** by status, with progress.
+- **Sign-in comes back to Zylo.** The admin registers one app per service with Zylo's own address (`/connect/anilist`, `/connect/mal`); Settings shows the exact URL to copy. AniList uses its implicit grant (Client ID only; the token lasts a year). MyAnimeList uses PKCE with an "other"-type app (Client ID only; tokens refresh monthly). The PKCE verifier travels inside an encrypted state value, so nothing half-finished is stored, and a sign-in started on one profile can't finish on another.
+- **Matching uses Kometa's anime ID list** (AniDB → AniList, MAL, TVDB with season and episode offset, IMDb), refreshed daily from GitHub. Series match by TVDB, films by IMDb, then to TMDB for Zylo's pages. Anime episode numbers are never assumed to equal TMDB or TVDB ones: a split-cour season (Attack on Titan season 3 is two AniList entries, episodes 1-12 and 13-22) maps to the right entry and episode, and long absolute-numbered shows work too.
+- **With TheTVDB connected**, Zylo translates TMDB's episode numbering to TVDB's by air date before matching, which covers shows where the two number seasons differently. Without it, Zylo assumes they agree, which holds for most anime.
+- **Finishing an episode updates the primary tracker once.** Progress only moves forward to the episode just finished and is sent as an absolute number, so repeats, rewatches of earlier episodes and retries never double-count. Reaching the last episode marks it completed. If the tracker is down, the progress waits in Zylo and goes on the next sync (every 30 minutes, or **Sync now**).
+- **The tracker wins on import** for status and score; only progress Zylo hasn't sent yet is kept over it. Removing a title on the tracker removes it here.
+- Also fixed: marking the same episode watched twice in one second (a double-click) no longer errors, and the Trakt and Anime sections in Settings update as soon as an admin saves the apps further down the page.
+- Not yet: editing anime status or score from Zylo, manga, tracker stats and activity, and a manual "this is the right match" override when Kometa's list is wrong.
