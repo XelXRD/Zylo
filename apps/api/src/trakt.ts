@@ -1,19 +1,23 @@
-// Trakt adapter + per-profile sync. API docs: https://trakt.docs.apiary.io
-// Sign-in uses the device-code flow (no redirect URL needed for a self-hosted app).
-// Access tokens last 24 hours since March 2025, so we refresh from expires_in, never a fixed interval.
+// Trakt adapter + per-profile sync. Docs: https://developer.trakt.tv (source: github.com/trakt/trakt-api)
+// Sign-in uses the device-code flow (a code at auth.trakt.tv/activate), which works on any device and needs only
+// the Client ID: since 2026-10-01 new Trakt apps get no Client Secret, and it's optional on every OAuth request.
+// All OAuth calls (device code, token, refresh, revoke) go to auth.trakt.tv; everything else to api.trakt.tv.
+// Token lifetimes have changed before (3 months → 24 hours → 7 days), so we refresh from expires_in, never a fixed
+// interval. Refresh tokens are single-use: always store the new pair.
 import { Prisma, type PrismaClient } from "./generated/prisma/client.js";
 import { fetchJson, UpstreamError } from "./http.js";
 import type { MetadataService } from "./metadata.js";
 import { decrypt, encrypt } from "./secrets.js";
 
 export const TRAKT_BASE = "https://api.trakt.tv";
+export const TRAKT_AUTH = "https://auth.trakt.tv";
 /** Older installs registered the out-of-band URI; Trakt now only accepts localhost addresses. */
 export const DEFAULT_REDIRECT = "urn:ietf:wg:oauth:2.0:oob";
 const PAGE = 100;
 
 // redirectUri: whatever was entered on the Trakt app page. Sign-in never visits it (device code), but
 // Trakt checks it matches when tokens are refreshed.
-export type TraktApp = { clientId: string; clientSecret: string; redirectUri?: string };
+export type TraktApp = { clientId: string; clientSecret?: string; redirectUri?: string };
 type Tokens = { access_token: string; refresh_token: string; expires_in: number; created_at: number };
 type Ids = { trakt?: number; slug?: string; imdb?: string | null; tmdb?: number | null; tvdb?: number | null };
 type TMovie = { title: string; year: number | null; ids: Ids };
@@ -22,10 +26,13 @@ type TEpisode = { season: number; number: number; title?: string | null; ids: Id
 type TItem = { type: "movie" | "show" | "episode" | "season" | "person"; movie?: TMovie; show?: TShow; episode?: TEpisode };
 export type TraktActivities = Record<string, Record<string, string> | string>;
 
-export function traktClient(app: TraktApp, base = TRAKT_BASE) {
+/** `base` is the API host; OAuth goes to auth.trakt.tv (tests point both at one mock). */
+export function traktClient(app: TraktApp, base = TRAKT_BASE, authBase = base === TRAKT_BASE ? TRAKT_AUTH : base) {
+  // Older apps still have a secret; send it only when there is one.
+  const creds = { client_id: app.clientId, ...(app.clientSecret && { client_secret: app.clientSecret }) };
   const headers = { "content-type": "application/json", "trakt-api-version": "2", "trakt-api-key": app.clientId };
   const post = <T>(path: string, body: unknown, token?: string) =>
-    call<T>(`${base}${path}`, { method: "POST", headers: { ...headers, ...(token && { authorization: `Bearer ${token}` }) }, body: JSON.stringify(body) });
+    call<T>(`${authBase}${path}`, { method: "POST", headers: { ...headers, ...(token && { authorization: `Bearer ${token}` }) }, body: JSON.stringify(body) });
 
   return {
     deviceCode: () =>
@@ -35,7 +42,7 @@ export function traktClient(app: TraktApp, base = TRAKT_BASE) {
     /** One poll. Trakt signals progress with status codes rather than error bodies. */
     async pollDevice(code: string): Promise<{ status: "connected"; tokens: Tokens } | { status: "pending" | "slow_down" | "expired" | "denied" | "invalid" }> {
       try {
-        const tokens = await post<Tokens>("/oauth/device/token", { code, client_id: app.clientId, client_secret: app.clientSecret });
+        const tokens = await post<Tokens>("/oauth/device/token", { code, ...creds });
         return { status: "connected", tokens };
       } catch (e) {
         const s = e instanceof UpstreamError ? e.status : 0;
@@ -48,8 +55,8 @@ export function traktClient(app: TraktApp, base = TRAKT_BASE) {
       }
     },
     refresh: (refreshToken: string) =>
-      post<Tokens>("/oauth/token", { refresh_token: refreshToken, client_id: app.clientId, client_secret: app.clientSecret, redirect_uri: app.redirectUri ?? DEFAULT_REDIRECT, grant_type: "refresh_token" }),
-    revoke: (token: string) => post("/oauth/revoke", { token, client_id: app.clientId, client_secret: app.clientSecret }),
+      post<Tokens>("/oauth/token", { refresh_token: refreshToken, ...creds, redirect_uri: app.redirectUri ?? DEFAULT_REDIRECT, grant_type: "refresh_token" }),
+    revoke: (token: string) => post("/oauth/revoke", { token, ...creds }),
     as(token: string) {
       const auth = { ...headers, authorization: `Bearer ${token}` };
       return {
@@ -99,7 +106,14 @@ export function traktService(db: PrismaClient, metadata: MetadataService, base =
     if (!acct || !client) return null;
     let { accessToken, refreshToken } = decrypt<{ accessToken: string; refreshToken: string }>(acct.secret);
     if (acct.expiresAt.getTime() - Date.now() < 3_600_000) {
-      const t = await client.refresh(refreshToken);
+      const t = await client.refresh(refreshToken).catch((e) => {
+        // invalid_grant: the refresh token was rejected (e.g. "session not found" for tokens issued before
+        // Trakt's 2026 sign-in migration). Only a fresh sign-in fixes that.
+        if (e instanceof UpstreamError && (e.status === 400 || e.status === 401)) {
+          throw new UpstreamError("Trakt", 401, "Trakt needs this profile to connect again (Settings > Trakt). This happens once after Trakt changed how sign-in works.");
+        }
+        throw e;
+      });
       ({ access_token: accessToken, refresh_token: refreshToken } = t);
       await db.traktAccount.update({
         where: { profileId },

@@ -143,7 +143,7 @@ test("phase 5: start, resume elsewhere, complete once, scrobble, de-dupe, fallba
   assert.deepEqual((await call("GET", "/playback/continue")).json, [], "finished things leave Continue watching");
 
   // Connect Trakt; the first sync uploads that local play (so Trakt has it), then watch again.
-  await call("PUT", "/integrations/trakt", { clientId: CLIENT_ID, clientSecret: "trakt-client-secret-0123456789abcdef" });
+  await call("PUT", "/integrations/trakt", { clientId: CLIENT_ID });
   await call("POST", "/trakt/connect");
   assert.equal((await call("POST", "/trakt/connect/poll")).json.status, "connected");
   assert.equal(historyPosts.length, 1, "first sync pushed the earlier play");

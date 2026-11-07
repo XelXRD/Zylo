@@ -17,7 +17,7 @@ Open http://localhost:3000. The first visit asks you to create the admin account
 
 Then connect metadata: **Settings > Integrations > TMDB**. Create a free account at themoviedb.org, open Settings > API, and paste the *API Read Access Token*. TheTVDB is optional and adds DVD, absolute and other episode orders.
 
-To use Trakt: create an app at trakt.tv/oauth/applications with `http://localhost` as the Redirect URI (Trakt only accepts localhost addresses; Zylo never visits it), paste its Client ID, Secret and that same Redirect URI under **Settings > Integrations > Trakt**, then each profile connects its own account under **Settings > Trakt** with a short code at trakt.tv/activate.
+To use Trakt: create an app at app.trakt.tv/settings/apps with `http://localhost` as the Redirect URI (Zylo never visits it), paste its Client ID (there is no secret) under **Settings > Integrations > Trakt**, then each profile connects its own account under **Settings > Trakt** with a short code at auth.trakt.tv/activate. Profiles connected before Trakt's October 2026 sign-in change need to connect once more.
 
 Update later with `docker compose up -d --build`. Database migrations run automatically when `zylo-core` starts.
 
@@ -69,7 +69,7 @@ TEST_DATABASE_URL=postgresql://zylo:zylo@localhost:5432/zylo_test pnpm test
 
 ## Phase 3 decisions
 
-- **Each profile links its own Trakt account** (device-code sign-in: a short code entered at trakt.tv/activate, no password shared). The admin registers one Trakt app for the server.
+- **Each profile links its own Trakt account** (device-code sign-in: a short code entered at auth.trakt.tv/activate, no password shared). The admin registers one Trakt app for the server. Only the Client ID is needed: Trakt's device-code flow, like PKCE, never uses a secret (a secret is still sent if an older app has one). PKCE itself needs a browser redirect back to Zylo, which Trakt only allows to localhost, so code sign-in is the one that works from a TV or another device. All sign-in calls go to auth.trakt.tv; access lasts 7 days and refresh tokens are single-use.
 - **Zylo keeps its own history, ratings, watchlist and lists** for every profile, so everything works with Trakt disconnected. Disconnecting keeps them.
 - **First sync merges both ways:** Trakt data comes in, and anything rated, watched or watchlisted in Zylo beforehand goes up. **After that, Trakt wins** for ratings, watchlist and lists, so removals on trakt.tv disappear here too. Watch history is only ever added to.
 - **Changes made in Zylo go to Trakt straight away.** If Trakt is unreachable they wait in an outbox and retry on each sync (up to 20 tries), shown as "changes waiting" in Settings.

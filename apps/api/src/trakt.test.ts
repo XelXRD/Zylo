@@ -4,6 +4,7 @@ import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import pg from "pg";
 import { buildApp } from "./app.js";
+import { traktClient } from "./trakt.js";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("Set TEST_DATABASE_URL to an empty, migrated database");
@@ -11,11 +12,11 @@ process.env.ZYLO_SECRET ??= "test-secret-test-secret-test-secret-123";
 
 const TMDB_TOKEN = "eyJhbGciOiJIUzI1NiJ9.good-read-access-token";
 const CLIENT_ID = "trakt-client-id-0123456789abcdef";
-const CLIENT_SECRET = "trakt-client-secret-0123456789abcdef";
 
 // --- mock Trakt state ---
 const t = {
   polls: 0,
+  sessionGone: false,
   failPosts: false,
   accessToken: "access-1",
   refreshToken: "refresh-1",
@@ -60,10 +61,11 @@ const mock = createServer((req, res) => {
     if (req.headers["trakt-api-key"] !== CLIENT_ID) return send(403);
     if (p === "/oauth/device/code") return send(200, { device_code: "dev-code", user_code: "ABCD1234", verification_url: "https://trakt.tv/activate", expires_in: 600, interval: 5 });
     if (p === "/oauth/device/token") {
-      if (body.client_secret !== CLIENT_SECRET) return send(401);
+      if ("client_secret" in body) return send(400, { error: "invalid_request" }); // new apps have none; we must not invent one
       return ++t.polls < 2 ? send(400) : send(200, { access_token: t.accessToken, refresh_token: t.refreshToken, expires_in: 86400, created_at: Math.floor(Date.now() / 1000) });
     }
     if (p === "/oauth/token") {
+      if (t.sessionGone) return send(400, { error: "invalid_grant", error_description: "session not found" });
       if (body.refresh_token !== t.refreshToken || body.redirect_uri !== "http://localhost") return send(400); // must match the app page
       t.accessToken = "access-2";
       t.refreshToken = "refresh-2";
@@ -139,8 +141,8 @@ test("phase 3: Trakt connect, import, push, outbox, mirror, refresh", async () =
   assert.equal((await call("POST", "/trakt/connect")).status, 409);
 
   // Admin adds the Trakt app; a wrong Client ID is caught.
-  assert.equal((await call("PUT", "/integrations/trakt", { clientId: "wrong-client-id-000000000", clientSecret: CLIENT_SECRET })).status, 400);
-  assert.equal((await call("PUT", "/integrations/trakt", { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, redirectUri: "http://localhost" })).status, 204);
+  assert.equal((await call("PUT", "/integrations/trakt", { clientId: "wrong-client-id-000000000" })).status, 400);
+  assert.equal((await call("PUT", "/integrations/trakt", { clientId: CLIENT_ID, redirectUri: "http://localhost" })).status, 204, "Client ID only");
 
   // Device sign-in: pending, then connected (which runs the first sync inline in tests).
   const code = (await call("POST", "/trakt/connect")).json;
@@ -211,6 +213,14 @@ test("phase 3: Trakt connect, import, push, outbox, mirror, refresh", async () =
   assert.equal(t.accessToken, "access-2");
   assert.equal((await call("GET", "/trakt")).json.lastError, null);
 
+  // A refresh Trakt rejects (tokens from before its sign-in migration) asks for a fresh connection, plainly.
+  t.sessionGone = true;
+  await client.query(`UPDATE "TraktAccount" SET "expiresAt" = now() + interval '10 minutes'`);
+  await call("POST", "/trakt/sync");
+  assert.match((await call("GET", "/trakt")).json.lastError, /connect again/);
+  t.sessionGone = false;
+  await client.query(`UPDATE "TraktAccount" SET "expiresAt" = now() + interval '7 days', "lastError" = null`);
+
   // Recommendations become full title cards.
   assert.equal((await call("GET", "/discover/recommended")).json.results[0].title, "Film 4242");
 
@@ -223,4 +233,29 @@ test("phase 3: Trakt connect, import, push, outbox, mirror, refresh", async () =
   await client.end();
   await app.close();
   mock.close();
+});
+
+test("Trakt OAuth goes to auth.trakt.tv, API calls to api.trakt.tv; no secret unless one exists", async () => {
+  const seen: { url: string; body: Record<string, unknown> | null }[] = [];
+  const real = globalThis.fetch;
+  globalThis.fetch = (async (url: string, init?: RequestInit) => {
+    seen.push({ url, body: init?.body ? JSON.parse(String(init.body)) : null });
+    return new Response(JSON.stringify({ access_token: "a", refresh_token: "r", expires_in: 604800, created_at: 0, device_code: "d", user_code: "U", verification_url: "https://auth.trakt.tv/activate", expires_in_s: 600, interval: 5, user: { username: "u" } }), { status: 200 });
+  }) as typeof fetch;
+  try {
+    const c = traktClient({ clientId: "cid", redirectUri: "http://localhost" });
+    await c.deviceCode();
+    await c.pollDevice("d");
+    await c.refresh("r");
+    await c.revoke("a");
+    await c.as("a").get("/users/settings");
+    assert.deepEqual(seen.map((x) => new URL(x.url).host), ["auth.trakt.tv", "auth.trakt.tv", "auth.trakt.tv", "auth.trakt.tv", "api.trakt.tv"]);
+    assert.ok(seen.every((x) => !x.body || !("client_secret" in x.body)), "no client_secret sent");
+    assert.equal(seen[2].body!.redirect_uri, "http://localhost");
+    seen.length = 0;
+    await traktClient({ clientId: "cid", clientSecret: "legacy" }).pollDevice("d");
+    assert.equal(seen[0].body!.client_secret, "legacy", "older apps with a secret keep sending it");
+  } finally {
+    globalThis.fetch = real;
+  }
 });

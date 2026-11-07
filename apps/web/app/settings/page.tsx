@@ -504,7 +504,6 @@ function TvdbCard({ integration, onChange }: { integration: Integration; onChang
 
 function TraktAppCard({ integration, onChange }: { integration: Integration; onChange: () => void }) {
   const [clientId, setClientId] = useState("");
-  const [clientSecret, setClientSecret] = useState("");
   const [redirectUri, setRedirectUri] = useState("http://localhost");
   const { busy, run, feedback } = useAction(onChange);
   return (
@@ -514,12 +513,12 @@ function TraktAppCard({ integration, onChange }: { integration: Integration; onC
       blurb={
         <>
           Lets each profile link its own Trakt account. Create an app at{" "}
-          <a href="https://trakt.tv/oauth/applications/new" target="_blank" rel="noreferrer" className="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink">
-            trakt.tv/oauth/applications
+          <a href="https://app.trakt.tv/settings/apps" target="_blank" rel="noreferrer" className="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink">
+            app.trakt.tv/settings/apps
           </a>
-          , enter <code className="rounded bg-sunken px-1 py-px text-xs">http://localhost</code> as the Redirect URI, then paste its Client ID and
-          Client Secret here. Zylo never uses that address: everyone signs in with a short code at trakt.tv/activate. Trakt just needs it to
-          match when Zylo renews access each day.
+          , enter <code className="rounded bg-sunken px-1 py-px text-xs">http://localhost</code> as the Redirect URI, then paste its Client ID here.
+          That's all Zylo needs: there is no secret. Everyone signs in with a short code on Trakt's activate page, and the Redirect URI only has
+          to match when Zylo renews access each week.
         </>
       }
     >
@@ -528,16 +527,14 @@ function TraktAppCard({ integration, onChange }: { integration: Integration; onC
         onSubmit={(e) => {
           e.preventDefault();
           run("save", async () => {
-            await api("/integrations/trakt", { method: "PUT", body: { clientId, clientSecret, redirectUri } });
+            await api("/integrations/trakt", { method: "PUT", body: { clientId, redirectUri } });
             setClientId("");
-            setClientSecret("");
             return "Trakt app saved. Each profile can now connect in Settings > Trakt.";
           });
         }}
       >
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Client ID" type="password" autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)} required minLength={20} />
-          <Field label="Client Secret" type="password" autoComplete="off" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} required minLength={20} />
+          <Field label="Client ID" autoComplete="off" spellCheck={false} value={clientId} onChange={(e) => setClientId(e.target.value)} required minLength={20} />
           <Field
             label="Redirect URI"
             autoComplete="off"
@@ -551,7 +548,7 @@ function TraktAppCard({ integration, onChange }: { integration: Integration; onC
         {feedback}
         <div className="flex flex-wrap gap-2">
           <Button type="submit" busy={busy === "save"}>
-            {integration.connected ? "Replace app keys" : "Save Trakt app"}
+            {integration.connected ? "Replace Client ID" : "Save Trakt app"}
           </Button>
           <DisconnectButtons id="trakt" connected={integration.connected} run={run} busy={busy} />
         </div>
