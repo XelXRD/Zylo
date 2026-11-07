@@ -1,0 +1,101 @@
+@import "tailwindcss";
+
+/* One neutral ramp per theme, shared hue temperature. No pure black or white. */
+:root,
+[data-theme="light"] {
+  --bg: #f6f6f3;
+  --surface: #fcfcfa;
+  --sunken: #eeeeea;
+  --line: #deded8;
+  --line-strong: #c4c4bc;
+  --ink: #1b1b1f;
+  --ink-2: #5d5d66;
+  --ink-3: #8a8a92;
+  --accent: #1f7f72;
+  --accent-ink: #f4fbf9;
+  --accent-hover: #196b60;
+  --danger: #b4372f;
+  --focus: #1f7f72;
+  color-scheme: light;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --bg: #111114;
+    --surface: #18181c;
+    --sunken: #0c0c0e;
+    --line: #2a2a31;
+    --line-strong: #3b3b44;
+    --ink: #ececef;
+    --ink-2: #a3a3ad;
+    --ink-3: #74747e;
+    --accent: #3cb5a3;
+    --accent-ink: #0b1f1c;
+    --accent-hover: #52c4b3;
+    --danger: #ef7a70;
+    --focus: #52c4b3;
+    color-scheme: dark;
+  }
+}
+
+[data-theme="dark"] {
+  --bg: #111114;
+  --surface: #18181c;
+  --sunken: #0c0c0e;
+  --line: #2a2a31;
+  --line-strong: #3b3b44;
+  --ink: #ececef;
+  --ink-2: #a3a3ad;
+  --ink-3: #74747e;
+  --accent: #3cb5a3;
+  --accent-ink: #0b1f1c;
+  --accent-hover: #52c4b3;
+  --danger: #ef7a70;
+  --focus: #52c4b3;
+  color-scheme: dark;
+}
+
+@theme inline {
+  --color-bg: var(--bg);
+  --color-surface: var(--surface);
+  --color-sunken: var(--sunken);
+  --color-line: var(--line);
+  --color-line-strong: var(--line-strong);
+  --color-ink: var(--ink);
+  --color-ink-2: var(--ink-2);
+  --color-ink-3: var(--ink-3);
+  --color-accent: var(--accent);
+  --color-accent-ink: var(--accent-ink);
+  --color-accent-hover: var(--accent-hover);
+  --color-danger: var(--danger);
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+
+  /* Profile avatar colours: flat, mid-tone so white-ish initials read on both themes. */
+  --color-p-teal: #237568;
+  --color-p-amber: #8f5e0c;
+  --color-p-rose: #b8475e;
+  --color-p-violet: #6d55b8;
+  --color-p-sky: #286a9c;
+  --color-p-lime: #4a6e18;
+  --color-p-orange: #a84a1c;
+  --color-p-slate: #56606e;
+}
+
+html {
+  background: var(--bg);
+  color: var(--ink);
+  -webkit-font-smoothing: antialiased;
+}
+
+:focus-visible {
+  outline: 2px solid var(--focus);
+  outline-offset: 2px;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    transition-duration: 0ms !important;
+  }
+}

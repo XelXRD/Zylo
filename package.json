@@ -1,0 +1,14 @@
+{
+  "name": "zylo",
+  "private": true,
+  "packageManager": "pnpm@10.28.0",
+  "scripts": {
+    "dev:api": "pnpm --filter @zylo/api dev",
+    "dev:web": "pnpm --filter @zylo/web dev",
+    "dev:worker": "pnpm --filter @zylo/worker dev",
+    "test": "pnpm --filter @zylo/api test"
+  },
+  "pnpm": {
+    "onlyBuiltDependencies": ["prisma", "@prisma/engines", "esbuild", "sharp", "@tailwindcss/oxide", "msgpackr-extract"]
+  }
+}

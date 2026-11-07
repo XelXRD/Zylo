@@ -1,0 +1,49 @@
+name: zylo
+
+services:
+  zylo-web:
+    build: { context: ., target: web }
+    ports:
+      - "${ZYLO_PORT:-3000}:3000"
+    depends_on: [zylo-core]
+    restart: unless-stopped
+
+  zylo-core:
+    build: { context: ., target: api }
+    environment:
+      DATABASE_URL: postgresql://zylo:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zylo
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+    depends_on:
+      postgres: { condition: service_healthy }
+    restart: unless-stopped
+
+  zylo-worker:
+    build: { context: ., target: worker }
+    environment:
+      REDIS_URL: redis://redis:6379
+    depends_on: [redis]
+    restart: unless-stopped
+
+  postgres:
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_USER: zylo
+      POSTGRES_DB: zylo
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}
+    volumes: [postgres:/var/lib/postgresql/data]
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U zylo -d zylo"]
+      interval: 5s
+      retries: 10
+    restart: unless-stopped
+
+  redis:
+    image: redis:7-alpine
+    volumes: [redis:/data]
+    restart: unless-stopped
+
+  # zylo-media-server joins here under `profiles: [media-server]` in Phase 13.
+
+volumes:
+  postgres:
+  redis:
