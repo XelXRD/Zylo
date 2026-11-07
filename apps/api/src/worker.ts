@@ -5,6 +5,7 @@ import { Redis } from "ioredis";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/prisma/client.js";
 import { metadataService, NotConfigured } from "./metadata.js";
+import { traktService } from "./trakt.js";
 
 // Fail fast on a bad secret: otherwise the first integration save fails with a confusing error.
 const secretError = secretProblem();
@@ -19,9 +20,11 @@ if (!databaseUrl) throw new Error("DATABASE_URL is not set");
 // BullMQ needs maxRetriesPerRequest: null on worker connections.
 const connection = new Redis(process.env.REDIS_URL ?? "redis://localhost:6379", { maxRetriesPerRequest: null });
 const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: databaseUrl }) });
-const metadata = metadataService(db);
+const bases = { tmdb: process.env.TMDB_BASE_URL, tvdb: process.env.TVDB_BASE_URL };
+const metadata = metadataService(db, bases);
+const trakt = traktService(db, metadata, process.env.TRAKT_BASE_URL);
 
-const handlers: Record<string, () => Promise<unknown>> = {
+const handlers: Record<string, (data: { profileId?: string }) => Promise<unknown>> = {
   async "refresh-metadata"() {
     try {
       return { refreshed: await metadata.refreshStale() };
@@ -30,17 +33,31 @@ const handlers: Record<string, () => Promise<unknown>> = {
       throw e;
     }
   },
+  async "trakt-sync"({ profileId }) {
+    await trakt.sync(profileId!);
+    // Fill in posters and details for newly imported titles straight away, not at the next scheduled run.
+    const filled = await metadata.refreshStale().catch(() => 0);
+    return { profileId, filled };
+  },
+  // Every connected profile with auto-sync on; one failing account doesn't stop the rest.
+  async "trakt-sync-all"() {
+    const accounts = await db.traktAccount.findMany({ where: { syncEnabled: true }, select: { profileId: true } });
+    let ok = 0;
+    for (const a of accounts) await trakt.sync(a.profileId).then(() => ok++, () => {});
+    return { synced: ok, of: accounts.length };
+  },
 };
 
 const queue = new Queue("zylo", { connection });
-await queue.upsertJobScheduler("refresh-metadata", { every: 60 * 60 * 1000 }, { name: "refresh-metadata" });
+await queue.upsertJobScheduler("refresh-metadata", { every: 15 * 60 * 1000 }, { name: "refresh-metadata" });
+await queue.upsertJobScheduler("trakt-sync-all", { every: 15 * 60 * 1000 }, { name: "trakt-sync-all" });
 
 const worker = new Worker(
   "zylo",
   async (job) => {
     const handler = handlers[job.name];
     if (!handler) throw new Error(`No handler for job "${job.name}"`);
-    return handler();
+    return handler(job.data);
   },
   { connection },
 );

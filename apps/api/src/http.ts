@@ -24,5 +24,12 @@ export async function fetchJson<T>(service: string, url: string, init: RequestIn
     const body = (await res.json().catch(() => ({}))) as { status_message?: string; message?: string };
     throw new UpstreamError(service, res.status, body.status_message ?? body.message ?? `${service} returned ${res.status}.`);
   }
-  return res.json() as Promise<T>;
+  // Some endpoints answer 204 or an empty body; anything else must be JSON.
+  const text = await res.text();
+  if (!text) return null as T;
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new UpstreamError(service, res.status, `${service} sent back something that isn't JSON.`);
+  }
 }

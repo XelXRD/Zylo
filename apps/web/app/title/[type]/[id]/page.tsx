@@ -5,7 +5,8 @@ import { api, img, type Episode, type Title } from "@/lib/api";
 import { Poster, PosterGrid, TmdbAttribution } from "@/lib/media";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
-import { Button, Loading, Select } from "@/lib/ui";
+import { TitleActions, EpisodeTick, useTitleState } from "@/lib/tracking";
+import { Loading, Select } from "@/lib/ui";
 
 const hm = (mins: number) => (mins >= 60 ? `${Math.floor(mins / 60)}h ${mins % 60 ? `${mins % 60}m` : ""}`.trim() : `${mins}m`);
 const longDate = (iso: string | null) =>
@@ -17,6 +18,7 @@ export default function TitlePage() {
   const [title, setTitle] = useState<Title>();
   const [error, setError] = useState<string>();
   const [trailer, setTrailer] = useState(false);
+  const { state, reload } = useTitleState(type, id);
 
   useEffect(() => {
     if (!user) return;
@@ -46,7 +48,7 @@ export default function TitlePage() {
 
           <main className="mx-auto max-w-6xl px-6">
             <div className="flex flex-col gap-8 sm:flex-row">
-              <Poster path={title.posterPath} title={title.title} size="w500" className="-mt-24 w-36 shrink-0 shadow-[0_1px_2px_rgb(0_0_0/0.2),0_8px_24px_-8px_rgb(0_0_0/0.4)] sm:-mt-40 sm:w-56" />
+              <Poster path={title.posterPath} title={title.title} size="w500" className="-mt-24 w-36 shrink-0 self-start shadow-[0_1px_2px_rgb(0_0_0/0.2),0_8px_24px_-8px_rgb(0_0_0/0.4)] sm:-mt-40 sm:w-56" />
 
               <div className="min-w-0 pt-2 sm:pt-6">
                 <h1 className="text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">{title.title}</h1>
@@ -79,12 +81,16 @@ export default function TitlePage() {
                   </p>
                 )}
 
+                <TitleActions type={title.type} id={id} state={state} reload={reload} />
                 {title.trailerKey && (
-                  <div className="mt-6">
-                    <Button variant="quiet" onClick={() => setTrailer((t) => !t)} aria-expanded={trailer}>
-                      {trailer ? "Hide trailer" : "Watch trailer"}
-                    </Button>
-                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setTrailer((t) => !t)}
+                    aria-expanded={trailer}
+                    className="mt-4 rounded text-sm font-medium text-accent transition-colors duration-150 hover:text-accent-hover"
+                  >
+                    {trailer ? "Hide trailer" : "▶ Watch trailer"}
+                  </button>
                 )}
               </div>
             </div>
@@ -122,7 +128,7 @@ export default function TitlePage() {
               </section>
             )}
 
-            {title.type === "series" && title.seasons.length > 0 && <Episodes seriesId={id} title={title} />}
+            {title.type === "series" && title.seasons.length > 0 && <Episodes seriesId={id} title={title} watched={new Set(state?.watchedEpisodes)} onWatchedChange={reload} />}
 
             {title.recommendations.length > 0 && (
               <section className="mt-16" aria-labelledby="more">
@@ -153,7 +159,7 @@ const ORDERS = [
 
 type TvdbSeasons = { seasons: { number: number; episodes: Episode[] }[] };
 
-function Episodes({ seriesId, title }: { seriesId: string; title: Title }) {
+function Episodes({ seriesId, title, watched, onWatchedChange }: { seriesId: string; title: Title; watched: Set<string>; onWatchedChange: () => void }) {
   const regular = title.seasons.filter((s) => s.number > 0);
   const [order, setOrder] = useState("tmdb");
   const [tvdbReady, setTvdbReady] = useState(false);
@@ -244,7 +250,7 @@ function Episodes({ seriesId, title }: { seriesId: string; title: Title }) {
                     {e.stillPath && <img src={img(e.stillPath, "w300")!} alt="" loading="lazy" className="size-full object-cover" />}
                   </span>
                 )}
-                <div className="min-w-0">
+                <div className="min-w-0 flex-1">
                   <p className="font-medium">
                     <span className="mr-2 text-ink-3 tabular-nums">{e.number}.</span>
                     {e.title ?? `Episode ${e.number}`}
@@ -254,6 +260,10 @@ function Episodes({ seriesId, title }: { seriesId: string; title: Title }) {
                   </p>
                   {e.overview && <p className="mt-2 line-clamp-2 max-w-[75ch] text-sm leading-relaxed text-ink-2">{e.overview}</p>}
                 </div>
+                {/* Ticks use TMDB numbering, which is what Trakt and Zylo's history use. */}
+                {order === "tmdb" && e.number !== null && (
+                  <EpisodeTick seriesId={seriesId} season={seasonNo} episode={e.number} watched={watched.has(`${seasonNo}:${e.number}`)} onChange={onWatchedChange} />
+                )}
               </li>
             ))}
           </ol>

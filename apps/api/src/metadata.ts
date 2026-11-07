@@ -6,8 +6,10 @@ import { decrypt, encrypt } from "./secrets.js";
 import { pickTrailer, TMDB_BASE, tmdbClient, toCard, yearOf, type Card, type TmdbClient, type TmdbMovie, type TmdbSeries } from "./tmdb.js";
 import { TVDB_BASE, TVDB_ORDERS, tvdbClient, type TvdbClient, type TvdbEpisode, type TvdbOrder } from "./tvdb.js";
 import { UpstreamError } from "./http.js";
+import { TRAKT_BASE, traktClient, type TraktApp } from "./trakt.js";
 
 export const STALE_AFTER_MS = 7 * 86_400_000;
+export const STUB = "stub";
 const LANGUAGE = { type: "string", pattern: "^[a-z]{2}(-[A-Z]{2})?$" } as const;
 
 export class NotConfigured extends Error {
@@ -48,7 +50,7 @@ async function cached<T>(key: string, ttlMs: number, load: () => Promise<T>): Pr
 export function metadataService(db: PrismaClient, bases: { tmdb?: string; tvdb?: string } = {}) {
   const clients = new Map<string, { secret: string; client: TmdbClient | TvdbClient }>();
 
-  async function integration<S>(id: "tmdb" | "tvdb") {
+  async function integration<S>(id: "tmdb" | "tvdb" | "trakt") {
     const row = await db.integration.findUnique({ where: { id } });
     return row ? { row, secret: decrypt<S>(row.secret), settings: row.settings as { language?: string } } : null;
   }
@@ -172,8 +174,26 @@ export function metadataService(db: PrismaClient, bases: { tmdb?: string; tvdb?:
       where: { system_type_value: { system: "tmdb", type, value: String(tmdbId) } },
       include: { mediaItem: true },
     });
-    // Cached → serve it; the worker refreshes stale records. Missing → fetch now.
-    return ext?.mediaItem ?? fetchTitle(type, tmdbId);
+    // Cached → serve it; the worker refreshes stale records. Missing or only a stub → fetch now.
+    return ext && ext.mediaItem.language !== STUB ? ext.mediaItem : fetchTitle(type, tmdbId);
+  }
+
+  /**
+   * A placeholder for a title imported from elsewhere (e.g. Trakt) that TMDB hasn't filled in yet.
+   * The worker fills stubs first (oldest refreshedAt), and viewing one fetches it immediately.
+   */
+  async function ensureStub(type: TitleType, tmdbId: number, name: string, year: number | null) {
+    const ext = await db.externalId.findUnique({ where: { system_type_value: { system: "tmdb", type, value: String(tmdbId) } } });
+    if (ext) return ext.mediaItemId;
+    try {
+      const item = await db.mediaItem.create({
+        data: { type, title: name || "Untitled", year, language: STUB, refreshedAt: new Date(0), externalIds: { create: { system: "tmdb", type, value: String(tmdbId) } } },
+      });
+      return item.id;
+    } catch {
+      // Created concurrently by another sync: use that one.
+      return (await db.externalId.findUniqueOrThrow({ where: { system_type_value: { system: "tmdb", type, value: String(tmdbId) } } })).mediaItemId;
+    }
   }
 
   async function fetchSeason(series: MediaItem, seriesTmdbId: number, n: number) {
@@ -229,7 +249,7 @@ export function metadataService(db: PrismaClient, bases: { tmdb?: string; tvdb?:
   }
 
   /** Re-fetch stale (or wrong-language) films, series and seasons. Returns how many were refreshed. */
-  async function refreshStale(limit = 50) {
+  async function refreshStale(limit = 100) {
     const { language } = await tmdb();
     const stale = await db.mediaItem.findMany({
       where: {
@@ -259,7 +279,7 @@ export function metadataService(db: PrismaClient, bases: { tmdb?: string; tvdb?:
     return refreshed;
   }
 
-  return { integration, tmdb, tvdb, title, season, refreshStale };
+  return { integration, tmdb, tvdb, title, ensureStub, season, refreshStale };
 }
 
 export type MetadataService = ReturnType<typeof metadataService>;
@@ -306,6 +326,13 @@ function detail(item: MediaItem, region: string) {
   };
 }
 
+/** Poster card for a stored film or series (tmdb external id included by the caller). */
+export function cardOf(item: MediaItem & { externalIds: { system: string; value: string }[] }): Card | null {
+  const tmdb = item.externalIds.find((x) => x.system === "tmdb")?.value;
+  if (!tmdb || (item.type !== "movie" && item.type !== "series")) return null;
+  return { type: item.type, tmdbId: Number(tmdb), title: item.title, year: item.year, posterPath: item.posterPath };
+}
+
 const episodeView = (e: MediaItem) => ({
   id: e.id,
   number: e.episodeNumber,
@@ -323,17 +350,18 @@ export function registerMetadataRoutes(
   app: FastifyInstance,
   db: PrismaClient,
   guards: { requireUser: preHandlerHookHandler; requireAdmin: preHandlerHookHandler },
-  bases: { tmdb?: string; tvdb?: string } = {}, // injectable so tests can use a local mock
+  bases: { tmdb?: string; tvdb?: string; trakt?: string } = {}, // injectable so tests can use a local mock
 ) {
   const { requireUser, requireAdmin } = guards;
   const svc = metadataService(db, bases);
+  const INTEGRATIONS = ["tmdb", "tvdb", "trakt"] as const;
   const idParam = { type: "object", required: ["id"], properties: { id: { type: "integer", minimum: 1 } } } as const;
   const regionOf = (req: { user: { settings: unknown } }) => ((req.user.settings as { region?: string }).region ?? "GB");
 
   // Integrations (admin). Secrets go in, never come out.
   app.get("/integrations", { preHandler: requireAdmin }, async () => {
     const rows = await db.integration.findMany();
-    return (["tmdb", "tvdb"] as const).map((id) => {
+    return INTEGRATIONS.map((id) => {
       const row = rows.find((r) => r.id === id);
       return {
         id,
@@ -407,14 +435,18 @@ export function registerMetadataRoutes(
 
   app.post<{ Params: { id: string } }>(
     "/integrations/:id/test",
-    { preHandler: requireAdmin, schema: { params: { type: "object", properties: { id: { enum: ["tmdb", "tvdb"] } } } } },
+    { preHandler: requireAdmin, schema: { params: { type: "object", properties: { id: { enum: INTEGRATIONS } } } } },
     async (req, reply) => {
-      const id = req.params.id as "tmdb" | "tvdb";
+      const id = req.params.id as (typeof INTEGRATIONS)[number];
       if (!(await db.integration.findUnique({ where: { id } }))) return reply.code(404).send({ error: "Not connected." });
       let lastError: string | null = null;
       try {
         if (id === "tmdb") await (await svc.tmdb()).client.check();
-        else await (await svc.tvdb())!.check();
+        else if (id === "tvdb") await (await svc.tvdb())!.check();
+        else {
+          const app = (await svc.integration<TraktApp>("trakt"))!.secret;
+          await traktClient(app, bases.trakt ?? TRAKT_BASE).deviceCode();
+        }
       } catch (e) {
         lastError = (e as Error).message;
       }
@@ -425,7 +457,7 @@ export function registerMetadataRoutes(
 
   app.delete<{ Params: { id: string } }>(
     "/integrations/:id",
-    { preHandler: requireAdmin, schema: { params: { type: "object", properties: { id: { enum: ["tmdb", "tvdb"] } } } } },
+    { preHandler: requireAdmin, schema: { params: { type: "object", properties: { id: { enum: INTEGRATIONS } } } } },
     async (req, reply) => {
       await db.integration.deleteMany({ where: { id: req.params.id } });
       return reply.code(204).send();
@@ -512,4 +544,6 @@ export function registerMetadataRoutes(
       };
     },
   );
+
+  return svc;
 }

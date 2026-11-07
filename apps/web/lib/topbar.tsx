@@ -20,6 +20,9 @@ export function TopBar() {
           <SearchBox />
         </Suspense>
         <nav className="ml-auto flex items-center gap-1">
+          <Link href="/library" className="rounded-lg px-3 py-2 text-sm text-ink-2 transition-colors duration-150 hover:text-ink">
+            Library
+          </Link>
           <Link href="/settings" className="rounded-lg px-3 py-2 text-sm text-ink-2 transition-colors duration-150 hover:text-ink">
             Settings
           </Link>

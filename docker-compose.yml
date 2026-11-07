@@ -5,7 +5,8 @@ services:
     build: { context: ., target: web }
     ports:
       - "${ZYLO_PORT:-3000}:3000"
-    depends_on: [zylo-core]
+    depends_on:
+      zylo-core: { condition: service_healthy }
     restart: unless-stopped
 
   zylo-core:
@@ -14,8 +15,17 @@ services:
       DATABASE_URL: postgresql://zylo:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zylo
       ZYLO_SECRET: ${ZYLO_SECRET:?Set ZYLO_SECRET in .env (any random string of 32+ characters)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      REDIS_URL: redis://redis:6379
     depends_on:
       postgres: { condition: service_healthy }
+      redis: { condition: service_started }
+    # Healthy once migrations have run and the API answers; the worker and web wait for this.
+    healthcheck:
+      test: ["CMD", "node", "-e", "fetch('http://localhost:4000/health').then(r => process.exit(r.ok ? 0 : 1), () => process.exit(1))"]
+      interval: 5s
+      timeout: 5s
+      retries: 30
+      start_period: 20s
     restart: unless-stopped
 
   zylo-worker:
@@ -25,7 +35,9 @@ services:
       DATABASE_URL: postgresql://zylo:${POSTGRES_PASSWORD}@postgres:5432/zylo
       ZYLO_SECRET: ${ZYLO_SECRET}
       REDIS_URL: redis://redis:6379
-    depends_on: [zylo-core, redis]
+    depends_on:
+      zylo-core: { condition: service_healthy }
+      redis: { condition: service_started }
     restart: unless-stopped
 
   postgres:

@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings } from "@/lib/api";
+import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus } from "@/lib/api";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
 import { Avatar, Button, Field, FormError, Loading, Select } from "@/lib/ui";
@@ -21,6 +21,7 @@ export default function SettingsPage() {
 
   if (error) return <main className="p-8 text-sm text-danger">{error}</main>;
   if (!user || !profiles) return <Loading />;
+  const current = profiles.find((p) => p.id === activeProfileId());
 
   return (
     <>
@@ -45,6 +46,12 @@ export default function SettingsPage() {
           </ul>
           {profiles.length < 8 && <AddProfile onAdd={(p) => setProfiles([...profiles, p])} />}
         </Section>
+
+        {current && (
+          <Section id="trakt" title={`Trakt for ${current.name}`} lead="Bring this profile's watch history, ratings, watchlist and lists from Trakt, and keep them in sync both ways.">
+            <TraktConnection isAdmin={user.isAdmin} />
+          </Section>
+        )}
 
         <Section title="Preferences" lead="Your region decides which age ratings you see, and later what's available where you live.">
           <Preferences settings={user.settings} onSaved={(settings) => setUser({ ...user, settings })} />
@@ -316,12 +323,12 @@ function Integrations() {
     reload();
   }, []);
   if (!list) return <p className="text-sm text-ink-3">Loading…</p>;
-  const tmdb = list.find((i) => i.id === "tmdb")!;
-  const tvdb = list.find((i) => i.id === "tvdb")!;
+  const byId = (id: Integration["id"]) => list.find((i) => i.id === id)!;
   return (
     <>
-      <TmdbCard integration={tmdb} onChange={reload} />
-      <TvdbCard integration={tvdb} onChange={reload} />
+      <TmdbCard integration={byId("tmdb")} onChange={reload} />
+      <TraktAppCard integration={byId("trakt")} onChange={reload} />
+      <TvdbCard integration={byId("tvdb")} onChange={reload} />
     </>
   );
 }
@@ -482,5 +489,235 @@ function TvdbCard({ integration, onChange }: { integration: Integration; onChang
         </div>
       </form>
     </IntegrationCard>
+  );
+}
+
+function TraktAppCard({ integration, onChange }: { integration: Integration; onChange: () => void }) {
+  const [clientId, setClientId] = useState("");
+  const [clientSecret, setClientSecret] = useState("");
+  const { busy, run, feedback } = useAction(onChange);
+  return (
+    <IntegrationCard
+      name="Trakt"
+      integration={integration}
+      blurb={
+        <>
+          Lets each profile link its own Trakt account. Create an app at{" "}
+          <a href="https://trakt.tv/oauth/applications/new" target="_blank" rel="noreferrer" className="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink">
+            trakt.tv/oauth/applications
+          </a>{" "}
+          with the redirect URI <code className="rounded bg-sunken px-1 py-px text-xs">urn:ietf:wg:oauth:2.0:oob</code>, then paste its Client ID and Client Secret.
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run("save", async () => {
+            await api("/integrations/trakt", { method: "PUT", body: { clientId, clientSecret } });
+            setClientId("");
+            setClientSecret("");
+            return "Trakt app saved. Each profile can now connect in Settings > Trakt.";
+          });
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label="Client ID" type="password" autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)} required minLength={20} />
+          <Field label="Client Secret" type="password" autoComplete="off" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} required minLength={20} />
+        </div>
+        {feedback}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" busy={busy === "save"}>
+            {integration.connected ? "Replace app keys" : "Save Trakt app"}
+          </Button>
+          <DisconnectButtons id="trakt" connected={integration.connected} run={run} busy={busy} />
+        </div>
+      </form>
+    </IntegrationCard>
+  );
+}
+
+type DeviceCode = { userCode: string; verificationUrl: string; expiresIn: number; interval: number };
+
+function TraktConnection({ isAdmin }: { isAdmin: boolean }) {
+  const [status, setStatus] = useState<TraktStatus>();
+  const [code, setCode] = useState<DeviceCode>();
+  const [note, setNote] = useState<{ ok: boolean; text: string }>();
+  const [busy, setBusy] = useState<string>();
+  const load = () => api<TraktStatus>("/trakt").then(setStatus, (e) => setNote({ ok: false, text: e.message }));
+
+  useEffect(() => {
+    load();
+  }, []);
+
+  // While a sync is queued or running, check back every few seconds.
+  useEffect(() => {
+    // "Coming in now" only while the first sync is running.
+    if (status?.syncState === "idle") setNote((n) => (n?.text.startsWith("Connected") ? undefined : n));
+    if (!status || status.syncState === "idle") return;
+    const t = setTimeout(load, 3000);
+    return () => clearTimeout(t);
+  }, [status]);
+
+  // Poll Trakt (through Zylo) at the interval it asked for, until the code is used, refused or expires.
+  useEffect(() => {
+    if (!code) return;
+    let wait = code.interval * 1000;
+    let timer: ReturnType<typeof setTimeout>;
+    const tick = async () => {
+      try {
+        const r = await api<{ status: string }>("/trakt/connect/poll", { method: "POST" });
+        if (r.status === "connected") {
+          setCode(undefined);
+          setNote({ ok: true, text: "Connected. Your Trakt history is coming in now." });
+          return load();
+        }
+        if (r.status === "expired" || r.status === "invalid") return setCode(undefined), setNote({ ok: false, text: "That code ran out. Start again to get a new one." });
+        if (r.status === "denied") return setCode(undefined), setNote({ ok: false, text: "Access was declined on Trakt." });
+        if (r.status === "slow_down") wait += 1000;
+      } catch (e) {
+        setCode(undefined);
+        return setNote({ ok: false, text: (e as Error).message });
+      }
+      timer = setTimeout(tick, wait);
+    };
+    timer = setTimeout(tick, wait);
+    return () => clearTimeout(timer);
+  }, [code]);
+
+  if (!status) return <p className="text-sm text-ink-3">Loading…</p>;
+
+  const card = "flex flex-col gap-4 rounded-xl border border-line bg-surface p-4";
+  const feedback = note && (note.ok ? <p role="status" className="text-sm text-accent">{note.text}</p> : <FormError message={note.text} />);
+
+  if (!status.available)
+    return (
+      <div className={card}>
+        <p className="text-sm text-ink-2">
+          {isAdmin ? (
+            <>
+              Trakt isn't set up on this server yet. Add your Trakt app in{" "}
+              <a href="#integrations" className="font-medium text-ink underline decoration-line-strong underline-offset-2">
+                Integrations
+              </a>{" "}
+              first.
+            </>
+          ) : (
+            "Trakt isn't set up on this server yet. Ask whoever runs Zylo to add it."
+          )}
+        </p>
+      </div>
+    );
+
+  if (code)
+    return (
+      <div className={card} aria-live="polite">
+        <p className="text-sm text-ink-2">
+          Go to{" "}
+          <a href={code.verificationUrl} target="_blank" rel="noreferrer" className="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink">
+            {code.verificationUrl.replace(/^https?:\/\//, "")}
+          </a>{" "}
+          on any device and enter this code:
+        </p>
+        <p className="font-mono text-3xl font-semibold tracking-[0.2em] tabular-nums">{code.userCode}</p>
+        <p className="text-xs text-ink-3">Waiting for Trakt… this page updates by itself. The code works for {Math.round(code.expiresIn / 60)} minutes.</p>
+        <div>
+          <Button variant="quiet" onClick={() => setCode(undefined)}>
+            Cancel
+          </Button>
+        </div>
+      </div>
+    );
+
+  if (!status.connected)
+    return (
+      <div className={card}>
+        <p className="text-sm text-ink-2">Not connected. You'll get a short code to enter on trakt.tv; no password is shared with Zylo.</p>
+        {feedback}
+        <div>
+          <Button
+            busy={busy === "connect"}
+            onClick={async () => {
+              setBusy("connect");
+              setNote(undefined);
+              try {
+                setCode(await api<DeviceCode>("/trakt/connect", { method: "POST" }));
+              } catch (e) {
+                setNote({ ok: false, text: (e as Error).message });
+              }
+              setBusy(undefined);
+            }}
+          >
+            Connect Trakt
+          </Button>
+        </div>
+      </div>
+    );
+
+  const syncing = status.syncState !== "idle";
+  return (
+    <div className={card}>
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <p className="font-medium">@{status.username}</p>
+        <span className={`text-xs ${status.lastError ? "text-danger" : "text-accent"}`} role="status">
+          {syncing
+            ? status.syncState === "queued"
+              ? "Sync queued…"
+              : "Syncing…"
+            : status.lastError
+              ? `Last sync failed: ${status.lastError}`
+              : status.lastSyncAt
+                ? `Synced ${new Date(status.lastSyncAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" })}`
+                : "Not synced yet"}
+        </span>
+      </div>
+      {status.pendingChanges > 0 && (
+        <p className="text-sm text-ink-2">
+          {status.pendingChanges} {status.pendingChanges === 1 ? "change is" : "changes are"} waiting to reach Trakt. Zylo keeps retrying.
+        </p>
+      )}
+      <label className="flex items-center gap-3 text-sm">
+        <input
+          type="checkbox"
+          checked={status.syncEnabled}
+          onChange={async (e) => {
+            await api("/trakt", { method: "PATCH", body: { syncEnabled: e.target.checked } }).catch(() => {});
+            load();
+          }}
+          className="size-4 accent-[var(--accent)]"
+        />
+        Sync automatically every 15 minutes
+      </label>
+      {feedback}
+      <div className="flex flex-wrap gap-2">
+        <Button
+          variant="quiet"
+          busy={busy === "sync" || syncing}
+          onClick={async () => {
+            setBusy("sync");
+            setNote(undefined);
+            await api("/trakt/sync", { method: "POST" }).catch((e) => setNote({ ok: false, text: e.message }));
+            await load();
+            setBusy(undefined);
+          }}
+        >
+          Sync now
+        </Button>
+        <Button
+          variant="danger"
+          busy={busy === "disconnect"}
+          onClick={async () => {
+            setBusy("disconnect");
+            await api("/trakt", { method: "DELETE" }).catch(() => {});
+            setNote({ ok: true, text: "Disconnected. Your history, ratings and lists stay in Zylo." });
+            await load();
+            setBusy(undefined);
+          }}
+        >
+          Disconnect
+        </Button>
+      </div>
+    </div>
   );
 }

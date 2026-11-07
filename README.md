@@ -2,7 +2,7 @@
 
 One interface. Your entire media world.
 
-Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack) and **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders). The full plan is in the master specification.
+Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) and **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways). The full plan is in the master specification.
 
 ## Run it
 
@@ -17,6 +17,8 @@ Open http://localhost:3000. The first visit asks you to create the admin account
 
 Then connect metadata: **Settings > Integrations > TMDB**. Create a free account at themoviedb.org, open Settings > API, and paste the *API Read Access Token*. TheTVDB is optional and adds DVD, absolute and other episode orders.
 
+To use Trakt: create an app at trakt.tv/oauth/applications with the redirect URI `urn:ietf:wg:oauth:2.0:oob`, paste its Client ID and Secret under **Settings > Integrations > Trakt**, then each profile connects its own account under **Settings > Trakt** with a short code.
+
 Update later with `docker compose up -d --build`. Database migrations run automatically when `zylo-core` starts.
 
 **Upgrading from Phase 1:** add a `ZYLO_SECRET` line to your `.env` first (see `.env.example`), or Compose will refuse to start.
@@ -27,7 +29,7 @@ Update later with `docker compose up -d --build`. Database migrations run automa
 |---|---|
 | `zylo-web` | Next.js app on port 3000. Proxies `/api/*` to `zylo-core`, so the browser only talks to one address |
 | `zylo-core` | Fastify API: accounts, profiles, settings, integrations, metadata. OpenAPI at `/api/openapi.json` |
-| `zylo-worker` | BullMQ background worker (same image as `zylo-core`). Hourly: refreshes titles older than 7 days, or in the wrong language |
+| `zylo-worker` | BullMQ background worker (same image as `zylo-core`). Every 15 minutes: syncs Trakt for each connected profile, and fills in or refreshes title details. Waits for `zylo-core` to be healthy |
 | `postgres`, `redis` | Data and queue |
 
 Only port 3000 is exposed. Put Zylo behind HTTPS (for example Caddy) before exposing it to the internet, then set `COOKIE_SECURE=true`.
@@ -64,3 +66,14 @@ TEST_DATABASE_URL=postgresql://zylo:zylo@localhost:5432/zylo_test pnpm test
 - TVDB episode orders are shown as TVDB lists them. Linking them to Zylo's own episode records arrives with anime support (Phase 7), where numbering matters most.
 - TMDB attribution appears at the foot of every page that shows TMDB data, as their terms require. Their terms also ask for the TMDB logo: drop the official logo from themoviedb.org/about/logos-attribution into the footer before sharing Zylo with anyone.
 - Cast and crew live inside each title's record for now; a separate `people` table arrives when person pages do.
+
+## Phase 3 decisions
+
+- **Each profile links its own Trakt account** (device-code sign-in: a short code entered at trakt.tv/activate, no password shared). The admin registers one Trakt app for the server.
+- **Zylo keeps its own history, ratings, watchlist and lists** for every profile, so everything works with Trakt disconnected. Disconnecting keeps them.
+- **First sync merges both ways:** Trakt data comes in, and anything rated, watched or watchlisted in Zylo beforehand goes up. **After that, Trakt wins** for ratings, watchlist and lists, so removals on trakt.tv disappear here too. Watch history is only ever added to.
+- **Changes made in Zylo go to Trakt straight away.** If Trakt is unreachable they wait in an outbox and retry on each sync (up to 20 tries), shown as "changes waiting" in Settings.
+- Trakt access tokens last 24 hours; Zylo refreshes them automatically an hour before expiry.
+- Imported titles start as placeholders and fill in from TMDB straight after each sync (100 at a time), or instantly when opened.
+- Trakt lists are read-only in Zylo; edit them on trakt.tv. Seasons and people in lists are skipped.
+- Scrobbling (live progress while playing) arrives with the player in Phase 5.

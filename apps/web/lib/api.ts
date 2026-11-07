@@ -11,9 +11,11 @@ export class ApiError extends Error {
 }
 
 export async function api<T = unknown>(path: string, init?: { method?: string; body?: unknown }): Promise<T> {
+  const profile = activeProfileId();
   const res = await fetch(`/api${path}`, {
     method: init?.method ?? "GET",
-    headers: init?.body ? { "content-type": "application/json" } : {},
+    // The active profile scopes history, ratings, lists and Trakt.
+    headers: { ...(init?.body ? { "content-type": "application/json" } : {}), ...(profile && { "x-zylo-profile": profile }) },
     body: init?.body ? JSON.stringify(init.body) : undefined,
   });
   if (res.status === 204) return undefined as T;
@@ -93,9 +95,42 @@ export type Episode = {
   runtime: number | null;
   stillPath?: string | null;
 };
-export type Integration = { id: "tmdb" | "tvdb"; connected: boolean; settings: { language?: string }; lastCheckedAt: string | null; lastError: string | null };
+export type Integration = { id: "tmdb" | "tvdb" | "trakt"; connected: boolean; settings: { language?: string }; lastCheckedAt: string | null; lastError: string | null };
 
 /** TMDB image URL. Sizes: w92 w154 w185 w342 w500 w780 original (posters); w300 w780 w1280 (backdrops). */
 export const img = (path: string | null | undefined, size: string) => (path ? `https://image.tmdb.org/t/p/${size}${path}` : null);
 
 export const titleHref = (c: { type: "movie" | "series"; tmdbId: number }) => `/title/${c.type}/${c.tmdbId}`;
+
+// --- tracking ---
+
+export type TitleState = {
+  plays: number;
+  lastWatchedAt: string | null;
+  rating: number | null;
+  inWatchlist: boolean;
+  watchedEpisodes: string[]; // "season:episode"
+  episodeRatings: Record<string, number>;
+};
+export type TraktStatus = {
+  available: boolean;
+  connected: boolean;
+  username: string | null;
+  syncEnabled: boolean;
+  syncState: "idle" | "queued" | "running";
+  lastSyncAt: string | null;
+  lastError: string | null;
+  pendingChanges: number;
+};
+export type Library = {
+  watchlist: Card[];
+  lists: { id: string; name: string; description: string | null; count: number }[];
+  history: { card: Card; season: number | null; episode: number | null; watchedAt: string }[];
+  stats: { filmsWatched: number; episodesWatched: number; ratings: number };
+};
+
+export const RATING_LABELS: Record<number, string> = {
+  10: "Masterpiece", 9: "Superb", 8: "Great", 7: "Good", 6: "Fair", 5: "Meh", 4: "Poor", 3: "Bad", 2: "Terrible", 1: "Awful",
+};
+
+export const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });

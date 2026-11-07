@@ -5,7 +5,9 @@ import swagger from "@fastify/swagger";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
-import { PrismaClient, type User } from "./generated/prisma/client.js";
+import { PrismaClient, type Profile, type User } from "./generated/prisma/client.js";
+import { registerLibraryRoutes } from "./library.js";
+import { traktService } from "./trakt.js";
 import { UpstreamError } from "./http.js";
 import { NotConfigured, registerMetadataRoutes } from "./metadata.js";
 
@@ -70,10 +72,18 @@ type Settings = typeof DEFAULT_SETTINGS;
 declare module "fastify" {
   interface FastifyRequest {
     user: User;
+    profile: Profile;
   }
 }
 
-export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; logger?: boolean; bases?: { tmdb?: string; tvdb?: string } }) {
+export function buildApp(opts: {
+  databaseUrl: string;
+  secureCookies?: boolean;
+  logger?: boolean;
+  bases?: { tmdb?: string; tvdb?: string; trakt?: string };
+  /** Hand a Trakt sync to the worker. Without one (tests), syncs run inline. */
+  enqueueTraktSync?: (profileId: string) => Promise<void>;
+}) {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: opts.databaseUrl }) });
   const app = Fastify({ logger: opts.logger ?? false });
 
@@ -121,6 +131,16 @@ export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; l
     await requireUser(req, reply);
     if (reply.sent) return;
     if (!req.user.isAdmin) return reply.code(403).send({ error: "Only the server admin can change this." });
+  };
+
+  // The active profile travels in a header; it must belong to the signed-in user.
+  const requireProfile = async (req: FastifyRequest, reply: FastifyReply) => {
+    await requireUser(req, reply);
+    if (reply.sent) return;
+    const id = req.headers["x-zylo-profile"];
+    const profile = typeof id === "string" && /^[0-9a-f-]{36}$/.test(id) ? await db.profile.findFirst({ where: { id, userId: req.user.id } }) : null;
+    if (!profile) return reply.code(400).send({ error: "Pick a profile first." });
+    req.profile = profile;
   };
 
   const publicUser = (u: User) => ({
@@ -270,7 +290,14 @@ export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; l
       return count ? reply.code(204).send() : reply.code(404).send({ error: "Profile not found." });
     });
 
-    registerMetadataRoutes(app, db, { requireUser, requireAdmin }, opts.bases);
+    const metadata = registerMetadataRoutes(app, db, { requireUser, requireAdmin }, opts.bases);
+    const trakt = traktService(db, metadata, opts.bases?.trakt);
+    const enqueueSync = async (profileId: string) => {
+      await db.traktAccount.updateMany({ where: { profileId }, data: { syncState: "queued" } });
+      if (opts.enqueueTraktSync) return opts.enqueueTraktSync(profileId);
+      await trakt.sync(profileId).catch(() => {}); // errors are recorded on the account
+    };
+    registerLibraryRoutes(app, db, { requireUser, requireAdmin, requireProfile }, { metadata, trakt, enqueueSync, traktBase: opts.bases?.trakt });
 
     // --- settings ---
 

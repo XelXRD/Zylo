@@ -69,6 +69,9 @@ model MediaItem {
   refreshedAt   DateTime     @default(now())
   createdAt     DateTime     @default(now())
   externalIds   ExternalId[]
+  watchEvents   WatchEvent[]
+  ratings       Rating[]
+  inCollections CollectionItem[]
 
   @@index([parentId])
   @@index([refreshedAt])
@@ -94,5 +97,92 @@ model Profile {
   color     String
   createdAt DateTime @default(now())
 
+  trakt          TraktAccount?
+  watchEvents    WatchEvent[]
+  ratings        Rating[]
+  collections    Collection[]
+  traktOutbox    TraktOutbox[]
+
   @@unique([userId, name])
+}
+
+// --- Phase 3: per-profile tracking. Zylo keeps its own copy so it works without Trakt. ---
+
+model TraktAccount {
+  profileId      String    @id
+  profile        Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  secret         String // encrypted { accessToken, refreshToken }
+  expiresAt      DateTime
+  username       String
+  syncEnabled    Boolean   @default(true)
+  syncState      String    @default("idle") // idle | queued | running
+  lastSyncAt     DateTime?
+  lastActivities Json?
+  lastError      String?
+  createdAt      DateTime  @default(now())
+}
+
+// Episodes are identified by their series + season/episode number; -1 means "not an episode".
+model WatchEvent {
+  id            String    @id @default(uuid())
+  profileId     String
+  profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  mediaItemId   String
+  mediaItem     MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  seasonNumber  Int       @default(-1)
+  episodeNumber Int       @default(-1)
+  watchedAt     DateTime
+  source        String // zylo | trakt
+
+  @@unique([profileId, mediaItemId, seasonNumber, episodeNumber, watchedAt])
+  @@index([profileId, watchedAt])
+}
+
+model Rating {
+  profileId     String
+  profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  mediaItemId   String
+  mediaItem     MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  seasonNumber  Int       @default(-1)
+  episodeNumber Int       @default(-1)
+  rating        Int // 1-10, as Trakt
+  ratedAt       DateTime
+
+  @@id([profileId, mediaItemId, seasonNumber, episodeNumber])
+}
+
+// The watchlist (key "watchlist") and personal lists (key "trakt:<id>").
+model Collection {
+  id          String           @id @default(uuid())
+  profileId   String
+  profile     Profile          @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  key         String
+  name        String
+  description String?
+  updatedAt   DateTime         @updatedAt
+  items       CollectionItem[]
+
+  @@unique([profileId, key])
+}
+
+model CollectionItem {
+  collectionId String
+  collection   Collection @relation(fields: [collectionId], references: [id], onDelete: Cascade)
+  mediaItemId  String
+  mediaItem    MediaItem  @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  addedAt      DateTime   @default(now())
+
+  @@id([collectionId, mediaItemId])
+}
+
+// Changes Zylo couldn't push to Trakt yet; retried on every sync.
+model TraktOutbox {
+  id        String   @id @default(uuid())
+  profileId String
+  profile   Profile  @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  path      String
+  body      Json
+  attempts  Int      @default(0)
+  lastError String?
+  createdAt DateTime @default(now())
 }

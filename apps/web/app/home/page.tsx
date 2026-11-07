@@ -15,6 +15,7 @@ export default function HomePage() {
   const [connected, setConnected] = useState<boolean>();
   const [trending, setTrending] = useState<Card[]>();
   const [trendingError, setTrendingError] = useState<string>();
+  const [recommended, setRecommended] = useState<Card[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -25,7 +26,10 @@ export default function HomePage() {
     });
     api<{ tmdb: boolean }>("/metadata/status").then(({ tmdb }) => {
       setConnected(tmdb);
-      if (tmdb) api<{ results: Card[] }>("/discover/trending").then((r) => setTrending(r.results), (e) => setTrendingError(e.message));
+      if (!tmdb) return;
+      api<{ results: Card[] }>("/discover/trending").then((r) => setTrending(r.results), (e) => setTrendingError(e.message));
+      // Only shows when this profile has Trakt connected; quietly empty otherwise.
+      api<{ results: Card[] }>("/discover/recommended").then((r) => setRecommended(r.results), () => {});
     });
   }, [user, router]);
 
@@ -55,7 +59,19 @@ export default function HomePage() {
             )}
           </section>
         ) : (
-          <section className="mt-10" aria-labelledby="trending">
+          <>
+          {recommended.length > 0 && (
+            <section className="mt-10" aria-labelledby="recommended">
+              <h2 id="recommended" className="text-lg font-semibold">
+                Recommended for you
+              </h2>
+              <p className="mt-1 text-sm text-ink-3">From your Trakt history.</p>
+              <div className="mt-5">
+                <PosterGrid cards={recommended.slice(0, 12)} />
+              </div>
+            </section>
+          )}
+          <section className={recommended.length ? "mt-16" : "mt-10"} aria-labelledby="trending">
             <h2 id="trending" className="text-lg font-semibold">
               Trending this week
             </h2>
@@ -69,6 +85,7 @@ export default function HomePage() {
               )}
             </div>
           </section>
+          </>
         )}
       </main>
       {connected && <TmdbAttribution />}
