@@ -12,16 +12,20 @@ services:
     build: { context: ., target: api }
     environment:
       DATABASE_URL: postgresql://zylo:${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD in .env}@postgres:5432/zylo
+      ZYLO_SECRET: ${ZYLO_SECRET:?Set ZYLO_SECRET in .env (any random string of 32+ characters)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
     depends_on:
       postgres: { condition: service_healthy }
     restart: unless-stopped
 
   zylo-worker:
-    build: { context: ., target: worker }
+    build: { context: ., target: api }
+    command: ["pnpm", "worker"]
     environment:
+      DATABASE_URL: postgresql://zylo:${POSTGRES_PASSWORD}@postgres:5432/zylo
+      ZYLO_SECRET: ${ZYLO_SECRET}
       REDIS_URL: redis://redis:6379
-    depends_on: [redis]
+    depends_on: [zylo-core, redis]
     restart: unless-stopped
 
   postgres:

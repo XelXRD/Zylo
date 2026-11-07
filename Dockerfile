@@ -1,23 +1,19 @@
-# One Dockerfile, three targets: api (zylo-core), worker, web.
+# One Dockerfile, two targets: api (zylo-core and zylo-worker) and web.
 FROM node:22-slim AS base
 RUN corepack enable
 WORKDIR /app
 COPY package.json pnpm-lock.yaml pnpm-workspace.yaml ./
 COPY apps/api/package.json apps/api/
-COPY apps/worker/package.json apps/worker/
 COPY apps/web/package.json apps/web/
 RUN pnpm install --frozen-lockfile
 COPY . .
 
-# ponytail: api and worker ship full node_modules and run TypeScript via tsx; slim images if size matters
+# zylo-core and zylo-worker share this image; the worker just runs a different command.
+# ponytail: ships full node_modules and runs TypeScript via tsx; slim the image if size matters
 FROM base AS api
 WORKDIR /app/apps/api
 RUN DATABASE_URL=postgresql://unused@localhost/unused pnpm exec prisma generate
 EXPOSE 4000
-CMD ["pnpm", "start"]
-
-FROM base AS worker
-WORKDIR /app/apps/worker
 CMD ["pnpm", "start"]
 
 FROM base AS web-build

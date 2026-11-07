@@ -6,8 +6,10 @@
     "dev": "tsx watch --env-file=../../.env src/server.ts",
     "start": "prisma migrate deploy && tsx src/server.ts",
     "generate": "prisma generate",
-    "test": "tsx --test src/api.test.ts",
-    "typecheck": "tsc --noEmit"
+    "test": "tsx --test --test-concurrency=1 src/*.test.ts",
+    "typecheck": "tsc --noEmit",
+    "worker": "tsx src/worker.ts",
+    "dev:worker": "tsx watch --env-file=../../.env src/worker.ts"
   },
   "dependencies": {
     "@fastify/cookie": "11.1.5",
@@ -15,7 +17,9 @@
     "@fastify/swagger": "9.9.3",
     "@prisma/adapter-pg": "7.10.1",
     "@prisma/client": "7.10.1",
+    "bullmq": "6.7.2",
     "fastify": "5.12.8",
+    "ioredis": "6.0.0",
     "prisma": "7.10.1",
     "tsx": "4.23.15"
   },

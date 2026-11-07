@@ -5,7 +5,7 @@
   "scripts": {
     "dev:api": "pnpm --filter @zylo/api dev",
     "dev:web": "pnpm --filter @zylo/web dev",
-    "dev:worker": "pnpm --filter @zylo/worker dev",
+    "dev:worker": "pnpm --filter @zylo/api dev:worker",
     "test": "pnpm --filter @zylo/api test"
   },
   "pnpm": {

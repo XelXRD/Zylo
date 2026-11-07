@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Profile, type ProfileColor, type Settings } from "@/lib/api";
+import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings } from "@/lib/api";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
 import { Avatar, Button, Field, FormError, Loading, Select } from "@/lib/ui";
@@ -22,11 +22,9 @@ export default function SettingsPage() {
   if (error) return <main className="p-8 text-sm text-danger">{error}</main>;
   if (!user || !profiles) return <Loading />;
 
-  const current = profiles.find((p) => p.id === activeProfileId());
-
   return (
     <>
-      <TopBar profile={current} />
+      <TopBar />
       <main className="mx-auto max-w-3xl px-6 pb-24 pt-12">
         <h1 className="text-2xl font-semibold leading-tight tracking-tight">Settings</h1>
 
@@ -48,9 +46,15 @@ export default function SettingsPage() {
           {profiles.length < 8 && <AddProfile onAdd={(p) => setProfiles([...profiles, p])} />}
         </Section>
 
-        <Section title="Preferences" lead="Used for titles, release dates and what's available where you live.">
+        <Section title="Preferences" lead="Your region decides which age ratings you see, and later what's available where you live.">
           <Preferences settings={user.settings} onSaved={(settings) => setUser({ ...user, settings })} />
         </Section>
+
+        {user.isAdmin && (
+          <Section id="integrations" title="Integrations" lead="Server-wide connections. Keys are encrypted and never shown again after saving.">
+            <Integrations />
+          </Section>
+        )}
 
         <Section title="Account" lead={`Signed in as ${user.email}${user.isAdmin ? " · server admin" : ""}.`}>
           <ChangePassword />
@@ -229,18 +233,11 @@ function Preferences({ settings, onSaved }: { settings: Settings; onSaved: (s: S
   };
 
   return (
-    <div className="grid gap-4 rounded-xl border border-line bg-surface p-4 sm:grid-cols-3">
+    <div className="grid gap-4 rounded-xl border border-line bg-surface p-4 sm:grid-cols-2">
       <Select label="Theme" value={settings.theme} onChange={(e) => save({ theme: e.target.value as Settings["theme"] })}>
         <option value="system">Match device</option>
         <option value="dark">Dark</option>
         <option value="light">Light</option>
-      </Select>
-      <Select label="Language" value={settings.language} onChange={(e) => save({ language: e.target.value })}>
-        {LANGUAGES.map((l) => (
-          <option key={l} value={l}>
-            {langName.of(l)}
-          </option>
-        ))}
       </Select>
       <Select label="Region" value={settings.region} onChange={(e) => save({ region: e.target.value })}>
         {REGIONS.map((r) => (
@@ -249,7 +246,7 @@ function Preferences({ settings, onSaved }: { settings: Settings; onSaved: (s: S
           </option>
         ))}
       </Select>
-      <p role="status" className="text-xs text-ink-3 sm:col-span-3">
+      <p role="status" className="text-xs text-ink-3 sm:col-span-2">
         {status ?? "Changes save automatically."}
       </p>
     </div>
@@ -309,5 +306,181 @@ function SignOut() {
         Sign out
       </Button>
     </div>
+  );
+}
+
+function Integrations() {
+  const [list, setList] = useState<Integration[]>();
+  const reload = () => api<Integration[]>("/integrations").then(setList);
+  useEffect(() => {
+    reload();
+  }, []);
+  if (!list) return <p className="text-sm text-ink-3">Loading…</p>;
+  const tmdb = list.find((i) => i.id === "tmdb")!;
+  const tvdb = list.find((i) => i.id === "tvdb")!;
+  return (
+    <>
+      <TmdbCard integration={tmdb} onChange={reload} />
+      <TvdbCard integration={tvdb} onChange={reload} />
+    </>
+  );
+}
+
+function StatusLine({ integration }: { integration: Integration }) {
+  if (!integration.connected) return <span className="text-xs text-ink-3">Not connected</span>;
+  if (integration.lastError) return <span className="text-xs text-danger">Connected, but the last check failed: {integration.lastError}</span>;
+  const when = integration.lastCheckedAt ? new Date(integration.lastCheckedAt).toLocaleString("en-GB", { dateStyle: "medium", timeStyle: "short" }) : null;
+  return <span className="text-xs text-accent">Connected{when ? ` · checked ${when}` : ""}</span>;
+}
+
+function IntegrationCard({ name, blurb, integration, children }: { name: string; blurb: React.ReactNode; integration: Integration; children: React.ReactNode }) {
+  return (
+    <div className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-4">
+      <div className="flex flex-wrap items-baseline justify-between gap-2">
+        <h3 className="font-semibold">{name}</h3>
+        <StatusLine integration={integration} />
+      </div>
+      <p className="max-w-[65ch] text-sm leading-relaxed text-ink-2">{blurb}</p>
+      {children}
+    </div>
+  );
+}
+
+function useAction(onDone: () => void) {
+  const [busy, setBusy] = useState<string>();
+  const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
+  const run = async (key: string, fn: () => Promise<string | void>) => {
+    setBusy(key);
+    setMsg(undefined);
+    try {
+      const text = await fn();
+      if (text) setMsg({ ok: true, text });
+      onDone();
+    } catch (e) {
+      setMsg({ ok: false, text: (e as Error).message });
+    }
+    setBusy(undefined);
+  };
+  const feedback = msg && (msg.ok ? <p role="status" className="text-sm text-accent">{msg.text}</p> : <FormError message={msg.text} />);
+  return { busy, run, feedback };
+}
+
+function DisconnectButtons({ id, connected, run, busy }: { id: string; connected: boolean; run: ReturnType<typeof useAction>["run"]; busy?: string }) {
+  if (!connected) return null;
+  return (
+    <>
+      <Button
+        type="button"
+        variant="quiet"
+        busy={busy === "test"}
+        onClick={() =>
+          run("test", async () => {
+            const r = await api<{ ok: boolean; error: string | null }>(`/integrations/${id}/test`, { method: "POST" });
+            if (!r.ok) throw new Error(r.error ?? "The check failed.");
+            return "Connection works.";
+          })
+        }
+      >
+        Test connection
+      </Button>
+      <Button type="button" variant="danger" busy={busy === "remove"} onClick={() => run("remove", async () => void (await api(`/integrations/${id}`, { method: "DELETE" })))}>
+        Disconnect
+      </Button>
+    </>
+  );
+}
+
+function TmdbCard({ integration, onChange }: { integration: Integration; onChange: () => void }) {
+  const [token, setToken] = useState("");
+  const [language, setLanguage] = useState(integration.settings.language ?? "en-GB");
+  const { busy, run, feedback } = useAction(onChange);
+  return (
+    <IntegrationCard
+      name="TMDB"
+      integration={integration}
+      blurb={
+        <>
+          Films, series, posters and trailers. Free for personal use: create an account at themoviedb.org, then copy the{" "}
+          <strong className="font-medium text-ink">API Read Access Token</strong> from Settings &gt; API.
+        </>
+      }
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run("save", async () => {
+            await api("/integrations/tmdb", { method: "PUT", body: token ? { token, language } : { language } });
+            setToken("");
+            return token ? "TMDB connected." : "Language saved. Titles update in the background over the next hour.";
+          });
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-[1fr_14rem]">
+          <Field
+            label={integration.connected ? "Replace token" : "API Read Access Token"}
+            type="password"
+            autoComplete="off"
+            value={token}
+            onChange={(e) => setToken(e.target.value)}
+            required={!integration.connected}
+            minLength={20}
+            hint={integration.connected ? "Leave blank to keep the current token." : undefined}
+          />
+          <Select label="Metadata language" value={language} onChange={(e) => setLanguage(e.target.value)}>
+            {LANGUAGES.map((l) => (
+              <option key={l} value={l}>
+                {langName.of(l)}
+              </option>
+            ))}
+          </Select>
+        </div>
+        {feedback}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" busy={busy === "save"} disabled={integration.connected && !token && language === (integration.settings.language ?? "en-GB")}>
+            {integration.connected ? "Save changes" : "Connect TMDB"}
+          </Button>
+          <DisconnectButtons id="tmdb" connected={integration.connected} run={run} busy={busy} />
+        </div>
+      </form>
+    </IntegrationCard>
+  );
+}
+
+function TvdbCard({ integration, onChange }: { integration: Integration; onChange: () => void }) {
+  const [apikey, setApikey] = useState("");
+  const [pin, setPin] = useState("");
+  const { busy, run, feedback } = useAction(onChange);
+  return (
+    <IntegrationCard
+      name="TheTVDB"
+      integration={integration}
+      blurb="Optional. Adds DVD, absolute and other episode orders to series. TVDB issues keys per project: paste your project key, plus your subscriber PIN if your key is user-supported."
+    >
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(e) => {
+          e.preventDefault();
+          run("save", async () => {
+            await api("/integrations/tvdb", { method: "PUT", body: { apikey, ...(pin && { pin }) } });
+            setApikey("");
+            setPin("");
+            return "TheTVDB connected.";
+          });
+        }}
+      >
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field label={integration.connected ? "Replace API key" : "API key"} type="password" autoComplete="off" value={apikey} onChange={(e) => setApikey(e.target.value)} required minLength={8} />
+          <Field label="Subscriber PIN" type="password" autoComplete="off" value={pin} onChange={(e) => setPin(e.target.value)} hint="Only for user-supported keys." />
+        </div>
+        {feedback}
+        <div className="flex flex-wrap gap-2">
+          <Button type="submit" busy={busy === "save"}>
+            {integration.connected ? "Save key" : "Connect TheTVDB"}
+          </Button>
+          <DisconnectButtons id="tvdb" connected={integration.connected} run={run} busy={busy} />
+        </div>
+      </form>
+    </IntegrationCard>
   );
 }

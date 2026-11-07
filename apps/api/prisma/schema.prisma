@@ -29,6 +29,63 @@ model Session {
   @@index([userId])
 }
 
+// Server-wide connections (TMDB, TVDB, later Trakt and others). Admin-managed.
+model Integration {
+  id            String    @id // "tmdb" | "tvdb"
+  secret        String // AES-256-GCM encrypted JSON; never sent to the browser
+  settings      Json      @default("{}")
+  lastCheckedAt DateTime?
+  lastError     String?
+  updatedAt     DateTime  @updatedAt
+}
+
+enum MediaType {
+  movie
+  series
+  season
+  episode
+}
+
+// One canonical record per film, series, season and episode.
+model MediaItem {
+  id            String       @id @default(uuid())
+  type          MediaType
+  parentId      String?
+  parent        MediaItem?   @relation("Children", fields: [parentId], references: [id], onDelete: Cascade)
+  children      MediaItem[]  @relation("Children")
+  title         String
+  originalTitle String?
+  overview      String?
+  year          Int?
+  releaseDate   String? // ISO date as published; no timezone
+  runtime       Int? // minutes
+  posterPath    String?
+  backdropPath  String?
+  rating        Float?
+  seasonNumber  Int?
+  episodeNumber Int?
+  data          Json         @default("{}") // genres, cast, trailer, certifications, seasons, recommendations
+  language      String
+  refreshedAt   DateTime     @default(now())
+  createdAt     DateTime     @default(now())
+  externalIds   ExternalId[]
+
+  @@index([parentId])
+  @@index([refreshedAt])
+}
+
+// IDs from other systems. TMDB movie and TV ids share number space, so `type` is part of the key.
+model ExternalId {
+  mediaItemId String
+  mediaItem   MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  system      String // tmdb | tvdb | imdb
+  type        MediaType
+  value       String
+
+  @@id([system, type, value])
+  @@index([mediaItemId])
+}
+
 model Profile {
   id        String   @id @default(uuid())
   userId    String

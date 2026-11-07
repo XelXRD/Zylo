@@ -1,4 +1,4 @@
-import Fastify, { type FastifyReply, type FastifyRequest } from "fastify";
+import Fastify, { type FastifyError, type FastifyReply, type FastifyRequest } from "fastify";
 import cookie from "@fastify/cookie";
 import rateLimit from "@fastify/rate-limit";
 import swagger from "@fastify/swagger";
@@ -6,6 +6,8 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { PrismaClient, type User } from "./generated/prisma/client.js";
+import { UpstreamError } from "./http.js";
+import { NotConfigured, registerMetadataRoutes } from "./metadata.js";
 
 const scryptAsync = promisify(scrypt) as (pw: string, salt: Buffer, len: number) => Promise<Buffer>;
 
@@ -14,7 +16,8 @@ const SESSION_DAYS = 30;
 const MAX_PROFILES = 8;
 export const PROFILE_COLORS = ["teal", "amber", "rose", "violet", "sky", "lime", "orange", "slate"] as const;
 
-const DEFAULT_SETTINGS = { language: "en-GB", region: "GB", theme: "system" };
+// Metadata language is server-wide (Settings > Integrations > TMDB); region is per user.
+const DEFAULT_SETTINGS = { region: "GB", theme: "system" };
 
 // --- passwords + sessions ---------------------------------------------------
 
@@ -54,7 +57,6 @@ const settingsBody = {
   type: "object",
   additionalProperties: false,
   properties: {
-    language: { type: "string", pattern: "^[a-z]{2}(-[A-Z]{2})?$" },
     region: { type: "string", pattern: "^[A-Z]{2}$" },
     theme: { type: "string", enum: ["system", "light", "dark"] },
   },
@@ -71,7 +73,7 @@ declare module "fastify" {
   }
 }
 
-export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; logger?: boolean }) {
+export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; logger?: boolean; bases?: { tmdb?: string; tvdb?: string } }) {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: opts.databaseUrl }) });
   const app = Fastify({ logger: opts.logger ?? false });
 
@@ -81,6 +83,15 @@ export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; l
     openapi: { info: { title: "Zylo API", version: "0.1.0" } },
   });
   app.addHook("onClose", () => db.$disconnect());
+
+  // Integration failures become plain-English JSON; everything else keeps Fastify's default shape.
+  app.setErrorHandler((err: FastifyError, _req, reply) => {
+    if (err instanceof NotConfigured) return reply.code(409).send({ error: err.message, code: err.code });
+    if (err instanceof UpstreamError && err.status === 404) return reply.code(404).send({ error: `${err.service} doesn't have that title.` });
+    if (err instanceof UpstreamError) return reply.code(502).send({ error: `${err.service}: ${err.message}` });
+    if (!err.statusCode || err.statusCode >= 500) app.log.error(err);
+    return reply.send(err);
+  });
 
   const startSession = async (reply: FastifyReply, userId: string) => {
     const token = randomBytes(32).toString("base64url");
@@ -106,11 +117,20 @@ export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; l
     req.user = session.user;
   };
 
+  const requireAdmin = async (req: FastifyRequest, reply: FastifyReply) => {
+    await requireUser(req, reply);
+    if (reply.sent) return;
+    if (!req.user.isAdmin) return reply.code(403).send({ error: "Only the server admin can change this." });
+  };
+
   const publicUser = (u: User) => ({
     id: u.id,
     email: u.email,
     isAdmin: u.isAdmin,
-    settings: { ...DEFAULT_SETTINGS, ...(u.settings as object) },
+    // Only known keys, so settings retired in later phases (e.g. per-user language) drop out.
+    settings: Object.fromEntries(
+      Object.entries({ ...DEFAULT_SETTINGS, ...(u.settings as object) }).filter(([k]) => k in DEFAULT_SETTINGS),
+    ) as Settings,
   });
 
   const strictLimit = { config: { rateLimit: { max: 10, timeWindow: "1 minute" } } };
@@ -249,6 +269,8 @@ export function buildApp(opts: { databaseUrl: string; secureCookies?: boolean; l
       const { count } = await db.profile.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
       return count ? reply.code(204).send() : reply.code(404).send({ error: "Profile not found." });
     });
+
+    registerMetadataRoutes(app, db, { requireUser, requireAdmin }, opts.bases);
 
     // --- settings ---
 
