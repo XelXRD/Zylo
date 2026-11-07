@@ -1,0 +1,241 @@
+// Stremio addons → playable sources, with debrid. Ported from apps/api/src/stremio.ts, debrid.ts and playback.ts.
+// Spec: https://github.com/Stremio/stremio-addon-sdk/blob/master/docs/protocol.md
+package tv.zylo
+
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.coroutineScope
+import org.json.JSONArray
+import org.json.JSONException
+import org.json.JSONObject
+import kotlin.math.roundToInt
+
+private val I = RegexOption.IGNORE_CASE
+
+class Addon(val url: String, val manifest: JSONObject) {
+  val name: String get() = manifest.optString("name", "Addon")
+
+  /** The manifest link minus its file name (configured addons keep their config path). */
+  val base: String get() = url.substringBefore('?').substringBefore('#').substringBeforeLast('/')
+
+  /** Does this addon answer `resource` requests for this type and id? */
+  fun supports(resource: String, type: String, id: String): Boolean {
+    val res = manifest.optJSONArray("resources") ?: return false
+    for (i in 0 until res.length()) {
+      val o = res.opt(i) as? JSONObject
+      if ((o?.optString("name") ?: res.opt(i) as? String) != resource) continue
+      val types = strings(o?.optJSONArray("types") ?: manifest.optJSONArray("types"))
+      val prefixes = strings(o?.optJSONArray("idPrefixes") ?: manifest.optJSONArray("idPrefixes"))
+      return type in types && (prefixes.isEmpty() || prefixes.any { id.startsWith(it) })
+    }
+    return false
+  }
+
+  companion object {
+    fun load(input: String): Addon {
+      val url = input.trim().replace(Regex("^stremio://", I), "https://")
+      if (!Regex("^https?://", I).containsMatchIn(url)) throw Exception("That isn't a web address.")
+      val m = try { getJson(url) } catch (e: JSONException) { throw Exception("That address didn't return an addon manifest.") }
+      if (m.str("id") == null || m.str("name") == null || m.str("version") == null || (m.optJSONArray("resources")?.length() ?: 0) == 0 || m.optJSONArray("types") == null)
+        throw Exception("That link works, but it isn't a Stremio addon manifest.")
+      return Addon(url, m)
+    }
+  }
+}
+
+data class Source(
+  val addon: String,
+  val label: String,
+  val detail: String,
+  val quality: String?,
+  val hdr: String,
+  val size: String?,
+  val filename: String?,
+  val url: String? = null,
+  val headers: Map<String, String> = emptyMap(),
+  val infoHash: String? = null,
+  val fileIdx: Int? = null,
+  val debrid: String? = null, // service that will stream this torrent
+  val cached: Boolean = false, // that service said it's ready (Real-Debrid can't say)
+)
+
+private val QUALITY = listOf(Regex("\\b(2160p|4k|uhd)\\b", I) to "4K", Regex("\\b1080p\\b", I) to "1080p", Regex("\\b720p\\b", I) to "720p", Regex("\\b(480p|576p|sd)\\b", I) to "480p")
+private val QUALITIES = QUALITY.map { it.second }
+
+fun source(raw: JSONObject, addon: String): Source? {
+  val hints = raw.optJSONObject("behaviorHints") ?: JSONObject()
+  val label = raw.str("name") ?: addon
+  val detail = raw.str("description") ?: raw.str("title") ?: ""
+  val filename = hints.str("filename")
+  val text = listOfNotNull(label, detail, filename).joinToString(" ")
+  val base = Source(
+    addon, label, detail,
+    QUALITY.firstOrNull { it.first.containsMatchIn(text) }?.second,
+    listOfNotNull("HDR".takeIf { Regex("\\bHDR", I).containsMatchIn(text) }, "DV".takeIf { Regex("\\bDV\\b|dolby.?vision", I).containsMatchIn(text) }).joinToString(" "),
+    Regex("(\\d+(?:[.,]\\d+)?)\\s?(GB|MB|GiB|MiB)\\b", I).find(text)?.let { "${it.groupValues[1]} ${it.groupValues[2]}" },
+    filename,
+  )
+  val url = raw.str("url")
+  if (url != null && Regex("^https?://", I).containsMatchIn(url)) {
+    val h = hints.optJSONObject("proxyHeaders")?.optJSONObject("request")
+    return base.copy(url = url, headers = h?.keys()?.asSequence()?.associateWith { h.optString(it) }.orEmpty())
+  }
+  val hash = raw.str("infoHash")
+  if (hash != null && Regex("^[a-f0-9]{40}$", I).matches(hash)) return base.copy(infoHash = hash.lowercase(), fileIdx = if (raw.has("fileIdx")) raw.optInt("fileIdx") else null)
+  return null // YouTube, websites, usenet, archives: nothing this player opens
+}
+
+/** Ready first (direct links, cached torrents), then best quality, then addon order. */
+fun rank(all: List<Source>) = all.filter { it.url != null || it.debrid != null }
+  .sortedWith(compareBy({ it.debrid != null && !it.cached }, { QUALITIES.indexOf(it.quality).let { i -> if (i < 0) 9 else i } }))
+
+class Found(val sources: List<Source>, val errors: List<String>, val waiting: Int)
+
+/** Ask every addon that serves streams for this video. videoId: tt123 for films, tt123:1:2 for episodes. */
+suspend fun findSources(store: Store, type: String, videoId: String): Found = coroutineScope {
+  val stype = if (type == "tv") "series" else "movie"
+  val results = store.addons.filter { it.supports("stream", stype, videoId) }.map { a ->
+    async(Dispatchers.IO) {
+      runCatching { getJson("${a.base}/stream/$stype/${enc(videoId)}.json").optJSONArray("streams")?.objects()?.mapNotNull { source(it, a.name) }.orEmpty() }
+        .fold({ it to null }, { emptyList<Source>() to "${a.name}: ${it.message}" })
+    }
+  }.awaitAll()
+  val all = withDebrid(store, results.flatMap { it.first })
+  Found(rank(all), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null })
+}
+
+// --- Debrid ------------------------------------------------------------------------------
+
+val SERVICES = linkedMapOf("torbox" to "TorBox", "realdebrid" to "Real-Debrid", "premiumize" to "Premiumize")
+
+class NotReady(message: String) : Exception(message)
+data class Hint(val filename: String?, val fileIdx: Int?, val season: Int?, val episode: Int?)
+class DebridFile(val name: String, val size: Long, val idx: Int? = null, val id: String = "", val link: String = "")
+
+interface Debrid {
+  /** Which hashes stream instantly; null = this service can't tell without adding them. */
+  fun cached(hashes: List<String>): Set<String>?
+  /** A direct link, right before playing (links expire). */
+  fun resolve(hash: String, hint: Hint): String
+}
+
+fun debrid(service: String, key: String): Debrid = when (service) {
+  "torbox" -> TorBox(key)
+  "realdebrid" -> RealDebrid(key)
+  else -> Premiumize(key)
+}
+
+/** Torrent sources a connected service can stream become playable, marked with that service. */
+fun withDebrid(store: Store, all: List<Source>): List<Source> {
+  val hashes = all.mapNotNull { it.infoHash }.distinct().take(100) // ponytail: first 100 torrents per title
+  val services = SERVICES.keys.filter { store.debrid(it).isNotEmpty() }
+  if (hashes.isEmpty() || services.isEmpty()) return all
+  // A failed check (service down, key revoked) just means "don't use this service right now".
+  val checks = services.map { s -> s to runCatching { debrid(s, store.debrid(s)).cached(hashes) } }
+  return all.map { o ->
+    val h = o.infoHash ?: return@map o
+    val hit = checks.find { it.second.getOrNull()?.contains(h) == true } ?: checks.find { it.second.isSuccess && it.second.getOrNull() == null }
+    if (hit == null) o else o.copy(debrid = hit.first, cached = hit.second.getOrNull() != null)
+  }
+}
+
+private val VIDEO = Regex("\\.(mkv|mp4|m4v|avi|mov|webm|wmv|flv|ts|m2ts|mpg|mpeg)$", I)
+private fun magnet(hash: String) = "magnet:?xt=urn:btih:$hash"
+private fun baseName(path: String) = path.substringAfterLast('/')
+
+/** The file the addon meant: its file name, then its index, then the episode, then the biggest video. */
+fun pickFile(files: List<DebridFile>, hint: Hint): DebridFile {
+  val pool = files.filter { VIDEO.containsMatchIn(it.name) }.ifEmpty { files }
+  if (pool.isEmpty()) throw NotReady("That torrent has no files.")
+  val name = hint.filename?.lowercase()
+  val ep = if (hint.season != null && hint.episode != null) Regex("(s0*${hint.season}[ ._-]*e0*${hint.episode}|\\b0*${hint.season}x0*${hint.episode})(?!\\d)", I) else null
+  return name?.let { n -> pool.find { baseName(it.name).lowercase() == n } }
+    ?: hint.fileIdx?.let { i -> pool.find { it.idx == i } }
+    ?: ep?.let { r -> pool.filter { r.containsMatchIn(baseName(it.name)) }.maxByOrNull { it.size } }
+    ?: pool.maxBy { it.size }
+}
+
+class TorBox(private val key: String) : Debrid {
+  private fun call(path: String, method: String = "GET", body: ByteArray? = null, type: String? = null): Any? =
+    JSONObject(http("https://api.torbox.app/v1/api$path", method, mapOf("Authorization" to "Bearer $key"), body, type)).opt("data")
+
+  override fun cached(hashes: List<String>) =
+    (call("/torrents/checkcached?format=list&list_files=false", "POST", JSONObject().put("hashes", JSONArray(hashes)).toString().toByteArray(), "application/json") as? JSONArray)
+      ?.objects()?.map { it.optString("hash").lowercase() }?.toSet() ?: emptySet()
+
+  override fun resolve(hash: String, hint: Hint): String {
+    // Reuse it if it's already in the account (adding is rate-limited to 50 an hour).
+    var t = (call("/torrents/mylist?bypass_cache=true") as? JSONArray)?.objects()?.find { it.optString("hash").lowercase() == hash }
+    if (t == null) {
+      val b = "zylo${System.nanoTime()}"
+      val body = "--$b\r\nContent-Disposition: form-data; name=\"magnet\"\r\n\r\n${magnet(hash)}\r\n--$b--\r\n".toByteArray()
+      val id = (call("/torrents/createtorrent", "POST", body, "multipart/form-data; boundary=$b") as JSONObject).getInt("torrent_id")
+      t = call("/torrents/mylist?bypass_cache=true&id=$id") as JSONObject
+    }
+    val files = t.optJSONArray("files")?.objects().orEmpty()
+    if (!t.optBoolean("download_present") || files.isEmpty())
+      throw NotReady("TorBox doesn't have this yet. It's downloading it (${(t.optDouble("progress", 0.0) * 100).roundToInt()}%); try again when it's done.")
+    val f = pickFile(files.map { DebridFile(it.optString("name"), it.optLong("size"), id = it.optString("id")) }, hint)
+    return call("/torrents/requestdl?" + String(form("token" to key, "torrent_id" to t.optString("id"), "file_id" to f.id))) as String
+  }
+}
+
+class RealDebrid(private val key: String) : Debrid {
+  private val auth = mapOf("Authorization" to "Bearer $key")
+  private val dead = setOf("magnet_error", "error", "virus", "dead")
+  private fun get(path: String) = http("https://api.real-debrid.com/rest/1.0$path", headers = auth)
+  private fun post(path: String, vararg f: Pair<String, String>) = http("https://api.real-debrid.com/rest/1.0$path", "POST", auth, form(*f), "application/x-www-form-urlencoded")
+  private fun info(id: String) = JSONObject(get("/torrents/info/$id"))
+
+  // Real-Debrid switched off its cache check in 2024: the only way to know is to add the torrent.
+  override fun cached(hashes: List<String>): Set<String>? = null
+
+  override fun resolve(hash: String, hint: Hint): String {
+    // ponytail: looks at the newest 100 torrents only; older duplicates just get added again.
+    val mine = JSONArray(get("/torrents?limit=100").ifBlank { "[]" }).objects()
+    val id = mine.find { it.optString("hash").lowercase() == hash && it.optString("status") !in dead }?.optString("id")
+      ?: JSONObject(post("/torrents/addMagnet", "magnet" to magnet(hash))).getString("id")
+    var info = info(id)
+    for (i in 0 until 8) {
+      if (info.optString("status") != "magnet_conversion") break
+      Thread.sleep(1000)
+      info = info(id)
+    }
+    if (info.optString("status") == "waiting_files_selection") {
+      // Every video file, so a season pack is ready for every episode.
+      val files = info.optJSONArray("files")?.objects().orEmpty()
+      post("/torrents/selectFiles/$id", "files" to files.filter { VIDEO.containsMatchIn(it.optString("path")) }.ifEmpty { files }.joinToString(",") { it.optString("id") })
+      info = info(id)
+    }
+    val status = info.optString("status")
+    if (status in dead) throw NotReady("Real-Debrid couldn't get this torrent (it may be dead or blocked).")
+    if (status != "downloaded") throw NotReady("Real-Debrid doesn't have this yet. It's downloading it (${info.optInt("progress")}%); try again when it's done.")
+    val links = info.optJSONArray("links")
+    // links[] lines up with the selected files, in order.
+    val selected = info.optJSONArray("files")?.objects().orEmpty().filter { it.optInt("selected") == 1 }
+      .mapIndexed { i, f -> DebridFile(f.optString("path"), f.optLong("bytes"), f.optInt("id") - 1, link = links?.optString(i).orEmpty()) }
+    return JSONObject(post("/unrestrict/link", "link" to pickFile(selected, hint).link)).getString("download")
+  }
+}
+
+class Premiumize(private val key: String) : Debrid {
+  // Premiumize answers 200 with status "error" for most failures.
+  private fun call(path: String, vararg f: Pair<String, String>): JSONObject {
+    val url = "https://www.premiumize.me/api$path${if ('?' in path) '&' else '?'}apikey=${enc(key)}"
+    val r = JSONObject(if (f.isEmpty()) http(url) else http(url, "POST", body = form(*f), type = "application/x-www-form-urlencoded"))
+    if (r.optString("status") != "success") throw HttpError(400, r.optString("message", "Premiumize said no."))
+    return r
+  }
+
+  override fun cached(hashes: List<String>): Set<String> {
+    val r = call("/cache/check?" + hashes.joinToString("&") { "items[]=$it" }).optJSONArray("response")
+    return hashes.filterIndexed { i, _ -> r?.optBoolean(i) == true }.toSet()
+  }
+
+  override fun resolve(hash: String, hint: Hint): String {
+    val content = try { call("/transfer/directdl", "src" to magnet(hash)).optJSONArray("content")?.objects().orEmpty() } catch (e: HttpError) { emptyList() }
+    if (content.isEmpty()) throw NotReady("Premiumize doesn't have this cached.")
+    return pickFile(content.map { DebridFile(it.optString("path"), it.optLong("size"), link = it.optString("link")) }, hint).link
+  }
+}
