@@ -27,7 +27,9 @@ function friendly(status: number, data: { error?: string; message?: string }) {
   if (data.error && !data.message) return data.error;
   if (status === 429) return "Too many attempts. Wait a minute and try again.";
   if (status === 400) return "Some of those details aren't valid. Check them and try again.";
-  if (status >= 500) return "Zylo couldn't reach its server. Check zylo-core is running.";
+  // A JSON 5xx came from zylo-core itself: show its reason. No JSON means the web app couldn't reach it at all.
+  if (status >= 500 && data.message) return `Zylo's server hit a problem: ${data.message}`;
+  if (status >= 500) return "Zylo couldn't reach its server. Run: docker compose logs zylo-core";
   return "Something went wrong.";
 }
 

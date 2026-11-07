@@ -1,4 +1,12 @@
+import { secretProblem } from "./secrets.js";
 import { buildApp } from "./app.js";
+
+// Fail fast on a bad secret: otherwise the first integration save fails with a confusing error.
+const secretError = secretProblem();
+if (secretError) {
+  console.error(`\n  Zylo can't start: ${secretError}\n`);
+  process.exit(1);
+}
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is not set");

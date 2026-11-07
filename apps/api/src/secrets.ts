@@ -2,8 +2,17 @@
 import { createCipheriv, createDecipheriv, createHash, randomBytes } from "node:crypto";
 
 function key(secret = process.env.ZYLO_SECRET) {
-  if (!secret || secret.length < 32) throw new Error("ZYLO_SECRET must be set to at least 32 characters");
-  return createHash("sha256").update(secret).digest();
+  const problem = secretProblem(secret);
+  if (problem) throw new Error(problem);
+  return createHash("sha256").update(secret!).digest();
+}
+
+/** Plain-English reason ZYLO_SECRET is unusable, or null if it's fine. Checked at startup. */
+export function secretProblem(secret = process.env.ZYLO_SECRET) {
+  if (!secret) return "ZYLO_SECRET is not set. Add it to .env (see .env.example), then run: docker compose up -d";
+  if (secret.length < 32)
+    return `ZYLO_SECRET in .env is ${secret.length} characters; it needs at least 32. Generate one (see .env.example), then run: docker compose up -d`;
+  return null;
 }
 
 export function encrypt(value: unknown, secret?: string) {

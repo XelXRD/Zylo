@@ -1,9 +1,17 @@
 // Background worker: keeps cached metadata fresh. Later phases add Trakt, tracker and library syncs here.
+import { secretProblem } from "./secrets.js";
 import { Queue, Worker } from "bullmq";
 import { Redis } from "ioredis";
 import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/prisma/client.js";
 import { metadataService, NotConfigured } from "./metadata.js";
+
+// Fail fast on a bad secret: otherwise the first integration save fails with a confusing error.
+const secretError = secretProblem();
+if (secretError) {
+  console.error(`\n  Zylo can't start: ${secretError}\n`);
+  process.exit(1);
+}
 
 const databaseUrl = process.env.DATABASE_URL;
 if (!databaseUrl) throw new Error("DATABASE_URL is not set");

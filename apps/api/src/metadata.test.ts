@@ -9,7 +9,7 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { PrismaClient } from "./generated/prisma/client.js";
 import { buildApp } from "./app.js";
 import { metadataService } from "./metadata.js";
-import { decrypt, encrypt } from "./secrets.js";
+import { decrypt, encrypt, secretProblem } from "./secrets.js";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("Set TEST_DATABASE_URL to an empty, migrated database");
@@ -86,6 +86,9 @@ test("secrets: round trip, and tampering is detected", () => {
   parts[3] = Buffer.from("x").toString("base64url");
   assert.throws(() => decrypt(parts.join(".")));
   assert.throws(() => decrypt(box, "a-completely-different-secret-of-enough-length"));
+  assert.match(secretProblem("")!, /not set/);
+  assert.match(secretProblem("1234567")!, /7 characters/);
+  assert.equal(secretProblem("x".repeat(32)), null);
 });
 
 test("phase 2: connect TMDB/TVDB, search, titles, seasons, refresh", async () => {
