@@ -16,6 +16,7 @@ services:
       ZYLO_SECRET: ${ZYLO_SECRET:?Set ZYLO_SECRET in .env (any random string of 32+ characters)}
       COOKIE_SECURE: ${COOKIE_SECURE:-false}
       REDIS_URL: redis://redis:6379
+      ZYLO_ALLOW_PRIVATE_ADDONS: ${ZYLO_ALLOW_PRIVATE_ADDONS:-false}
     depends_on:
       postgres: { condition: service_healthy }
       redis: { condition: service_started }

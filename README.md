@@ -2,7 +2,7 @@
 
 One interface. Your entire media world.
 
-Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) and **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways). The full plan is in the master specification.
+Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways) and **Phase 4, Addons** (Stremio-compatible addons: streams on film and episode pages, addon catalogues on the home page). The full plan is in the master specification.
 
 ## Run it
 
@@ -77,3 +77,15 @@ TEST_DATABASE_URL=postgresql://zylo:zylo@localhost:5432/zylo_test pnpm test
 - Imported titles start as placeholders and fill in from TMDB straight after each sync (100 at a time), or instantly when opened.
 - Trakt lists are read-only in Zylo; edit them on trakt.tv. Seasons and people in lists are skipped.
 - Scrobbling (live progress while playing) arrives with the player in Phase 5.
+
+## Phase 4 decisions
+
+- **Zylo ships with no addons.** Add your own under **Settings > Addons** by pasting the manifest link (ending in `/manifest.json`; `stremio://` links work). Addons are shared by every profile on the account.
+- **Addon links are treated like passwords.** Configured addons usually carry your account keys in the link, so it's encrypted at rest and only the website's name is ever shown. Reinstalling the same addon replaces its link (that's how reconfiguring works); **Configure** opens the addon's own setup page.
+- **Addons can't reach your network.** Every request is checked when it connects, after DNS, and again on each redirect: private, local and cloud-metadata addresses are refused, including tricks where a public name later points somewhere private. Responses are limited to 5 MB, JSON only, with a 10-second limit (15 for streams). No addon code is ever run. Set `ZYLO_ALLOW_PRIVATE_ADDONS=true` only if you host your own addon at home.
+- **Streams are fetched only when you ask** ("Find streams" on a film, "Streams" on an episode), from every enabled addon at once, in your chosen order. Each addon is asked with the IDs it says it understands (IMDb `tt…`, or `tmdb:…`). Results are cached for 5 minutes.
+- Every stream becomes one standard **playback option** (direct link, YouTube, torrent, website, usenet or archive) with quality, HDR/Dolby Vision and size picked out. Phase 5's player, Phase 6's debrid services and Phase 9's media servers all produce the same shape.
+- Direct links, YouTube and websites open now; torrents are listed and wait for a debrid service (Phase 6); usenet and archive sources aren't supported.
+- An addon answering "not found" means it has nothing for that title, not that it failed.
+- Home shows up to 3 browsable catalogues per addon (search-only catalogues skipped). Items are matched to Zylo's own title pages by IMDb ID; addon-only titles without one aren't shown yet.
+- Subtitle addons are used by the player (Phase 5); subtitles attached to streams are already kept.

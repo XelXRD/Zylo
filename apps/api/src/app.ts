@@ -6,7 +6,9 @@ import { PrismaPg } from "@prisma/adapter-pg";
 import { createHash, randomBytes, scrypt, timingSafeEqual } from "node:crypto";
 import { promisify } from "node:util";
 import { PrismaClient, type Profile, type User } from "./generated/prisma/client.js";
+import { registerAddonRoutes } from "./addons.js";
 import { registerLibraryRoutes } from "./library.js";
+import type { SafeFetchOptions } from "./safe-fetch.js";
 import { traktService } from "./trakt.js";
 import { UpstreamError } from "./http.js";
 import { NotConfigured, registerMetadataRoutes } from "./metadata.js";
@@ -83,6 +85,8 @@ export function buildApp(opts: {
   bases?: { tmdb?: string; tvdb?: string; trakt?: string };
   /** Hand a Trakt sync to the worker. Without one (tests), syncs run inline. */
   enqueueTraktSync?: (profileId: string) => Promise<void>;
+  /** Tests run mock addons on localhost. */
+  addonFetch?: SafeFetchOptions;
 }) {
   const db = new PrismaClient({ adapter: new PrismaPg({ connectionString: opts.databaseUrl }) });
   const app = Fastify({ logger: opts.logger ?? false });
@@ -298,6 +302,7 @@ export function buildApp(opts: {
       await trakt.sync(profileId).catch(() => {}); // errors are recorded on the account
     };
     registerLibraryRoutes(app, db, { requireUser, requireAdmin, requireProfile }, { metadata, trakt, enqueueSync, traktBase: opts.bases?.trakt });
+    registerAddonRoutes(app, db, { requireUser }, { metadata, fetchOptions: opts.addonFetch });
 
     // --- settings ---
 

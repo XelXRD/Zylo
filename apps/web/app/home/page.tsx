@@ -2,8 +2,8 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, type Card, type Profile } from "@/lib/api";
-import { PosterGrid, SkeletonGrid, TmdbAttribution } from "@/lib/media";
+import { activeProfileId, api, type Card, type CatalogRow, type Profile } from "@/lib/api";
+import { AddonPosterCard, PosterGrid, SkeletonGrid, TmdbAttribution } from "@/lib/media";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
 import { Loading } from "@/lib/ui";
@@ -16,6 +16,7 @@ export default function HomePage() {
   const [trending, setTrending] = useState<Card[]>();
   const [trendingError, setTrendingError] = useState<string>();
   const [recommended, setRecommended] = useState<Card[]>([]);
+  const [catalogs, setCatalogs] = useState<CatalogRow[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -30,6 +31,7 @@ export default function HomePage() {
       api<{ results: Card[] }>("/discover/trending").then((r) => setTrending(r.results), (e) => setTrendingError(e.message));
       // Only shows when this profile has Trakt connected; quietly empty otherwise.
       api<{ results: Card[] }>("/discover/recommended").then((r) => setRecommended(r.results), () => {});
+      api<{ rows: CatalogRow[] }>("/addons/catalogs").then((r) => setCatalogs(r.rows), () => {});
     });
   }, [user, router]);
 
@@ -85,6 +87,19 @@ export default function HomePage() {
               )}
             </div>
           </section>
+          {catalogs.map((row) => (
+            <section key={`${row.addonId}-${row.catalog}`} className="mt-16" aria-label={`${row.catalog} from ${row.addon}`}>
+              <h2 className="text-lg font-semibold">{row.catalog}</h2>
+              <p className="mt-1 text-sm text-ink-3">From {row.addon}</p>
+              <ul className="mt-5 grid grid-cols-2 gap-x-4 gap-y-6 sm:grid-cols-4 lg:grid-cols-6">
+                {row.items.slice(0, 12).map((c) => (
+                  <li key={c.imdbId}>
+                    <AddonPosterCard card={c} />
+                  </li>
+                ))}
+              </ul>
+            </section>
+          ))}
           </>
         )}
       </main>

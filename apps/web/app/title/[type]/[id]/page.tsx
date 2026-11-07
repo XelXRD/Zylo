@@ -5,6 +5,7 @@ import { api, img, type Episode, type Title } from "@/lib/api";
 import { Poster, PosterGrid, TmdbAttribution } from "@/lib/media";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
+import { StreamsPanel } from "@/lib/streams";
 import { TitleActions, EpisodeTick, useTitleState } from "@/lib/tracking";
 import { Loading, Select } from "@/lib/ui";
 
@@ -107,6 +108,8 @@ export default function TitlePage() {
               </div>
             )}
 
+            {title.type === "movie" && <MovieStreams id={id} />}
+
             {title.cast.length > 0 && (
               <section className="mt-16" aria-labelledby="cast">
                 <h2 id="cast" className="text-lg font-semibold">
@@ -167,6 +170,7 @@ function Episodes({ seriesId, title, watched, onWatchedChange }: { seriesId: str
   const [seasonNo, setSeasonNo] = useState((regular[0] ?? title.seasons[0]).number);
   const [episodes, setEpisodes] = useState<Episode[]>();
   const [error, setError] = useState<string>();
+  const [openEp, setOpenEp] = useState<number | null>(null);
 
   useEffect(() => {
     if (title.hasTvdb) api<{ tvdb: boolean }>("/metadata/status").then((s) => setTvdbReady(s.tvdb), () => {});
@@ -244,7 +248,7 @@ function Episodes({ seriesId, title, watched, onWatchedChange }: { seriesId: str
         ) : (
           <ol className="divide-y divide-line rounded-xl border border-line bg-surface">
             {shown.map((e) => (
-              <li key={e.id} className="flex gap-4 p-4">
+              <li key={e.id} className="flex flex-wrap gap-4 p-4">
                 {order === "tmdb" && (
                   <span className="hidden aspect-video w-40 shrink-0 overflow-hidden rounded-md bg-sunken sm:block">
                     {e.stillPath && <img src={img(e.stillPath, "w300")!} alt="" loading="lazy" className="size-full object-cover" />}
@@ -260,15 +264,53 @@ function Episodes({ seriesId, title, watched, onWatchedChange }: { seriesId: str
                   </p>
                   {e.overview && <p className="mt-2 line-clamp-2 max-w-[75ch] text-sm leading-relaxed text-ink-2">{e.overview}</p>}
                 </div>
-                {/* Ticks use TMDB numbering, which is what Trakt and Zylo's history use. */}
+                {/* Ticks and streams use TMDB numbering, which is what Trakt, addons and Zylo's history use. */}
                 {order === "tmdb" && e.number !== null && (
-                  <EpisodeTick seriesId={seriesId} season={seasonNo} episode={e.number} watched={watched.has(`${seasonNo}:${e.number}`)} onChange={onWatchedChange} />
+                  <div className="flex shrink-0 items-start gap-2">
+                    <button
+                      type="button"
+                      aria-expanded={openEp === e.number}
+                      onClick={() => setOpenEp(openEp === e.number ? null : e.number)}
+                      className="h-9 rounded-lg border border-line px-3 text-sm text-ink-2 transition-[border-color,color] duration-150 hover:border-line-strong hover:text-ink"
+                    >
+                      Streams
+                    </button>
+                    <EpisodeTick seriesId={seriesId} season={seasonNo} episode={e.number} watched={watched.has(`${seasonNo}:${e.number}`)} onChange={onWatchedChange} />
+                  </div>
+                )}
+                {openEp === e.number && order === "tmdb" && (
+                  <div className="basis-full pt-2">
+                    <StreamsPanel type="series" id={seriesId} season={seasonNo} episode={e.number ?? undefined} />
+                  </div>
                 )}
               </li>
             ))}
           </ol>
         )}
       </div>
+    </section>
+  );
+}
+
+function MovieStreams({ id }: { id: string }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <section className="mt-16" aria-labelledby="streams">
+      <div className="flex flex-wrap items-baseline justify-between gap-3">
+        <h2 id="streams" className="text-lg font-semibold">
+          Streams
+        </h2>
+        {!open && (
+          <button type="button" onClick={() => setOpen(true)} className="rounded text-sm font-medium text-accent transition-colors duration-150 hover:text-accent-hover">
+            Find streams from your addons
+          </button>
+        )}
+      </div>
+      {open && (
+        <div className="mt-5">
+          <StreamsPanel type="movie" id={id} />
+        </div>
+      )}
     </section>
   );
 }

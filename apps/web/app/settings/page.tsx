@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus } from "@/lib/api";
+import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus, type AddonView } from "@/lib/api";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
 import { Avatar, Button, Field, FormError, Loading, Select } from "@/lib/ui";
@@ -52,6 +52,10 @@ export default function SettingsPage() {
             <TraktConnection isAdmin={user.isAdmin} />
           </Section>
         )}
+
+        <Section id="addons" title="Addons" lead="Stremio-compatible addons add streams, and sometimes catalogues, to Zylo. They're shared by every profile on this account. Zylo comes with none: you choose your own.">
+          <Addons />
+        </Section>
 
         <Section title="Preferences" lead="Your region decides which age ratings you see, and later what's available where you live.">
           <Preferences settings={user.settings} onSaved={(settings) => setUser({ ...user, settings })} />
@@ -719,5 +723,169 @@ function TraktConnection({ isAdmin }: { isAdmin: boolean }) {
         </Button>
       </div>
     </div>
+  );
+}
+
+function Addons() {
+  const [list, setList] = useState<AddonView[]>();
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<{ ok: boolean; text: string }>();
+  const load = () => api<AddonView[]>("/addons").then(setList, (e) => setMsg({ ok: false, text: e.message }));
+  useEffect(() => {
+    load();
+  }, []);
+
+  return (
+    <>
+      <form
+        className="flex flex-col gap-4 rounded-xl border border-line bg-surface p-4"
+        onSubmit={async (e) => {
+          e.preventDefault();
+          setBusy(true);
+          setMsg(undefined);
+          try {
+            const a = await api<AddonView & { replaced: boolean }>("/addons", { method: "POST", body: { url } });
+            setUrl("");
+            setMsg({ ok: true, text: a.replaced ? `${a.name} updated with the new address.` : `${a.name} added.` });
+            await load();
+          } catch (err) {
+            setMsg({ ok: false, text: (err as Error).message });
+          }
+          setBusy(false);
+        }}
+      >
+        <Field
+          label="Addon address"
+          type="url"
+          inputMode="url"
+          autoComplete="off"
+          spellCheck={false}
+          value={url}
+          onChange={(e) => setUrl(e.target.value)}
+          required
+          placeholder="https://example.com/manifest.json"
+          hint="The manifest link the addon gives you, ending in /manifest.json. stremio:// links work too. Treat it like a password: it can contain your account keys."
+        />
+        {msg && (msg.ok ? <p role="status" className="text-sm text-accent">{msg.text}</p> : <FormError message={msg.text} />)}
+        <div>
+          <Button type="submit" busy={busy}>
+            Add addon
+          </Button>
+        </div>
+      </form>
+
+      {!list ? (
+        <p className="text-sm text-ink-3">Loading…</p>
+      ) : list.length === 0 ? (
+        <p className="text-sm text-ink-2">No addons yet.</p>
+      ) : (
+        <ol className="flex flex-col gap-3">
+          {list.map((a, i) => (
+            <AddonRow key={a.id} addon={a} first={i === 0} last={i === list.length - 1} onChange={load} />
+          ))}
+        </ol>
+      )}
+    </>
+  );
+}
+
+function AddonRow({ addon: a, first, last, onChange }: { addon: AddonView; first: boolean; last: boolean; onChange: () => void }) {
+  const [confirm, setConfirm] = useState(false);
+  const [busy, setBusy] = useState<string>();
+  const [note, setNote] = useState<{ ok: boolean; text: string }>();
+  const act = async (key: string, fn: () => Promise<unknown>) => {
+    setBusy(key);
+    setNote(undefined);
+    try {
+      await fn();
+    } catch (e) {
+      setNote({ ok: false, text: (e as Error).message });
+    }
+    await onChange();
+    setBusy(undefined);
+  };
+  const what = [a.resources.filter((r) => ["stream", "catalog", "meta", "subtitles"].includes(r)).join(", "), a.types.join(", ")].filter(Boolean).join(" · ");
+
+  return (
+    <li className={`flex flex-col gap-3 rounded-xl border border-line bg-surface p-4 ${a.enabled ? "" : "opacity-70"}`}>
+      <div className="flex items-start gap-3">
+        <span className="size-10 shrink-0 overflow-hidden rounded-lg border border-line bg-sunken">{a.logo && <img src={a.logo} alt="" className="size-full object-cover" />}</span>
+        <div className="min-w-0 flex-1">
+          <p className="font-medium">
+            {a.name} <span className="text-xs font-normal text-ink-3 tabular-nums">v{a.version}</span>
+          </p>
+          <p className="truncate text-xs text-ink-3">
+            {a.host} · {what}
+          </p>
+          {a.description && <p className="mt-1 line-clamp-2 text-sm text-ink-2">{a.description}</p>}
+        </div>
+        <label className="flex shrink-0 items-center gap-2 text-sm text-ink-2">
+          <input type="checkbox" checked={a.enabled} onChange={(e) => act("toggle", () => api(`/addons/${a.id}`, { method: "PATCH", body: { enabled: e.target.checked } }))} className="size-4 accent-[var(--accent)]" />
+          On
+        </label>
+      </div>
+
+      {(a.p2p || a.adult || a.needsConfiguring || a.lastError) && (
+        <ul className="flex flex-col gap-1 text-xs">
+          {a.p2p && <li className="text-ink-2">Uses peer-to-peer sources, which can share your IP address with others.</li>}
+          {a.adult && <li className="text-ink-2">Marked by its author as containing adult content.</li>}
+          {a.needsConfiguring && <li className="text-ink-2">Says it needs setting up: use Configure, then paste the new address it gives you above.</li>}
+          {a.lastError && <li className="text-danger">Last check failed: {a.lastError}</li>}
+        </ul>
+      )}
+      {note && (note.ok ? <p role="status" className="text-sm text-accent">{note.text}</p> : <FormError message={note.text} />)}
+
+      <div className="flex flex-wrap gap-2">
+        <Button variant="quiet" disabled={first} busy={busy === "up"} onClick={() => act("up", () => api(`/addons/${a.id}`, { method: "PATCH", body: { move: "up" } }))} aria-label={`Move ${a.name} up`}>
+          ↑
+        </Button>
+        <Button variant="quiet" disabled={last} busy={busy === "down"} onClick={() => act("down", () => api(`/addons/${a.id}`, { method: "PATCH", body: { move: "down" } }))} aria-label={`Move ${a.name} down`}>
+          ↓
+        </Button>
+        <Button
+          variant="quiet"
+          busy={busy === "test"}
+          onClick={() =>
+            act("test", async () => {
+              const r = await api<{ ok: boolean; ms?: number; error?: string }>(`/addons/${a.id}/test`, { method: "POST" });
+              setNote(r.ok ? { ok: true, text: `Working · answered in ${r.ms} ms` } : { ok: false, text: r.error ?? "The check failed." });
+            })
+          }
+        >
+          Test
+        </Button>
+        {a.configurable && (
+          <Button
+            variant="quiet"
+            onClick={async () => {
+              // Open the tab first (synchronously) so browsers don't treat it as a pop-up, then point it at the page.
+              const tab = window.open("", "_blank");
+              const r = await api<{ url: string }>(`/addons/${a.id}/configure`).catch(() => null);
+              if (tab && r) {
+                tab.opener = null;
+                tab.location.href = r.url;
+              } else tab?.close();
+            }}
+          >
+            Configure
+          </Button>
+        )}
+        {confirm ? (
+          <>
+            <Button variant="danger" busy={busy === "remove"} onClick={() => act("remove", () => api(`/addons/${a.id}`, { method: "DELETE" }))}>
+              Remove {a.name}
+            </Button>
+            <Button variant="quiet" onClick={() => setConfirm(false)}>
+              Keep
+            </Button>
+          </>
+        ) : (
+          <Button variant="quiet" onClick={() => setConfirm(true)}>
+            Remove
+          </Button>
+        )}
+      </div>
+    </li>
   );
 }

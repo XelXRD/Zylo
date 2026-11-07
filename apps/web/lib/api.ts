@@ -134,3 +134,50 @@ export const RATING_LABELS: Record<number, string> = {
 };
 
 export const shortDate = (iso: string) => new Date(iso).toLocaleDateString("en-GB", { day: "numeric", month: "short", year: "numeric" });
+
+// --- addons and streams ---
+
+export type AddonView = {
+  id: string;
+  addonId: string;
+  name: string;
+  version: string;
+  description: string | null;
+  logo: string | null;
+  host: string;
+  enabled: boolean;
+  position: number;
+  types: string[];
+  resources: string[];
+  catalogs: number;
+  adult: boolean;
+  p2p: boolean;
+  configurable: boolean;
+  needsConfiguring: boolean;
+  lastCheckedAt: string | null;
+  lastError: string | null;
+};
+
+export type PlaybackOption = {
+  id: string;
+  source: { kind: "addon"; id: string; name: string };
+  label: string;
+  description: string | null;
+  kind: "url" | "youtube" | "torrent" | "external" | "usenet" | "archive";
+  url?: string;
+  ytId?: string;
+  externalUrl?: string;
+  quality: string | null;
+  hdr: string[];
+  size: string | null;
+  playable: boolean;
+  note: string | null;
+};
+
+export type StreamResults = {
+  addons: { id: string; name: string; logo: string | null; status: "ok" | "error"; error?: string; options: PlaybackOption[] }[];
+  skipped: number;
+};
+
+export type AddonCard = { type: "movie" | "series"; imdbId: string; title: string; year: number | null; poster: string | null };
+export type CatalogRow = { addonId: string; addon: string; catalog: string; type: string; items: AddonCard[] };

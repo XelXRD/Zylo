@@ -113,6 +113,8 @@ export function tmdbClient(credential: string, base = TMDB_BASE) {
     search: (query: string, language: string, page = 1) =>
       get<{ results: ListItem[]; total_pages: number; page: number }>("/search/multi", { query, language, page, include_adult: "false" }),
     trending: (language: string) => get<{ results: ListItem[] }>("/trending/all/week", { language }),
+    /** TMDB ids for an IMDb id (used for addon catalogue items, which are keyed by IMDb). */
+    findByImdb: (imdbId: string) => get<{ movie_results: { id: number }[]; tv_results: { id: number }[] }>(`/find/${imdbId}`, { external_source: "imdb_id" }),
   };
 }
 

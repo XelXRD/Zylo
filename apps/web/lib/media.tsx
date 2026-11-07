@@ -1,6 +1,6 @@
 "use client";
 import Link from "next/link";
-import { img, titleHref, type Card } from "./api";
+import { img, titleHref, type AddonCard, type Card } from "./api";
 
 export function Poster({ path, title, size = "w342", className = "" }: { path: string | null; title: string; size?: string; className?: string }) {
   const src = img(path, size);
@@ -65,5 +65,26 @@ export function SkeletonGrid({ count = 12 }: { count?: number }) {
         </li>
       ))}
     </ul>
+  );
+}
+
+/** A catalogue item from an addon: its poster comes from the addon, its page from Zylo (resolved by IMDb id). */
+export function AddonPosterCard({ card }: { card: AddonCard }) {
+  return (
+    <Link href={`/title/resolve?imdb=${card.imdbId}&type=${card.type}`} className="group flex flex-col gap-2 rounded-lg">
+      <span className="relative block aspect-[2/3] overflow-hidden rounded-lg border border-line bg-sunken transition-[border-color,transform] duration-150 ease-out group-hover:border-line-strong group-active:scale-[0.99]">
+        {card.poster ? (
+          <img src={card.poster} alt="" loading="lazy" referrerPolicy="no-referrer" className="size-full object-cover" />
+        ) : (
+          <span className="flex size-full items-center justify-center p-3 text-center text-xs text-ink-3">{card.title}</span>
+        )}
+      </span>
+      <span className="flex flex-col">
+        <span className="truncate text-sm font-medium text-ink">{card.title}</span>
+        <span className="text-xs text-ink-3 tabular-nums">
+          {card.year ?? "—"} · {card.type === "movie" ? "Film" : "Series"}
+        </span>
+      </span>
+    </Link>
   );
 }
