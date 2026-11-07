@@ -58,6 +58,7 @@ const mock = createServer((req, res) => {
     }
 
     // Trakt
+    if (!String(req.headers["user-agent"]).startsWith("Zylo/")) return send(403); // Trakt's Cloudflare wants a real User-Agent
     if (req.headers["trakt-api-key"] !== CLIENT_ID) return send(403);
     if (p === "/oauth/device/code") return send(200, { device_code: "dev-code", user_code: "ABCD1234", verification_url: "https://trakt.tv/activate", expires_in: 600, interval: 5 });
     if (p === "/oauth/device/token") {
@@ -141,7 +142,9 @@ test("phase 3: Trakt connect, import, push, outbox, mirror, refresh", async () =
   assert.equal((await call("POST", "/trakt/connect")).status, 409);
 
   // Admin adds the Trakt app; a wrong Client ID is caught.
-  assert.equal((await call("PUT", "/integrations/trakt", { clientId: "wrong-client-id-000000000" })).status, 400);
+  const refused = await call("PUT", "/integrations/trakt", { clientId: "wrong-client-id-000000000" });
+  assert.equal(refused.status, 400);
+  assert.match(refused.json.error, /^Trakt refused that Client ID \(403/, "says what Trakt answered");
   assert.equal((await call("PUT", "/integrations/trakt", { clientId: CLIENT_ID, redirectUri: "http://localhost" })).status, 204, "Client ID only");
 
   // Device sign-in: pending, then connected (which runs the first sync inline in tests).

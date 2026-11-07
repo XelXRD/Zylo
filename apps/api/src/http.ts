@@ -5,12 +5,15 @@ export class UpstreamError extends Error {
   }
 }
 
+export const USER_AGENT = "Zylo/0.7.0";
+
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
 
 export async function fetchJson<T>(service: string, url: string, init: RequestInit = {}, attempt = 1): Promise<T> {
   let res: Response;
   try {
-    res = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000), headers: { accept: "application/json", ...init.headers } });
+    // Trakt (and others behind Cloudflare) require a real User-Agent; Node's default is just "node".
+    res = await fetch(url, { ...init, signal: AbortSignal.timeout(10_000), headers: { accept: "application/json", "user-agent": USER_AGENT, ...init.headers } });
   } catch (e) {
     if (attempt < 2) return fetchJson(service, url, init, attempt + 1);
     throw new UpstreamError(service, 0, `${service} didn't respond (${(e as Error).name === "TimeoutError" ? "timed out" : "network error"}).`);

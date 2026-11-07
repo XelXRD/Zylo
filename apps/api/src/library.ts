@@ -1,5 +1,6 @@
 // Per-profile library: watch history, ratings, watchlist, lists, Trakt connection.
 // Everything works without Trakt; when a profile is connected, changes are pushed to Trakt too.
+import { UpstreamError } from "./http.js";
 import type { FastifyInstance, preHandlerHookHandler } from "fastify";
 import type { PrismaClient } from "./generated/prisma/client.js";
 import { cardOf, type MetadataService } from "./metadata.js";
@@ -59,8 +60,16 @@ export function registerLibraryRoutes(
       try {
         // Asking for a device code proves the Client ID is real (the secret is checked at first sign-in).
         await traktClient(creds, deps.traktBase ?? TRAKT_BASE).deviceCode();
-      } catch {
-        return reply.code(400).send({ error: "Trakt didn't recognise that Client ID. Copy it again from your Trakt app page." });
+      } catch (e) {
+        // Say what Trakt actually answered: a refused ID and an unreachable Trakt need different fixes.
+        const status = e instanceof UpstreamError ? e.status : 0;
+        const said = (e as Error).message;
+        return reply.code(400).send({
+          error:
+            status === 401 || status === 403
+              ? `Trakt refused that Client ID (${status}: ${said}). Check it's the Client ID from app.trakt.tv/settings/apps and that the app isn't pending approval.`
+              : `Couldn't check the Client ID with Trakt${status ? ` (${status})` : ""}: ${said}`,
+        });
       }
       await db.integration.upsert({
         where: { id: "trakt" },
