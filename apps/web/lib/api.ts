@@ -181,3 +181,35 @@ export type StreamResults = {
 
 export type AddonCard = { type: "movie" | "series"; imdbId: string; title: string; year: number | null; poster: string | null };
 export type CatalogRow = { addonId: string; addon: string; catalog: string; type: string; items: AddonCard[] };
+
+// --- playback ---
+
+export type PlaybackPrefs = { maxQuality: "4K" | "1080p" | "720p" | "480p"; autoPlay: boolean };
+export type RankedOption = PlaybackOption & {
+  browserFriendly: boolean;
+  filename: string | null;
+  subtitles: { id: string; url: string; lang: string; label?: string }[];
+  bingeGroup: string | null;
+};
+export type PlaybackStart = {
+  prefs: PlaybackPrefs;
+  resumeAt: number | null;
+  ranked: RankedOption[];
+  others: PlaybackOption[];
+  addonErrors: { name: string; error?: string }[];
+};
+export type ContinueItem = { card: Card; season: number | null; episode: number | null; position: number; duration: number; backdropPath: string | null };
+export type ProgressRow = { season: number | null; episode: number | null; position: number; duration: number; completed: boolean };
+
+/** 3725 → "1:02:05", 125 → "2:05" */
+export const clock = (secs: number) => {
+  const s = Math.floor(secs % 60).toString().padStart(2, "0");
+  const m = Math.floor((secs / 60) % 60);
+  const h = Math.floor(secs / 3600);
+  return h ? `${h}:${m.toString().padStart(2, "0")}:${s}` : `${m}:${s}`;
+};
+
+export const watchHref = (type: string, id: string | number, ep?: { season: number; episode: number } | null, extra: Record<string, string> = {}) => {
+  const q = new URLSearchParams({ ...(ep && { s: String(ep.season), e: String(ep.episode) }), ...extra }).toString();
+  return `/watch/${type}/${id}${q ? `?${q}` : ""}`;
+};

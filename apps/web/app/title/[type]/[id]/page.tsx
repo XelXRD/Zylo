@@ -1,7 +1,8 @@
 "use client";
+import Link from "next/link";
 import { useParams } from "next/navigation";
 import { useEffect, useState } from "react";
-import { api, img, type Episode, type Title } from "@/lib/api";
+import { api, clock, img, watchHref, type Episode, type ProgressRow, type Title } from "@/lib/api";
 import { Poster, PosterGrid, TmdbAttribution } from "@/lib/media";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
@@ -20,6 +21,10 @@ export default function TitlePage() {
   const [error, setError] = useState<string>();
   const [trailer, setTrailer] = useState(false);
   const { state, reload } = useTitleState(type, id);
+  const [progress, setProgress] = useState<ProgressRow[]>([]);
+  useEffect(() => {
+    if (user && (type === "movie" || type === "series")) api<ProgressRow[]>(`/titles/${type}/${id}/progress`).then(setProgress, () => {});
+  }, [user, type, id]);
 
   useEffect(() => {
     if (!user) return;
@@ -82,7 +87,7 @@ export default function TitlePage() {
                   </p>
                 )}
 
-                <TitleActions type={title.type} id={id} state={state} reload={reload} />
+                <TitleActions type={title.type} id={id} state={state} reload={reload} play={<PlayButton title={title} id={id} progress={progress} watched={state?.watchedEpisodes ?? []} />} />
                 {title.trailerKey && (
                   <button
                     type="button"
@@ -131,7 +136,9 @@ export default function TitlePage() {
               </section>
             )}
 
-            {title.type === "series" && title.seasons.length > 0 && <Episodes seriesId={id} title={title} watched={new Set(state?.watchedEpisodes)} onWatchedChange={reload} />}
+            {title.type === "series" && title.seasons.length > 0 && (
+              <Episodes seriesId={id} title={title} watched={new Set(state?.watchedEpisodes)} onWatchedChange={reload} progress={progress} />
+            )}
 
             {title.recommendations.length > 0 && (
               <section className="mt-16" aria-labelledby="more">
@@ -162,7 +169,19 @@ const ORDERS = [
 
 type TvdbSeasons = { seasons: { number: number; episodes: Episode[] }[] };
 
-function Episodes({ seriesId, title, watched, onWatchedChange }: { seriesId: string; title: Title; watched: Set<string>; onWatchedChange: () => void }) {
+function Episodes({
+  seriesId,
+  title,
+  watched,
+  onWatchedChange,
+  progress,
+}: {
+  seriesId: string;
+  title: Title;
+  watched: Set<string>;
+  onWatchedChange: () => void;
+  progress: ProgressRow[];
+}) {
   const regular = title.seasons.filter((s) => s.number > 0);
   const [order, setOrder] = useState("tmdb");
   const [tvdbReady, setTvdbReady] = useState(false);
@@ -263,17 +282,35 @@ function Episodes({ seriesId, title, watched, onWatchedChange }: { seriesId: str
                     {[longDate(e.airDate), e.runtime ? hm(e.runtime) : null, e.absoluteNumber ? `Absolute ${e.absoluteNumber}` : null].filter(Boolean).join(" · ") || "Air date not announced"}
                   </p>
                   {e.overview && <p className="mt-2 line-clamp-2 max-w-[75ch] text-sm leading-relaxed text-ink-2">{e.overview}</p>}
+                  {(() => {
+                    const p = order === "tmdb" ? progress.find((r) => r.season === seasonNo && r.episode === e.number && !r.completed && r.position > 60) : undefined;
+                    return p ? (
+                      <div className="mt-3 flex max-w-xs items-center gap-2" title={`Stopped at ${clock(p.position)}`}>
+                        <span className="h-1 flex-1 overflow-hidden rounded-full bg-sunken">
+                          <span className="block h-full bg-accent" style={{ width: `${Math.min(100, (p.position / p.duration) * 100)}%` }} />
+                        </span>
+                        <span className="text-xs text-ink-3 tabular-nums">{clock(p.duration - p.position)} left</span>
+                      </div>
+                    ) : null;
+                  })()}
                 </div>
                 {/* Ticks and streams use TMDB numbering, which is what Trakt, addons and Zylo's history use. */}
                 {order === "tmdb" && e.number !== null && (
                   <div className="flex shrink-0 items-start gap-2">
+                    <Link
+                      href={watchHref("series", seriesId, { season: seasonNo, episode: e.number })}
+                      aria-label={`Play season ${seasonNo} episode ${e.number}`}
+                      className="inline-flex h-9 items-center rounded-lg border border-line px-3 text-sm text-ink transition-[border-color] duration-150 hover:border-line-strong"
+                    >
+                      ▶ Play
+                    </Link>
                     <button
                       type="button"
                       aria-expanded={openEp === e.number}
                       onClick={() => setOpenEp(openEp === e.number ? null : e.number)}
-                      className="h-9 rounded-lg border border-line px-3 text-sm text-ink-2 transition-[border-color,color] duration-150 hover:border-line-strong hover:text-ink"
+                      className="hidden h-9 rounded-lg px-2 text-sm text-ink-3 transition-colors duration-150 hover:text-ink sm:block"
                     >
-                      Streams
+                      Sources
                     </button>
                     <EpisodeTick seriesId={seriesId} season={seasonNo} episode={e.number} watched={watched.has(`${seasonNo}:${e.number}`)} onChange={onWatchedChange} />
                   </div>
@@ -312,5 +349,42 @@ function MovieStreams({ id }: { id: string }) {
         </div>
       )}
     </section>
+  );
+}
+
+/** Play for a film; for a series, resume where you were, or the next unwatched episode. */
+function PlayButton({ title, id, progress, watched }: { title: Title; id: string; progress: ProgressRow[]; watched: string[] }) {
+  const cls = "inline-flex h-10 items-center gap-2 rounded-lg bg-accent px-4 text-sm font-medium text-accent-ink transition-colors duration-150 hover:bg-accent-hover active:translate-y-px";
+  if (title.type === "movie") {
+    const p = progress.find((r) => r.season === null && !r.completed && r.position > 60);
+    return (
+      <Link href={watchHref("movie", id)} className={cls}>
+        ▶ {p ? `Resume from ${clock(p.position)}` : "Play"}
+      </Link>
+    );
+  }
+  const regular = title.seasons.filter((s) => s.number > 0 && s.episodeCount > 0);
+  if (!regular.length) return null;
+  const inProgress = progress.find((r) => r.season !== null && !r.completed && r.position > 60);
+  let ep = inProgress ? { season: inProgress.season!, episode: inProgress.episode! } : null;
+  if (!ep) {
+    // The episode after the furthest one watched, else the very first.
+    const seen = watched.map((k) => k.split(":").map(Number)).filter(([s]) => s > 0).sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+    const last = seen.at(-1);
+    if (last) {
+      const s = regular.find((x) => x.number === last[0]);
+      if (s && last[1] < s.episodeCount) ep = { season: last[0], episode: last[1] + 1 };
+      else {
+        const nextSeason = regular.find((x) => x.number > last[0]);
+        if (nextSeason) ep = { season: nextSeason.number, episode: 1 };
+      }
+    }
+  }
+  const label = inProgress ? "Resume" : ep ? "Play next" : "Play";
+  ep ??= { season: regular[0].number, episode: 1 };
+  return (
+    <Link href={watchHref("series", id, ep)} className={cls}>
+      ▶ {label} <span className="font-normal opacity-80 tabular-nums">S{ep.season} E{ep.episode}</span>
+    </Link>
   );
 }

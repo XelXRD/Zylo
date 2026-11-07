@@ -92,6 +92,8 @@ model MediaItem {
   watchEvents   WatchEvent[]
   ratings       Rating[]
   inCollections CollectionItem[]
+  progress      PlaybackProgress[]
+  sourceChoices SourceChoice[]
 
   @@index([parentId])
   @@index([refreshedAt])
@@ -115,9 +117,12 @@ model Profile {
   user      User     @relation(fields: [userId], references: [id], onDelete: Cascade)
   name      String
   color     String
+  settings  Json     @default("{}") // playback preferences
   createdAt DateTime @default(now())
 
   trakt          TraktAccount?
+  progress       PlaybackProgress[]
+  sourceChoices  SourceChoice[]
   watchEvents    WatchEvent[]
   ratings        Rating[]
   collections    Collection[]
@@ -193,6 +198,38 @@ model CollectionItem {
   addedAt      DateTime   @default(now())
 
   @@id([collectionId, mediaItemId])
+}
+
+// --- Phase 5: playback ---
+
+// Where each profile got to, per film or episode (-1 = not an episode). Shared across devices.
+model PlaybackProgress {
+  profileId     String
+  profile       Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  mediaItemId   String
+  mediaItem     MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  seasonNumber  Int       @default(-1)
+  episodeNumber Int       @default(-1)
+  position      Float // seconds
+  duration      Float // seconds
+  completed     Boolean   @default(false)
+  updatedAt     DateTime  @updatedAt
+
+  @@id([profileId, mediaItemId, seasonNumber, episodeNumber])
+  @@index([profileId, updatedAt])
+}
+
+// The source a profile last picked by hand for a film or series; preferred next time.
+model SourceChoice {
+  profileId   String
+  profile     Profile   @relation(fields: [profileId], references: [id], onDelete: Cascade)
+  mediaItemId String
+  mediaItem   MediaItem @relation(fields: [mediaItemId], references: [id], onDelete: Cascade)
+  addonId     String
+  quality     String?
+  updatedAt   DateTime  @updatedAt
+
+  @@id([profileId, mediaItemId])
 }
 
 // Changes Zylo couldn't push to Trakt yet; retried on every sync.

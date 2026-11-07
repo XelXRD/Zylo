@@ -1,7 +1,7 @@
 "use client";
 import Link from "next/link";
 import { useEffect, useState } from "react";
-import { api, type PlaybackOption, type StreamResults } from "./api";
+import { api, watchHref, type PlaybackOption, type StreamResults } from "./api";
 
 const PER_ADDON = 8;
 
@@ -44,13 +44,13 @@ export function StreamsPanel({ type, id, season, episode }: { type: "movie" | "s
     <div className="flex flex-col gap-6" aria-live="polite">
       {total === 0 && data.addons.every((a) => a.status === "ok") && <p className="text-sm text-ink-2">Your addons didn't find any streams for this.</p>}
       {data.addons.map((a) => (
-        <AddonStreams key={a.id} addon={a} />
+        <AddonStreams key={a.id} addon={a} playHref={(o) => watchHref(type, id, type === "series" ? { season: season!, episode: episode! } : null, { option: o.id })} />
       ))}
     </div>
   );
 }
 
-function AddonStreams({ addon }: { addon: StreamResults["addons"][number] }) {
+function AddonStreams({ addon, playHref }: { addon: StreamResults["addons"][number]; playHref: (o: PlaybackOption) => string }) {
   const [all, setAll] = useState(false);
   if (addon.status === "error")
     return (
@@ -69,7 +69,7 @@ function AddonStreams({ addon }: { addon: StreamResults["addons"][number] }) {
       </h3>
       <ul className="divide-y divide-line rounded-xl border border-line bg-surface">
         {shown.map((o) => (
-          <StreamRow key={o.id} option={o} />
+          <StreamRow key={o.id} option={o} playHref={playHref(o)} />
         ))}
       </ul>
       {addon.options.length > PER_ADDON && (
@@ -90,7 +90,7 @@ const KIND_LABEL: Record<PlaybackOption["kind"], string> = {
   archive: "Archive",
 };
 
-function StreamRow({ option: o }: { option: PlaybackOption }) {
+function StreamRow({ option: o, playHref }: { option: PlaybackOption; playHref: string }) {
   const [copied, setCopied] = useState(false);
   const [title, ...rest] = o.label.split("\n");
   const href = o.kind === "url" ? o.url : o.kind === "youtube" ? `https://www.youtube.com/watch?v=${o.ytId}` : o.kind === "external" ? o.externalUrl : undefined;
@@ -115,13 +115,21 @@ function StreamRow({ option: o }: { option: PlaybackOption }) {
       </div>
       {o.playable && href && (
         <div className="flex shrink-0 gap-2">
+          {o.kind === "url" && (
+            <Link
+              href={playHref}
+              className="inline-flex h-9 items-center rounded-lg bg-accent px-3 text-sm font-medium text-accent-ink transition-colors duration-150 hover:bg-accent-hover"
+            >
+              ▶ Play
+            </Link>
+          )}
           <a
             href={href}
             target="_blank"
             rel="noreferrer noopener"
             className="inline-flex h-9 items-center rounded-lg border border-line-strong px-3 text-sm font-medium text-ink transition-[border-color,background-color] duration-150 hover:border-ink-2 hover:bg-sunken"
           >
-            {o.kind === "external" ? "Open site" : o.kind === "youtube" ? "Watch on YouTube" : "Open"}
+            {o.kind === "external" ? "Open site" : o.kind === "youtube" ? "Watch on YouTube" : "Open link"}
           </a>
           {o.kind === "url" && (
             <button

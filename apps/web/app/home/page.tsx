@@ -2,7 +2,7 @@
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, type Card, type CatalogRow, type Profile } from "@/lib/api";
+import { activeProfileId, api, clock, img, watchHref, type Card, type CatalogRow, type ContinueItem, type Profile } from "@/lib/api";
 import { AddonPosterCard, PosterGrid, SkeletonGrid, TmdbAttribution } from "@/lib/media";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
@@ -17,6 +17,7 @@ export default function HomePage() {
   const [trendingError, setTrendingError] = useState<string>();
   const [recommended, setRecommended] = useState<Card[]>([]);
   const [catalogs, setCatalogs] = useState<CatalogRow[]>([]);
+  const [resume, setResume] = useState<ContinueItem[]>([]);
 
   useEffect(() => {
     if (!user) return;
@@ -28,6 +29,7 @@ export default function HomePage() {
     api<{ tmdb: boolean }>("/metadata/status").then(({ tmdb }) => {
       setConnected(tmdb);
       if (!tmdb) return;
+      api<ContinueItem[]>("/playback/continue").then(setResume, () => {});
       api<{ results: Card[] }>("/discover/trending").then((r) => setTrending(r.results), (e) => setTrendingError(e.message));
       // Only shows when this profile has Trakt connected; quietly empty otherwise.
       api<{ results: Card[] }>("/discover/recommended").then((r) => setRecommended(r.results), () => {});
@@ -62,8 +64,34 @@ export default function HomePage() {
           </section>
         ) : (
           <>
+          {resume.length > 0 && (
+            <section className="mt-10" aria-labelledby="continue">
+              <h2 id="continue" className="text-lg font-semibold">
+                Continue watching
+              </h2>
+              <ul className="mt-5 grid gap-4 sm:grid-cols-2 lg:grid-cols-3">
+                {resume.map((r) => (
+                  <li key={`${r.card.type}-${r.card.tmdbId}-${r.season}-${r.episode}`} className="group relative">
+                    <Link href={watchHref(r.card.type, r.card.tmdbId, r.season !== null ? { season: r.season, episode: r.episode! } : null)} className="block rounded-xl">
+                      <span className="relative block aspect-video overflow-hidden rounded-xl border border-line bg-sunken transition-[border-color] duration-150 group-hover:border-line-strong">
+                        {r.backdropPath && <img src={img(r.backdropPath, "w780")!} alt="" loading="lazy" className="size-full object-cover" />}
+                        <span className="absolute inset-x-0 bottom-0 h-1 bg-black/40">
+                          <span className="block h-full bg-accent" style={{ width: `${Math.min(100, (r.position / r.duration) * 100)}%` }} />
+                        </span>
+                      </span>
+                      <span className="mt-2 block truncate text-sm font-medium">{r.card.title}</span>
+                      <span className="block text-xs text-ink-3 tabular-nums">
+                        {r.season !== null ? `S${r.season} E${r.episode} · ` : ""}
+                        {clock(r.duration - r.position)} left
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            </section>
+          )}
           {recommended.length > 0 && (
-            <section className="mt-10" aria-labelledby="recommended">
+            <section className={resume.length ? "mt-16" : "mt-10"} aria-labelledby="recommended">
               <h2 id="recommended" className="text-lg font-semibold">
                 Recommended for you
               </h2>
@@ -73,7 +101,7 @@ export default function HomePage() {
               </div>
             </section>
           )}
-          <section className={recommended.length ? "mt-16" : "mt-10"} aria-labelledby="trending">
+          <section className={recommended.length || resume.length ? "mt-16" : "mt-10"} aria-labelledby="trending">
             <h2 id="trending" className="text-lg font-semibold">
               Trending this week
             </h2>

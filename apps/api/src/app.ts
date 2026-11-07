@@ -8,6 +8,7 @@ import { promisify } from "node:util";
 import { PrismaClient, type Profile, type User } from "./generated/prisma/client.js";
 import { registerAddonRoutes } from "./addons.js";
 import { registerLibraryRoutes } from "./library.js";
+import { registerPlaybackRoutes } from "./playback.js";
 import type { SafeFetchOptions } from "./safe-fetch.js";
 import { traktService } from "./trakt.js";
 import { UpstreamError } from "./http.js";
@@ -141,7 +142,8 @@ export function buildApp(opts: {
   const requireProfile = async (req: FastifyRequest, reply: FastifyReply) => {
     await requireUser(req, reply);
     if (reply.sent) return;
-    const id = req.headers["x-zylo-profile"];
+    // navigator.sendBeacon (used when a player tab closes) can't set headers, so it may send profileId in the body.
+    const id = req.headers["x-zylo-profile"] ?? (req.body as { profileId?: unknown } | undefined)?.profileId;
     const profile = typeof id === "string" && /^[0-9a-f-]{36}$/.test(id) ? await db.profile.findFirst({ where: { id, userId: req.user.id } }) : null;
     if (!profile) return reply.code(400).send({ error: "Pick a profile first." });
     req.profile = profile;
@@ -303,6 +305,7 @@ export function buildApp(opts: {
     };
     registerLibraryRoutes(app, db, { requireUser, requireAdmin, requireProfile }, { metadata, trakt, enqueueSync, traktBase: opts.bases?.trakt });
     registerAddonRoutes(app, db, { requireUser }, { metadata, fetchOptions: opts.addonFetch });
+    registerPlaybackRoutes(app, db, { requireUser, requireProfile }, { metadata, trakt, fetchOptions: opts.addonFetch });
 
     // --- settings ---
 

@@ -145,36 +145,7 @@ export function registerAddonRoutes(app: FastifyInstance, db: PrismaClient, guar
       const { season, episode } = req.query;
       if (type === "series" && (season === undefined || episode === undefined)) return reply.code(400).send({ error: "Pick an episode to find streams for." });
 
-      const item = await deps.metadata.title(type, id);
-      const imdb = (await db.externalId.findFirst({ where: { mediaItemId: item.id, system: "imdb" } }))?.value ?? null;
-      const suffix = type === "series" ? `:${season}:${episode}` : "";
-      // Addons are keyed mostly by IMDb ("tt…"); some accept TMDB ("tmdb:…"). Try both, in that order.
-      const candidates = [imdb && `${imdb}${suffix}`, `tmdb:${id}${suffix}`].filter((x): x is string => !!x);
-
-      const addons = await db.addon.findMany({ where: { userId: req.user.id, enabled: true }, orderBy: { position: "asc" } });
-      const results = await Promise.all(
-        addons.map(async (a) => {
-          const m = a.manifest as Manifest;
-          const videoId = candidates.find((c) => supports(m, "stream", type, c));
-          const base = { id: a.id, name: m.name, logo: m.logo ?? null };
-          if (!videoId) return { ...base, status: "skipped" as const, options: [] as PlaybackOption[] };
-          try {
-            const raw = await cached(`stream:${a.transportUrl}:${type}:${videoId}`, 5 * 60_000, () =>
-              safeFetchJson<{ streams?: unknown[] }>(resourceUrl(baseOf(urlOf(a)), "stream", type, videoId), { ...fetchOptions, timeoutMs: 15_000 }),
-            );
-            const streams = Array.isArray(raw?.streams) ? raw.streams.slice(0, 200) : [];
-            const options = streams
-              .map((s, i) => (s && typeof s === "object" ? normaliseStream(s as Record<string, unknown>, { kind: "addon", id: a.id, name: m.name }, i) : null))
-              .filter((o): o is PlaybackOption => o !== null);
-            return { ...base, status: "ok" as const, options };
-          } catch (e) {
-            // Many addons answer "not found" when they simply have nothing for this title.
-            if (e instanceof UnsafeUrl && e.status === 404) return { ...base, status: "ok" as const, options: [] as PlaybackOption[] };
-            return { ...base, status: "error" as const, error: e instanceof UnsafeUrl ? e.message : "The addon didn't answer.", options: [] as PlaybackOption[] };
-          }
-        }),
-      );
-      return { addons: results.filter((r) => r.status !== "skipped"), skipped: results.filter((r) => r.status === "skipped").length };
+      return collectStreams(db, deps.metadata, fetchOptions, req.user.id, type, id, season, episode);
     },
   );
 
@@ -236,4 +207,50 @@ export function registerAddonRoutes(app: FastifyInstance, db: PrismaClient, guar
       return { type: req.query.type, tmdbId: hit.id };
     },
   );
+}
+
+export type StreamResults = Awaited<ReturnType<typeof collectStreams>>;
+
+/** Ask every enabled addon of this account for streams, in the user's order. Shared by the streams list and the player. */
+export async function collectStreams(
+  db: PrismaClient,
+  metadata: MetadataService,
+  fetchOptions: SafeFetchOptions,
+  userId: string,
+  type: "movie" | "series",
+  id: number,
+  season?: number,
+  episode?: number,
+) {
+  const urlOf = (a: Addon) => decrypt<string>(a.transportUrl);
+  const item = await metadata.title(type, id);
+  const imdb = (await db.externalId.findFirst({ where: { mediaItemId: item.id, system: "imdb" } }))?.value ?? null;
+  const suffix = type === "series" ? `:${season}:${episode}` : "";
+  // Addons are keyed mostly by IMDb ("tt…"); some accept TMDB ("tmdb:…"). Try both, in that order.
+  const candidates = [imdb && `${imdb}${suffix}`, `tmdb:${id}${suffix}`].filter((x): x is string => !!x);
+
+  const addons = await db.addon.findMany({ where: { userId, enabled: true }, orderBy: { position: "asc" } });
+  const results = await Promise.all(
+    addons.map(async (a) => {
+      const m = a.manifest as Manifest;
+      const videoId = candidates.find((c) => supports(m, "stream", type, c));
+      const base = { id: a.id, name: m.name, logo: m.logo ?? null };
+      if (!videoId) return { ...base, status: "skipped" as const, options: [] as PlaybackOption[] };
+      try {
+        const raw = await cached(`stream:${a.transportUrl}:${type}:${videoId}`, 5 * 60_000, () =>
+          safeFetchJson<{ streams?: unknown[] }>(resourceUrl(baseOf(urlOf(a)), "stream", type, videoId), { ...fetchOptions, timeoutMs: 15_000 }),
+        );
+        const streams = Array.isArray(raw?.streams) ? raw.streams.slice(0, 200) : [];
+        const options = streams
+          .map((s, i) => (s && typeof s === "object" ? normaliseStream(s as Record<string, unknown>, { kind: "addon", id: a.id, name: m.name }, i) : null))
+          .filter((o): o is PlaybackOption => o !== null);
+        return { ...base, status: "ok" as const, options };
+      } catch (e) {
+        // Many addons answer "not found" when they simply have nothing for this title.
+        if (e instanceof UnsafeUrl && e.status === 404) return { ...base, status: "ok" as const, options: [] as PlaybackOption[] };
+        return { ...base, status: "error" as const, error: e instanceof UnsafeUrl ? e.message : "The addon didn't answer.", options: [] as PlaybackOption[] };
+      }
+    }),
+  );
+  return { addons: results.filter((r) => r.status !== "skipped"), skipped: results.filter((r) => r.status === "skipped").length };
 }

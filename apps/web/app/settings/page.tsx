@@ -1,7 +1,7 @@
 "use client";
 import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
-import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus, type AddonView } from "@/lib/api";
+import { activeProfileId, api, applyTheme, PROFILE_COLORS, setActiveProfileId, type Integration, type Profile, type ProfileColor, type Settings, type TraktStatus, type AddonView, type PlaybackPrefs } from "@/lib/api";
 import { useUser } from "@/lib/session";
 import { TopBar } from "@/lib/topbar";
 import { Avatar, Button, Field, FormError, Loading, Select } from "@/lib/ui";
@@ -50,6 +50,12 @@ export default function SettingsPage() {
         {current && (
           <Section id="trakt" title={`Trakt for ${current.name}`} lead="Bring this profile's watch history, ratings, watchlist and lists from Trakt, and keep them in sync both ways.">
             <TraktConnection isAdmin={user.isAdmin} />
+          </Section>
+        )}
+
+        {current && (
+          <Section id="playback" title={`Playback for ${current.name}`} lead="How Zylo picks a source when you press Play. It tries your addons in order, preferring files your browser can play, at or under your quality limit, and remembers the source you choose for each title.">
+            <PlaybackSettings />
           </Section>
         )}
 
@@ -899,5 +905,40 @@ function AddonRow({ addon: a, first, last, onChange }: { addon: AddonView; first
         )}
       </div>
     </li>
+  );
+}
+
+function PlaybackSettings() {
+  const [prefs, setPrefs] = useState<PlaybackPrefs>();
+  const [status, setStatus] = useState<string>();
+  useEffect(() => {
+    api<PlaybackPrefs>("/profile/playback").then(setPrefs, (e) => setStatus(e.message));
+  }, []);
+  if (!prefs) return <p className="text-sm text-ink-3">{status ?? "Loading…"}</p>;
+  const save = async (patch: Partial<PlaybackPrefs>) => {
+    setStatus("Saving…");
+    try {
+      setPrefs(await api<PlaybackPrefs>("/profile/playback", { method: "PUT", body: patch }));
+      setStatus("Saved");
+    } catch (e) {
+      setStatus((e as Error).message);
+    }
+  };
+  return (
+    <div className="grid gap-4 rounded-xl border border-line bg-surface p-4 sm:grid-cols-2">
+      <Select label="Highest quality" value={prefs.maxQuality} onChange={(e) => save({ maxQuality: e.target.value as PlaybackPrefs["maxQuality"] })}>
+        <option value="4K">4K</option>
+        <option value="1080p">1080p (recommended)</option>
+        <option value="720p">720p (slower connections)</option>
+        <option value="480p">480p</option>
+      </Select>
+      <label className="flex items-center gap-3 self-end pb-2 text-sm">
+        <input type="checkbox" checked={prefs.autoPlay} onChange={(e) => save({ autoPlay: e.target.checked })} className="size-4 accent-[var(--accent)]" />
+        Start the best source automatically
+      </label>
+      <p role="status" className="text-xs text-ink-3 sm:col-span-2">
+        {status ?? "Changes save automatically. Higher qualities are still used when nothing else is available."}
+      </p>
+    </div>
   );
 }

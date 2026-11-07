@@ -13,7 +13,7 @@ export function useTitleState(type: string, id: string) {
 }
 
 /** Watchlist, watched and rating for a film or series. Every change is saved here and sent to Trakt if connected. */
-export function TitleActions({ type, id, state, reload }: { type: "movie" | "series"; id: string; state?: TitleState; reload: () => void }) {
+export function TitleActions({ type, id, state, reload, play }: { type: "movie" | "series"; id: string; state?: TitleState; reload: () => void; play?: React.ReactNode }) {
   const [busy, setBusy] = useState<string>();
   const [error, setError] = useState<string>();
 
@@ -35,8 +35,9 @@ export function TitleActions({ type, id, state, reload }: { type: "movie" | "ser
   return (
     <div className="mt-6 flex flex-col gap-3">
       <div className="flex flex-wrap items-center gap-2">
+        {play}
         <Button
-          variant={state.inWatchlist ? "quiet" : "primary"}
+          variant="quiet"
           busy={busy === "watchlist"}
           aria-pressed={state.inWatchlist}
           onClick={() => run("watchlist", () => api(`${base}/watchlist`, { method: state.inWatchlist ? "DELETE" : "PUT" }))}

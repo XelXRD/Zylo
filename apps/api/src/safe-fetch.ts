@@ -58,6 +58,16 @@ export function normaliseUrl(raw: string) {
 }
 
 export async function safeFetchJson<T>(raw: string, opts: SafeFetchOptions = {}): Promise<T> {
+  const text = await safeFetchText(raw, opts);
+  try {
+    return JSON.parse(text) as T;
+  } catch {
+    throw new UnsafeUrl("The addon didn't send back valid JSON.");
+  }
+}
+
+/** Same protections, raw text back (subtitle files). */
+export async function safeFetchText(raw: string, opts: SafeFetchOptions = {}): Promise<string> {
   const { allowPrivate = false, timeoutMs = 10_000, maxBytes = 5 * 1024 * 1024, maxRedirects = 3, resolver = systemResolver } = opts;
   let url = normaliseUrl(raw);
 
@@ -88,11 +98,7 @@ export async function safeFetchJson<T>(raw: string, opts: SafeFetchOptions = {})
       continue;
     }
     if (res.status < 200 || res.status >= 300) throw Object.assign(new UnsafeUrl(`The addon answered with an error (${res.status}).`), { status: res.status });
-    try {
-      return JSON.parse(res.body) as T;
-    } catch {
-      throw new UnsafeUrl("The addon didn't send back valid JSON.");
-    }
+    return res.body;
   }
 }
 
@@ -124,9 +130,18 @@ function request(url: URL, lookup: LookupFunction, timeoutMs: number, maxBytes: 
         if (size > maxBytes) return finish(new UnsafeUrl("The addon's response was too large."));
         chunks.push(c);
       });
-      res.on("end", () => finish(null, { status, body: Buffer.concat(chunks).toString("utf8") }));
+      res.on("end", () => finish(null, { status, body: decode(Buffer.concat(chunks)) }));
       res.on("error", (e) => finish(e));
     });
     req.on("error", (e) => finish(e));
   });
+}
+
+/** UTF-8 if it is valid UTF-8, otherwise Windows-1252/Latin-1 (common for older subtitle files). */
+function decode(buf: Buffer) {
+  try {
+    return new TextDecoder("utf-8", { fatal: true }).decode(buf).replace(/^\uFEFF/, "");
+  } catch {
+    return new TextDecoder("windows-1252").decode(buf);
+  }
 }

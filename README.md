@@ -2,7 +2,7 @@
 
 One interface. Your entire media world.
 
-Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways) and **Phase 4, Addons** (Stremio-compatible addons: streams on film and episode pages, addon catalogues on the home page). The full plan is in the master specification.
+Self-hosted media discovery, tracking and playback. Built so far: **Phase 1, Core** (accounts, profiles, settings, Docker stack), **Phase 2, Metadata** (TMDB search, film and series pages, seasons and episodes, optional TheTVDB episode orders) **Phase 3, Trakt** (per-profile history, ratings, watchlist and lists, synced both ways) **Phase 4, Addons** (Stremio-compatible addons: streams on film and episode pages, addon catalogues on the home page) and **Phase 5, Playback** (built-in player, automatic source choice, resume on any device, Continue watching, Trakt scrobbling, subtitles). The full plan is in the master specification.
 
 ## Run it
 
@@ -89,3 +89,14 @@ TEST_DATABASE_URL=postgresql://zylo:zylo@localhost:5432/zylo_test pnpm test
 - An addon answering "not found" means it has nothing for that title, not that it failed.
 - Home shows up to 3 browsable catalogues per addon (search-only catalogues skipped). Items are matched to Zylo's own title pages by IMDb ID; addon-only titles without one aren't shown yet.
 - Subtitle addons are used by the player (Phase 5); subtitles attached to streams are already kept.
+
+## Phase 5 decisions
+
+- **The player is the browser's own `<video>`**, so keyboard shortcuts, picture-in-picture, full screen and accessibility come for free. Zylo doesn't transcode: MP4/WebM play everywhere; MKV and HEVC depend on your browser, and Zylo says so plainly when one won't play, with **Try the next source** and **Open in VLC** (a small playlist file VLC opens).
+- **Choosing a source:** direct links only (YouTube entries are usually trailers; websites can't be embedded), in this order: the source you last picked for that title; files your browser can play; quality at or under your profile's limit (default 1080p), best first; then your addon order. Each profile sets its limit, and whether to start automatically, under **Settings > Playback**.
+- **Progress** is saved every 15 seconds, on pause, and when you leave the page, per profile on the server, so **Resume** works on any device. Over a minute in and not finished = **Continue watching** on Home.
+- **Finished = 90% watched.** That's logged once per viewing (credits rolling don't count again; starting over from the beginning begins a new viewing).
+- **Trakt scrobbling:** play and pause show live on Trakt; at 90% Zylo sends one "stop", which Trakt records as a play. If Trakt is down, the play goes to the outbox instead. When Trakt's copy comes back on the next sync, it's recognised as the same viewing (within 10 minutes) and not duplicated.
+- **Next episode:** when an episode ends, **Play next episode** prefers the same source group (Stremio's `bingeGroup`), so you stay on the same addon and quality.
+- **Subtitles** come from the stream itself and from any subtitle addons, fetched through Zylo with the same network protections, converted from SRT to WebVTT, and Latin-1 files decoded properly.
+- Not yet: progress from external players (VLC can't report back), streams that need custom headers, and HLS where the browser has no native support.

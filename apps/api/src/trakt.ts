@@ -193,6 +193,12 @@ export function traktService(db: PrismaClient, metadata: MetadataService, base =
         for (const h of await pages<TItem & { watched_at: string }>(api, `/sync/history${since}`)) {
           const r = await resolve(h);
           if (!r) continue;
+          // The same viewing recorded twice (e.g. Zylo's player logged it and also scrobbled it): keep one.
+          const at = new Date(h.watched_at);
+          const near = await db.watchEvent.findFirst({
+            where: { profileId, mediaItemId: r.mediaItemId, seasonNumber: r.season, episodeNumber: r.episode, watchedAt: { gte: new Date(at.getTime() - 600_000), lte: new Date(at.getTime() + 600_000) } },
+          });
+          if (near) continue;
           await db.watchEvent.upsert({
             where: { profileId_mediaItemId_seasonNumber_episodeNumber_watchedAt: { profileId, mediaItemId: r.mediaItemId, seasonNumber: r.season, episodeNumber: r.episode, watchedAt: new Date(h.watched_at) } },
             create: { profileId, mediaItemId: r.mediaItemId, seasonNumber: r.season, episodeNumber: r.episode, watchedAt: new Date(h.watched_at), source: "trakt" },
@@ -288,7 +294,26 @@ export function traktService(db: PrismaClient, metadata: MetadataService, base =
     return { type: item.type, tmdbId: Number(tmdb), ...(season >= 0 && { season, episode }) };
   }
 
-  return { app, tokenFor, saveTokens, push, sync, collection };
+  /**
+   * Live "now watching" for Trakt. start/pause just inform; stop at ≥80% records a play on Trakt.
+   * Returns false when not connected or Trakt couldn't be reached. A 409 means Trakt already recorded it.
+   */
+  async function scrobble(profileId: string, action: "start" | "pause" | "stop", t: Target, progress: number) {
+    const api = await tokenFor(profileId).catch(() => null);
+    if (!api) return false;
+    const body =
+      t.type === "movie"
+        ? { movie: { ids: { tmdb: t.tmdbId } }, progress }
+        : { show: { ids: { tmdb: t.tmdbId } }, episode: { season: t.season, number: t.episode }, progress };
+    try {
+      await api.post(`/scrobble/${action}`, body);
+      return true;
+    } catch (e) {
+      return e instanceof UpstreamError && e.status === 409;
+    }
+  }
+
+  return { app, tokenFor, saveTokens, push, sync, collection, scrobble };
 }
 
 export type TraktService = ReturnType<typeof traktService>;
