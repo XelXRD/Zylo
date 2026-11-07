@@ -17,7 +17,7 @@ Open http://localhost:3000. The first visit asks you to create the admin account
 
 Then connect metadata: **Settings > Integrations > TMDB**. Create a free account at themoviedb.org, open Settings > API, and paste the *API Read Access Token*. TheTVDB is optional and adds DVD, absolute and other episode orders.
 
-To use Trakt: create an app at trakt.tv/oauth/applications with the redirect URI `urn:ietf:wg:oauth:2.0:oob`, paste its Client ID and Secret under **Settings > Integrations > Trakt**, then each profile connects its own account under **Settings > Trakt** with a short code.
+To use Trakt: create an app at trakt.tv/oauth/applications with `http://localhost` as the Redirect URI (Trakt only accepts localhost addresses; Zylo never visits it), paste its Client ID, Secret and that same Redirect URI under **Settings > Integrations > Trakt**, then each profile connects its own account under **Settings > Trakt** with a short code at trakt.tv/activate.
 
 Update later with `docker compose up -d --build`. Database migrations run automatically when `zylo-core` starts.
 
@@ -80,7 +80,7 @@ TEST_DATABASE_URL=postgresql://zylo:zylo@localhost:5432/zylo_test pnpm test
 
 ## Phase 4 decisions
 
-- **Zylo ships with no addons.** Add your own under **Settings > Addons** by pasting the manifest link (ending in `/manifest.json`; `stremio://` links work). Addons are shared by every profile on the account.
+- **Zylo ships with no addons.** Add your own under **Settings > Addons** by pasting the addon's link: usually ending in `manifest.json`, but any `.json` file name works, as do `stremio://` links. Links that aren't Stremio manifests (such as Syncler vendor lists) are recognised and explained; Syncler support arrives in Phase 8. Addons are shared by every profile on the account.
 - **Addon links are treated like passwords.** Configured addons usually carry your account keys in the link, so it's encrypted at rest and only the website's name is ever shown. Reinstalling the same addon replaces its link (that's how reconfiguring works); **Configure** opens the addon's own setup page.
 - **Addons can't reach your network.** Every request is checked when it connects, after DNS, and again on each redirect: private, local and cloud-metadata addresses are refused, including tricks where a public name later points somewhere private. Responses are limited to 5 MB, JSON only, with a 10-second limit (15 for streams). No addon code is ever run. Set `ZYLO_ALLOW_PRIVATE_ADDONS=true` only if you host your own addon at home.
 - **Streams are fetched only when you ask** ("Find streams" on a film, "Streams" on an episode), from every enabled addon at once, in your chosen order. Each addon is asked with the IDs it says it understands (IMDb `tt…`, or `tmdb:…`). Results are cached for 5 minutes.

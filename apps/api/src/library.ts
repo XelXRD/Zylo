@@ -33,7 +33,7 @@ export function registerLibraryRoutes(
 
   // --- admin: the Trakt app (one per server) ---
 
-  app.put<{ Body: { clientId: string; clientSecret: string } }>(
+  app.put<{ Body: { clientId: string; clientSecret: string; redirectUri?: string } }>(
     "/integrations/trakt",
     {
       preHandler: requireAdmin,
@@ -42,12 +42,16 @@ export function registerLibraryRoutes(
           type: "object",
           required: ["clientId", "clientSecret"],
           additionalProperties: false,
-          properties: { clientId: { type: "string", minLength: 20, maxLength: 200 }, clientSecret: { type: "string", minLength: 20, maxLength: 200 } },
+          properties: {
+            clientId: { type: "string", minLength: 20, maxLength: 200 },
+            clientSecret: { type: "string", minLength: 20, maxLength: 200 },
+            redirectUri: { type: "string", minLength: 1, maxLength: 500 },
+          },
         },
       },
     },
     async (req, reply) => {
-      const creds = { clientId: req.body.clientId.trim(), clientSecret: req.body.clientSecret.trim() };
+      const creds = { clientId: req.body.clientId.trim(), clientSecret: req.body.clientSecret.trim(), redirectUri: req.body.redirectUri?.trim() || "http://localhost" };
       try {
         // Asking for a device code proves the Client ID is real (the secret is checked at first sign-in).
         await traktClient(creds, deps.traktBase ?? TRAKT_BASE).deviceCode();

@@ -64,7 +64,6 @@ export function registerAddonRoutes(app: FastifyInstance, db: PrismaClient, guar
       let manifest: Manifest;
       try {
         url = normaliseUrl(req.body.url).toString();
-        if (!/\/manifest\.json(\?.*)?$/i.test(url)) throw new UnsafeUrl("Paste the addon's full manifest address: it ends in /manifest.json.");
         manifest = await fetchManifest(url, fetchOptions);
       } catch (e) {
         return reply.code(400).send({ error: e instanceof UnsafeUrl ? e.message : "Couldn't read that addon." });

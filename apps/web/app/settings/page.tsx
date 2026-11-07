@@ -499,6 +499,7 @@ function TvdbCard({ integration, onChange }: { integration: Integration; onChang
 function TraktAppCard({ integration, onChange }: { integration: Integration; onChange: () => void }) {
   const [clientId, setClientId] = useState("");
   const [clientSecret, setClientSecret] = useState("");
+  const [redirectUri, setRedirectUri] = useState("http://localhost");
   const { busy, run, feedback } = useAction(onChange);
   return (
     <IntegrationCard
@@ -509,8 +510,10 @@ function TraktAppCard({ integration, onChange }: { integration: Integration; onC
           Lets each profile link its own Trakt account. Create an app at{" "}
           <a href="https://trakt.tv/oauth/applications/new" target="_blank" rel="noreferrer" className="font-medium text-ink underline decoration-line-strong underline-offset-2 hover:decoration-ink">
             trakt.tv/oauth/applications
-          </a>{" "}
-          with the redirect URI <code className="rounded bg-sunken px-1 py-px text-xs">urn:ietf:wg:oauth:2.0:oob</code>, then paste its Client ID and Client Secret.
+          </a>
+          , enter <code className="rounded bg-sunken px-1 py-px text-xs">http://localhost</code> as the Redirect URI, then paste its Client ID and
+          Client Secret here. Zylo never uses that address: everyone signs in with a short code at trakt.tv/activate. Trakt just needs it to
+          match when Zylo renews access each day.
         </>
       }
     >
@@ -519,7 +522,7 @@ function TraktAppCard({ integration, onChange }: { integration: Integration; onC
         onSubmit={(e) => {
           e.preventDefault();
           run("save", async () => {
-            await api("/integrations/trakt", { method: "PUT", body: { clientId, clientSecret } });
+            await api("/integrations/trakt", { method: "PUT", body: { clientId, clientSecret, redirectUri } });
             setClientId("");
             setClientSecret("");
             return "Trakt app saved. Each profile can now connect in Settings > Trakt.";
@@ -529,6 +532,15 @@ function TraktAppCard({ integration, onChange }: { integration: Integration; onC
         <div className="grid gap-4 sm:grid-cols-2">
           <Field label="Client ID" type="password" autoComplete="off" value={clientId} onChange={(e) => setClientId(e.target.value)} required minLength={20} />
           <Field label="Client Secret" type="password" autoComplete="off" value={clientSecret} onChange={(e) => setClientSecret(e.target.value)} required minLength={20} />
+          <Field
+            label="Redirect URI"
+            autoComplete="off"
+            spellCheck={false}
+            value={redirectUri}
+            onChange={(e) => setRedirectUri(e.target.value)}
+            required
+            hint="Exactly as you typed it on the Trakt app page."
+          />
         </div>
         {feedback}
         <div className="flex flex-wrap gap-2">
@@ -764,8 +776,8 @@ function Addons() {
           value={url}
           onChange={(e) => setUrl(e.target.value)}
           required
-          placeholder="https://example.com/manifest.json"
-          hint="The manifest link the addon gives you, ending in /manifest.json. stremio:// links work too. Treat it like a password: it can contain your account keys."
+          placeholder="https://addon.example.com/manifest.json"
+          hint="The link the addon gives you: usually ending in manifest.json, but any .json link works, and so do stremio:// links. Treat it like a password: it can contain your account keys."
         />
         {msg && (msg.ok ? <p role="status" className="text-sm text-accent">{msg.text}</p> : <FormError message={msg.text} />)}
         <div>

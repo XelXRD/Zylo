@@ -45,7 +45,9 @@ export function validateManifest(raw: unknown): Manifest {
     : [];
   const types = strArr(m.types);
   if (!id || !name || !version || !resources.length || !types) {
-    throw new UnsafeUrl("That address returned something that isn't a valid Stremio addon manifest (it needs an id, name, version, resources and types).");
+    throw new UnsafeUrl(
+      "That link works, but it isn't a Stremio addon manifest (it needs an id, name, version, resources and types). Syncler vendor and package links aren't supported yet: they arrive in a later update.",
+    );
   }
   const hints = (m.behaviorHints && typeof m.behaviorHints === "object" ? m.behaviorHints : {}) as Record<string, unknown>;
   const catalogs = Array.isArray(m.catalogs)
@@ -93,8 +95,16 @@ export function supports(m: Manifest, resource: string, type: string, id: string
 }
 
 /** The addon's base URL: the transport URL minus /manifest.json (configured addons keep their config path). */
+/**
+ * The addon's base URL: the manifest link minus its file name (configured addons keep their config path).
+ * Usually that's /manifest.json, but any file name works: https://x.example/cfg/my-list.json → https://x.example/cfg
+ */
 export function baseOf(transportUrl: string) {
-  return transportUrl.replace(/\/manifest\.json(\?.*)?$/i, "");
+  const u = new URL(transportUrl);
+  u.pathname = u.pathname.replace(/\/[^/]*$/, "");
+  u.search = "";
+  u.hash = "";
+  return u.toString().replace(/\/$/, "");
 }
 
 export function resourceUrl(base: string, resource: string, type: string, id: string, extra?: Record<string, string>) {

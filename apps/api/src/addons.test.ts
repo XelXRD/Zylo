@@ -5,7 +5,7 @@ import { createServer } from "node:http";
 import { createHash } from "node:crypto";
 import pg from "pg";
 import { buildApp } from "./app.js";
-import { normaliseStream } from "./stremio.js";
+import { baseOf, normaliseStream } from "./stremio.js";
 
 const url = process.env.TEST_DATABASE_URL;
 if (!url) throw new Error("Set TEST_DATABASE_URL to an empty, migrated database");
@@ -44,7 +44,7 @@ const mock = createServer((req, res) => {
   const m = p.match(/^\/(\w+)(?:\/secret-config)?\/(.*)$/);
   if (!m) return send(404, {});
   const [, name, rest] = m;
-  if (rest === "manifest.json") return name === "notamanifest" ? send(200, { hello: "world" }) : send(200, manifests[name]);
+  if (rest === "manifest.json" || rest === "my-addon-list.json") return name === "notamanifest" ? send(200, { hello: "world" }) : send(200, manifests[name]);
   if (name === "broken") return send(500, {});
   if (name === "alpha" && rest === "stream/movie/tt0063350.json")
     return send(200, {
@@ -63,6 +63,12 @@ const mock = createServer((req, res) => {
   if (name === "alpha" && rest === "catalog/movie/top.json")
     return send(200, { metas: [{ id: "tt0063350", type: "movie", name: "Night of the Living Dead", releaseInfo: "1968", poster: "https://img.example.com/n.jpg" }, { id: "custom:42", type: "movie", name: "Addon-only" }, { id: "tt0000001", type: "movie", name: "Unknown", poster: "http://insecure.example/p.jpg" }] });
   send(404, {});
+});
+
+test("baseOf: any manifest file name, config path kept, query dropped", () => {
+  assert.equal(baseOf("https://a.example/cfg-1/manifest.json"), "https://a.example/cfg-1");
+  assert.equal(baseOf("https://a.example/lists/my-addon.json?x=1"), "https://a.example/lists");
+  assert.equal(baseOf("https://a.example/manifest.json"), "https://a.example");
 });
 
 test("normaliseStream: kinds, quality, size, safe subtitles", () => {
@@ -94,8 +100,8 @@ test("phase 4: install, manage, streams, catalogues, isolation, SSRF", async () 
   await call("PUT", "/integrations/tmdb", { token: TMDB_TOKEN });
 
   // Install: must be a manifest URL, and a real manifest.
-  assert.match((await call("POST", "/addons", { url: `${base}/alpha/` })).json.error, /manifest\.json/);
-  assert.match((await call("POST", "/addons", { url: `${base}/notamanifest/manifest.json` })).json.error, /valid Stremio addon manifest/);
+  assert.match((await call("POST", "/addons", { url: `${base}/alpha/` })).json.error, /answered with an error \(404\)/);
+  assert.match((await call("POST", "/addons", { url: `${base}/notamanifest/manifest.json` })).json.error, /isn't a Stremio addon manifest.*Syncler/);
   const alpha = await call("POST", "/addons", { url: `${base}/alpha/secret-config/manifest.json` });
   assert.equal(alpha.status, 201);
   assert.equal(alpha.json.p2p, true);
@@ -108,6 +114,10 @@ test("phase 4: install, manage, streams, catalogues, isolation, SSRF", async () 
   const stored = (await client.query(`SELECT "transportUrl" FROM "Addon"`)).rows.map((r) => r.transportUrl).join();
   assert.ok(!stored.includes("secret-config"));
   assert.match((await call("GET", `/addons/${alpha.json.id}/configure`)).json.url, /secret-config\/configure$/);
+
+  // Any .json file name works, not just manifest.json (resources resolve next to it).
+  const custom = await call("POST", "/addons", { url: `${base}/beta/my-addon-list.json` });
+  assert.equal(custom.status, 200, "same addon id as Beta, so it replaces it");
 
   // Reinstalling the same addon replaces its configuration in place.
   const again = await call("POST", "/addons", { url: `${base}/alpha/secret-config/manifest.json` });

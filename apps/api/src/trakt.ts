@@ -7,10 +7,13 @@ import type { MetadataService } from "./metadata.js";
 import { decrypt, encrypt } from "./secrets.js";
 
 export const TRAKT_BASE = "https://api.trakt.tv";
-const OOB = "urn:ietf:wg:oauth:2.0:oob";
+/** Older installs registered the out-of-band URI; Trakt now only accepts localhost addresses. */
+export const DEFAULT_REDIRECT = "urn:ietf:wg:oauth:2.0:oob";
 const PAGE = 100;
 
-export type TraktApp = { clientId: string; clientSecret: string };
+// redirectUri: whatever was entered on the Trakt app page. Sign-in never visits it (device code), but
+// Trakt checks it matches when tokens are refreshed.
+export type TraktApp = { clientId: string; clientSecret: string; redirectUri?: string };
 type Tokens = { access_token: string; refresh_token: string; expires_in: number; created_at: number };
 type Ids = { trakt?: number; slug?: string; imdb?: string | null; tmdb?: number | null; tvdb?: number | null };
 type TMovie = { title: string; year: number | null; ids: Ids };
@@ -45,7 +48,7 @@ export function traktClient(app: TraktApp, base = TRAKT_BASE) {
       }
     },
     refresh: (refreshToken: string) =>
-      post<Tokens>("/oauth/token", { refresh_token: refreshToken, client_id: app.clientId, client_secret: app.clientSecret, redirect_uri: OOB, grant_type: "refresh_token" }),
+      post<Tokens>("/oauth/token", { refresh_token: refreshToken, client_id: app.clientId, client_secret: app.clientSecret, redirect_uri: app.redirectUri ?? DEFAULT_REDIRECT, grant_type: "refresh_token" }),
     revoke: (token: string) => post("/oauth/revoke", { token, client_id: app.clientId, client_secret: app.clientSecret }),
     as(token: string) {
       const auth = { ...headers, authorization: `Bearer ${token}` };

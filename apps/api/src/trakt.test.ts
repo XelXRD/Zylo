@@ -64,7 +64,7 @@ const mock = createServer((req, res) => {
       return ++t.polls < 2 ? send(400) : send(200, { access_token: t.accessToken, refresh_token: t.refreshToken, expires_in: 86400, created_at: Math.floor(Date.now() / 1000) });
     }
     if (p === "/oauth/token") {
-      if (body.refresh_token !== t.refreshToken || body.redirect_uri !== "urn:ietf:wg:oauth:2.0:oob") return send(400);
+      if (body.refresh_token !== t.refreshToken || body.redirect_uri !== "http://localhost") return send(400); // must match the app page
       t.accessToken = "access-2";
       t.refreshToken = "refresh-2";
       return send(200, { access_token: t.accessToken, refresh_token: t.refreshToken, expires_in: 86400, created_at: Math.floor(Date.now() / 1000) });
@@ -140,7 +140,7 @@ test("phase 3: Trakt connect, import, push, outbox, mirror, refresh", async () =
 
   // Admin adds the Trakt app; a wrong Client ID is caught.
   assert.equal((await call("PUT", "/integrations/trakt", { clientId: "wrong-client-id-000000000", clientSecret: CLIENT_SECRET })).status, 400);
-  assert.equal((await call("PUT", "/integrations/trakt", { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET })).status, 204);
+  assert.equal((await call("PUT", "/integrations/trakt", { clientId: CLIENT_ID, clientSecret: CLIENT_SECRET, redirectUri: "http://localhost" })).status, 204);
 
   // Device sign-in: pending, then connected (which runs the first sync inline in tests).
   const code = (await call("POST", "/trakt/connect")).json;
