@@ -2,6 +2,7 @@
 package tv.zylo
 
 import android.content.Context
+import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateOf
 import org.json.JSONArray
 import org.json.JSONObject
@@ -12,7 +13,7 @@ import java.util.concurrent.ConcurrentHashMap
 
 class HttpError(val code: Int, message: String) : Exception(message)
 
-fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null): String {
+fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null, timeout: Int = 10_000): String {
   val c = URL(url).openConnection() as HttpURLConnection
   try {
     try {
@@ -20,9 +21,9 @@ fun http(url: String, method: String = "GET", headers: Map<String, String> = emp
     } catch (e: java.net.ProtocolException) { // PATCH (MyAnimeList) on stacks that only list the classic methods
       HttpURLConnection::class.java.getDeclaredField("method").apply { isAccessible = true }.set(c, method)
     }
-    c.connectTimeout = 10_000
+    c.connectTimeout = timeout
     c.readTimeout = 20_000
-    c.setRequestProperty("User-Agent", "Zylo/0.12.0")
+    c.setRequestProperty("User-Agent", "Zylo/0.13.0")
     headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
     if (body != null) {
       c.doOutput = true
@@ -75,42 +76,107 @@ fun progressKey(item: Item, season: Int?, episode: Int?) = "${item.type}:${item.
 
 // --- Storage ------------------------------------------------------------------------
 
-class Store(ctx: Context) {
-  private val p = ctx.getSharedPreferences("zylo", Context.MODE_PRIVATE)
-  fun put(k: String, v: String) = p.edit().putString(k, v).apply()
-  fun str(k: String) = p.getString(k, "")!!
-  fun long(k: String) = p.getLong(k, 0)
-  fun putLong(k: String, v: Long) = p.edit().putLong(k, v).apply()
+data class Profile(val id: String, val name: String, val color: Int)
+
+/**
+ * Settings and data, on the TV. Two layers:
+ * - global ("zylo"): TMDB/fanart/debrid keys, addons, media servers, app-wide preferences, the profile list;
+ * - per profile: watch progress, My List, Trakt / AniList / MyAnimeList sign-ins, remembered sources, subtitle language.
+ * The first profile ("main") uses the global file too, so data from before profiles existed simply stays where it was.
+ */
+class Store(private val open: (String) -> SharedPreferences) {
+  constructor(ctx: Context) : this({ ctx.getSharedPreferences(it, Context.MODE_PRIVATE) })
+
+  private val g = open("zylo")
+  val profileId: String = g.getString("profile", "main")!!.let { id -> if (id == "main" || profilesIn(g).any { it.id == id }) id else "main" }
+  private val p = if (profileId == "main") g else open("zylo_p_$profileId")
+
+  /** Which layer a key lives in. App credentials (…_client) stay global so each profile only signs in. */
+  private fun layer(k: String) = if (!k.endsWith("_client") && PROFILE_KEYS.any { k.startsWith(it) }) p else g
+
+  fun put(k: String, v: String) = layer(k).edit().putString(k, v).apply()
+  fun str(k: String) = layer(k).getString(k, "")!!
+  fun long(k: String) = layer(k).getLong(k, 0)
+  fun putLong(k: String, v: Long) = layer(k).edit().putLong(k, v).apply()
+
+  // --- Profiles ---
+  val profiles: List<Profile> get() = profilesIn(g)
+  val profile: Profile get() = profiles.find { it.id == profileId } ?: profiles.first()
+
+  fun addProfile(name: String): Profile {
+    val list = profiles
+    val made = Profile("p${System.currentTimeMillis()}", name.trim().ifEmpty { "Profile ${list.size + 1}" }, AVATARS[list.size % AVATARS.size])
+    saveProfiles(list + made)
+    return made
+  }
+
+  fun renameProfile(id: String, name: String) = saveProfiles(profiles.map { if (it.id == id && name.isNotBlank()) it.copy(name = name.trim()) else it })
+
+  /** Removes the profile and everything it saved. The main profile and the one in use can't be removed. */
+  fun deleteProfile(id: String) {
+    if (id == "main" || id == profileId) return
+    open("zylo_p_$id").edit().clear().apply()
+    saveProfiles(profiles.filter { it.id != id })
+  }
+
+  /** Takes effect when the screen is rebuilt (MainActivity recreates itself). */
+  fun switchProfile(id: String) = g.edit().putString("profile", id).commit()
+
+  private fun saveProfiles(list: List<Profile>) =
+    g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color) }).toString()).apply()
+
+  companion object {
+    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang")
+    val AVATARS = listOf(0xFFBD1422, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
+
+    private fun profilesIn(g: SharedPreferences): List<Profile> =
+      JSONArray(g.getString("profiles", "[]")).objects().map { Profile(it.getString("id"), it.optString("name"), it.optInt("color", AVATARS[0])) }
+        .ifEmpty { listOf(Profile("main", "Me", AVATARS[0])) }
+  }
 
   // ponytail: keys live in app-private storage, not Keystore-encrypted; add that if the Shield is shared or rooted
   var tmdb: String
-    get() = p.getString("tmdb", "")!!
+    get() = g.getString("tmdb", "")!!
     set(v) = put("tmdb", v.trim())
 
-  fun debrid(service: String) = p.getString("debrid_$service", "")!!
+  fun debrid(service: String) = g.getString("debrid_$service", "")!!
   fun setDebrid(service: String, key: String) = put("debrid_$service", key.trim())
 
   /** "ok", "fail:<why>", or "" (never tested). Only "ok" may show as Connected. */
-  fun status(service: String) = p.getString("status_$service", "")!!
+  fun status(service: String) = str("status_$service")
   fun setStatus(service: String, v: String) = put("status_$service", v)
 
-  private val previewsState = mutableStateOf(p.getBoolean("previews", true))
+  private val previewsState = mutableStateOf(g.getBoolean("previews", true))
   var previews: Boolean
     get() = previewsState.value
-    set(v) { previewsState.value = v; p.edit().putBoolean("previews", v).apply() }
+    set(v) { previewsState.value = v; g.edit().putBoolean("previews", v).apply() }
 
-  private val trailerSoundState = mutableStateOf(p.getBoolean("trailerSound", false))
+  private val trailerSoundState = mutableStateOf(g.getBoolean("trailerSound", false))
   var trailerSound: Boolean
     get() = trailerSoundState.value
-    set(v) { trailerSoundState.value = v; p.edit().putBoolean("trailerSound", v).apply() }
+    set(v) { trailerSoundState.value = v; g.edit().putBoolean("trailerSound", v).apply() }
 
-  private val reduceMotionState = mutableStateOf(p.getBoolean("reduceMotion", false))
+  private val reduceMotionState = mutableStateOf(g.getBoolean("reduceMotion", false))
   var reduceMotion: Boolean
     get() = reduceMotionState.value
-    set(v) { reduceMotionState.value = v; p.edit().putBoolean("reduceMotion", v).apply() }
+    set(v) { reduceMotionState.value = v; g.edit().putBoolean("reduceMotion", v).apply() }
+
+  /** Highest quality Play picks on its own ("4K", "1080p", "720p"). Higher ones stay listed in Choose Source. */
+  var maxQuality: String
+    get() = g.getString("maxQuality", "4K")!!
+    set(v) = g.edit().putString("maxQuality", v).apply()
+
+  /** Preferred subtitle language (ISO 639-1, e.g. "en"); "" = subtitles off unless the file forces them. */
+  var subLang: String
+    get() = str("sublang")
+    set(v) = put("sublang", v)
+
+  /** The source that last played well for this film or series (for a series: what the next episode should look like). */
+  fun sourcePref(item: Item): JSONObject? = str("src:${item.key}").takeIf { it.isNotEmpty() }?.let { runCatching { JSONObject(it) }.getOrNull() }
+  fun rememberSource(item: Item, pref: String) = put("src:${item.key}", pref)
 
   var addons: List<Addon>
-    get() = JSONArray(p.getString("addons", "[]")).objects().map { Addon(it.getString("url"), it.getJSONObject("manifest")) }
+    get() = JSONArray(g.getString("addons", "[]")).objects().map { Addon(it.getString("url"), it.getJSONObject("manifest")) }
     set(v) = put("addons", JSONArray(v.map { JSONObject().put("url", it.url).put("manifest", it.manifest) }).toString())
 
   var myList: List<Item>
@@ -275,4 +341,26 @@ val DISCOVER_ROWS = listOf(
   RowSpec("Anime Films", "/discover/movie?with_genres=16&with_origin_country=JP", "movie"),
   RowSpec("Family", "/discover/movie?with_genres=10751", "movie"),
   RowSpec("Documentaries", "/discover/movie?with_genres=99", "movie"),
+)
+
+// --- Up Next ---------------------------------------------------------------------------------------
+
+class NextEp(val season: Int, val episode: Int, val name: String, val still: String?)
+
+/**
+ * The episode after S[season]E[episode]: the next one in the season, else the first of the next season (specials,
+ * season 0, are skipped). Nothing if it hasn't aired yet. today: "yyyy-MM-dd".
+ */
+fun nextEpisode(episodesOf: (Int) -> List<JSONObject>, seasons: List<Int>, season: Int, episode: Int, today: String): NextEp? {
+  fun aired(e: JSONObject) = e.str("air_date")?.let { it <= today } ?: false
+  fun of(s: Int, e: JSONObject) = if (aired(e)) NextEp(s, e.optInt("episode_number"), e.optString("name"), e.str("still_path")) else null
+  episodesOf(season).find { it.optInt("episode_number") == episode + 1 }?.let { return of(season, it) }
+  val following = seasons.filter { it > season && it > 0 }.minOrNull() ?: return null
+  return episodesOf(following).minByOrNull { it.optInt("episode_number") }?.let { of(following, it) }
+}
+
+fun nextEpisode(t: Tmdb, item: Item, season: Int, episode: Int): NextEp? = nextEpisode(
+  { s -> t.season(item.id, s).optJSONArray("episodes")?.objects().orEmpty() },
+  t.details("tv", item.id).optJSONArray("seasons")?.objects()?.map { it.optInt("season_number") }.orEmpty(),
+  season, episode, java.text.SimpleDateFormat("yyyy-MM-dd", java.util.Locale.UK).format(java.util.Date()),
 )

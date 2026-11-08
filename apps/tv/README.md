@@ -12,6 +12,11 @@ A standalone native app for Android TV / NVIDIA Shield. No server: it talks to T
 - **Settings** (its own sidebar): Playback, Integrations, Addons, Debrid Services, About. A service only shows as Connected after a real test.
 - **Trakt:** sign in with a code at trakt.tv/activate (your own Trakt API app's Client ID). Home gets Your Trakt Watchlist, Recommended For You and Popular on Trakt; My Lists shows your watchlist plus lists you made or liked. Watch history and titles paused on other devices sync in (every 15 minutes or Sync Now), playback scrobbles (80%+ counts as watched), Mark as Watched and My List go back up to Trakt.
 - **AniList / MyAnimeList:** sign in by scanning a QR code on your phone and pasting the result back (the Google TV phone app's keyboard can paste). Finishing an anime episode moves your progress forward, matched with Kometa's anime ID list (handles split cours). Watching / Plan to Watch lists appear in My Lists.
+- **Up Next:** in the last 30 seconds of an episode, the next one (rolling into the next season, never one that hasn't aired) is offered with a 10-second countdown; it then starts from the same kind of source.
+- **Sources:** Play remembers what last played well for each film or series and prefers it (or one like it for the next episode). Settings > Playback > Maximum quality keeps Play below 4K / 1080p / 720p; higher sources stay in Choose Source.
+- **Subtitles:** from every addon that offers them (the Stremio subtitles resource), plus those inside the file. Settings > Playback > Subtitles turns your language on automatically.
+- **Plex and Jellyfin** (Settings > Media Servers): Plex signs in with a code at plex.tv/link and finds your server; Jellyfin uses its address, username and password. Titles are matched by TMDB id and listed first in Choose Source as Personal Library.
+- **Profiles:** Who's watching? at launch when there's more than one; each profile keeps its own Continue Watching, My List, Trakt / AniList / MyAnimeList sign-ins, remembered sources and subtitle language. Keys, addons and servers are shared. Avatar at the right of the top bar; manage in Settings > Profiles.
 - **fanart.tv** (optional key): title logos, clean backgrounds and landscape thumbs on Home, cards and detail pages. Without it, TMDB's logos are used where they exist.
 
 Design tokens (colours, type scale, radii, timings) are in `Theme.kt` (`object Z`). Font: Inter. The Z mark is a vector redraw of the concept logo; swap in the original artwork when available.
@@ -26,4 +31,4 @@ Signed with `debug.keystore` (same key as earlier builds), so it installs over t
 
 ## Not yet
 
-Plex/Jellyfin/Emby, profiles, notifications, rating and sharing, Trakt ratings and custom-list editing, next-episode autoplay, addon subtitles, a quality cap, remembering your last source.
+Emby (Jellyfin's API is close, but untested), notifications, rating and sharing, Trakt ratings and custom-list editing, profile PINs.

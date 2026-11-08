@@ -46,7 +46,11 @@ sealed interface Screen {
   data object Search : Screen
   data class Title(val item: Item) : Screen
   data class Sources(val item: Item, val season: Int?, val episode: Int?, val episodeName: String = "", val autoplay: Boolean = false) : Screen
-  data class Play(val item: Item, val season: Int?, val episode: Int?, val url: String, val headers: Map<String, String>, val subtitle: String, val source: String) : Screen
+  data class Play(
+    val item: Item, val season: Int?, val episode: Int?, val url: String, val headers: Map<String, String>, val subtitle: String, val source: String,
+    val subs: List<Sub> = emptyList(), val signature: String = "",
+  ) : Screen
+  data object Profiles : Screen
 }
 
 enum class Section(val label: String) { Home("Home"), Movies("Movies"), Series("Series"), Anime("Anime"), Discover("Discover"), MyList("My List") }
@@ -62,6 +66,7 @@ class UiState(store: Store) {
   val search = FocusMemory()
   val titles = HashMap<String, FocusMemory>()
   val content = FocusRequester() // the current page, so Down from the top bar always lands back in it
+  val profile = store.profile
   var listTab by mutableStateOf("mine")
 }
 
@@ -73,6 +78,10 @@ class Nav(private val stack: SnapshotStateList<Screen>, private val store: Store
 
   fun replace(s: Screen) {
     stack[stack.lastIndex] = s
+  }
+
+  fun back() {
+    if (stack.size > 1) stack.removeAt(stack.lastIndex)
   }
 
   /** Play from the right place: where you stopped, or the next episode after a finished one. */
@@ -93,7 +102,8 @@ class MainActivity : ComponentActivity() {
     Trakt.io.launch { runCatching { Trakt.sync(store) } } // history and paused-elsewhere titles, at most every 15 minutes
     setContent {
       ZTheme(store.reduceMotion) {
-        val stack = remember { mutableStateListOf<Screen>(Screen.Main) }
+        // Several people on this TV: ask who's watching when the app opens (not when it rebuilds after a switch).
+        val stack = remember { mutableStateListOf<Screen>(Screen.Main).apply { if (savedInstanceState == null && store.profiles.size > 1) add(Screen.Profiles) } }
         val nav = remember { Nav(stack, store, ui) }
         val saved = rememberSaveableStateHolder()
         BackHandler(stack.size > 1) {
@@ -108,7 +118,8 @@ class MainActivity : ComponentActivity() {
             Screen.Search -> SearchPage(store, nav, ui.search)
             is Screen.Title -> TitlePage(store, s.item, nav)
             is Screen.Sources -> SourcesPage(store, s, nav)
-            is Screen.Play -> PlayerPage(store, s)
+            is Screen.Play -> PlayerPage(store, s, nav)
+            Screen.Profiles -> ProfilesPage(store, nav)
           }
         }
       }
@@ -168,6 +179,7 @@ fun TopNav(ui: UiState, nav: Nav) {
     Spacer(Modifier.weight(1f))
     NavIcon(Icons.Filled.Search, down) { nav.push(Screen.Search) }
     NavIcon(Icons.Filled.Settings, down) { nav.push(Screen.Settings) }
+    NavSurface({ nav.push(Screen.Profiles) }, down) { Box(Modifier.padding(5.dp)) { Avatar(ui.profile, 28.dp) } }
   }
 }
 

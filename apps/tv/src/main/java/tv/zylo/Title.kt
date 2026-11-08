@@ -54,6 +54,11 @@ import androidx.media3.ui.PlayerView
 import androidx.tv.material3.*
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.animateFloatAsState
+import kotlinx.coroutines.withTimeoutOrNull
+import kotlinx.coroutines.flow.first
+import androidx.compose.runtime.snapshotFlow
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
@@ -250,6 +255,10 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
   val scope = rememberCoroutineScope()
   val first = remember { FocusRequester() }
   val addons = remember { store.addons }
+  val servers = remember { Library.connected(store) }
+  var subs by remember { mutableStateOf<List<Sub>?>(null) }
+  val pref = remember { store.sourcePref(s.item) }
+  val cap = store.maxQuality
   val label = listOfNotNull(s.season?.let { "S$it · E${s.episode}" }, s.episodeName.ifEmpty { null }).joinToString("   ")
 
   /** Get a playable link and open the player. On failure, say why and return false. */
@@ -262,20 +271,30 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
       notes = notes + "$name: ${it.message ?: "that source didn't work."}"
       return false
     }
-    val play = Screen.Play(s.item, s.season, s.episode, url, src.headers, label, listOfNotNull(name, src.quality, src.hdr.ifEmpty { null }).joinToString(" · "))
+    // Subtitles come from addons in parallel; wait briefly for them, but never hold up playback for long.
+    val subtitles = withTimeoutOrNull(4_000) { snapshotFlow { subs }.first { it != null } } ?: emptyList()
+    val play = Screen.Play(s.item, s.season, s.episode, url, src.headers, label, listOfNotNull(name, src.quality, src.hdr.ifEmpty { null }).joinToString(" · "), subtitles, src.signature())
     if (replace) nav.replace(play) else nav.push(play)
     return true
   }
 
   LaunchedEffect(s) {
-    if (addons.isEmpty()) return@LaunchedEffect
+    if (addons.isEmpty() && servers.isEmpty()) return@LaunchedEffect
     val d = withContext(Dispatchers.IO) { Tmdb(store.tmdb).preview(s.item) }
     val imdb = d?.optJSONObject("external_ids")?.str("imdb_id") ?: "tmdb:${s.item.id}"
-    val f = findSources(store, s.item.type, if (s.season != null) "$imdb:${s.season}:${s.episode}" else imdb)
+    val videoId = if (s.season != null) "$imdb:${s.season}:${s.episode}" else imdb
+    launch { subs = runCatching { findSubtitles(store, s.item.type, videoId) }.getOrDefault(emptyList()) }
+    val f = findSources(store, s.item, s.season, s.episode, videoId)
     found = f
     if (!s.autoplay || f.sources.isEmpty()) return@LaunchedEffect
+    // Play never picks a source above the quality cap on its own; those stay in the list to choose by hand.
+    val candidates = f.sources.filter { !overCap(it, cap) }.take(4)
+    if (candidates.isEmpty()) {
+      notes = notes + "Every source is above your $cap limit. Pick one below, or change it in Settings > Playback."
+      return@LaunchedEffect
+    }
     busy = true
-    for (src in f.sources.take(4)) {
+    for (src in candidates) {
       if (start(src, replace = true)) return@LaunchedEffect
       notes = notes + "Trying the next source…"
     }
@@ -298,7 +317,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
         }
         val f = found
         when {
-          addons.isEmpty() -> StatusChip("Requires configuration", Z.Warning)
+          addons.isEmpty() && servers.isEmpty() -> StatusChip("Requires configuration", Z.Warning)
           f == null -> StatusChip("Checking addons…", Z.Info)
           busy -> StatusChip("Starting…", Z.Info)
           else -> StatusChip("${f.sources.size} sources", Z.Text2)
@@ -308,7 +327,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
       Spacer(Modifier.height(14.dp))
       val f = found
       when {
-        addons.isEmpty() -> Text("Add a Stremio addon in Settings > Addons to find sources.", color = Z.Text2)
+        addons.isEmpty() && servers.isEmpty() -> Text("Add a Stremio addon (Settings > Addons) or connect Plex or Jellyfin (Settings > Media Servers) to find sources.", color = Z.Text2)
         f == null -> {}
         f.sources.isEmpty() -> Text(
           "No playable sources found." + when {
@@ -320,7 +339,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
         )
         else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
           itemsIndexed(f.sources) { i, src ->
-            SourceRow(src, best = i == 0, failed = src in failed, modifier = if (i == 0) Modifier.focusRequester(first) else Modifier) {
+            SourceRow(src, best = i == 0, failed = src in failed, last = src.likeness(pref) == 0, overCap = overCap(src, cap), modifier = if (i == 0) Modifier.focusRequester(first) else Modifier) {
               if (!busy) scope.launch {
                 busy = true
                 start(src, replace = false)
@@ -336,7 +355,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
 }
 
 @Composable
-private fun SourceRow(src: Source, best: Boolean, failed: Boolean, modifier: Modifier, onClick: () -> Unit) = Surface(
+private fun SourceRow(src: Source, best: Boolean, failed: Boolean, last: Boolean, overCap: Boolean, modifier: Modifier, onClick: () -> Unit) = Surface(
   onClick, modifier.fillMaxWidth(),
   shape = ClickableSurfaceDefaults.shape(Z.Medium),
   colors = ClickableSurfaceDefaults.colors(containerColor = if (best) Z.Card else Color.Transparent, contentColor = Z.Text, focusedContainerColor = Z.Elevated, focusedContentColor = Z.Text),
@@ -344,11 +363,14 @@ private fun SourceRow(src: Source, best: Boolean, failed: Boolean, modifier: Mod
   scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
 ) {
   Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-    Tile(when (src.debrid) { "torbox" -> "TB"; "realdebrid" -> "RD"; "premiumize" -> "PM"; else -> "A" })
+    Tile(when { src.library == "plex" -> "PX"; src.library == "jellyfin" -> "JF"; src.debrid == "torbox" -> "TB"; src.debrid == "realdebrid" -> "RD"; src.debrid == "premiumize" -> "PM"; else -> "A" })
     Spacer(Modifier.width(14.dp))
     Column(Modifier.weight(1f)) {
       Text(src.debrid?.let { SERVICES[it] } ?: src.addon, style = MaterialTheme.typography.titleSmall, maxLines = 1)
-      MetaLine(listOfNotNull(if (src.debrid != null) "Cloud · via ${src.addon}" else "Addon", src.quality, src.hdr.ifEmpty { null }, src.size))
+      MetaLine(listOfNotNull(
+        when { src.library != null -> "Personal Library"; src.debrid != null -> "Cloud · via ${src.addon}"; else -> "Addon" },
+        src.quality, src.hdr.ifEmpty { null }, src.size, "Last played".takeIf { last }, "Above your limit".takeIf { overCap },
+      ))
       Text(src.filename ?: src.detail.lineSequence().firstOrNull().orEmpty(), style = MaterialTheme.typography.labelSmall, color = Z.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
     }
     Spacer(Modifier.width(12.dp))
@@ -370,18 +392,23 @@ private fun SourceRow(src: Source, best: Boolean, failed: Boolean, modifier: Mod
 
 // --- Player ------------------------------------------------------------------------------------------------
 
+
 @OptIn(UnstableApi::class)
 @Composable
-fun PlayerPage(store: Store, s: Screen.Play) {
+fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   val ctx = LocalContext.current
   val key = progressKey(s.item, s.season, s.episode)
   var error by remember { mutableStateOf<String?>(null) }
   var controls by remember { mutableStateOf(false) }
   var view by remember { mutableStateOf<PlayerView?>(null) }
   val player = remember {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.12.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
+    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.13.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(http)).build().apply {
-      setMediaItem(MediaItem.fromUri(s.url))
+      // Addon subtitles ride along as extra text tracks; subtitles inside the file are found automatically.
+      setMediaItem(MediaItem.Builder().setUri(s.url).setSubtitleConfigurations(s.subs.map { sub ->
+        MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url)).setMimeType(subtitleMime(sub.url)).setLanguage(sub.lang).setLabel(sub.label).build()
+      }).build())
+      store.subLang.takeIf { it.isNotEmpty() }?.let { lang -> trackSelectionParameters = trackSelectionParameters.buildUpon().setPreferredTextLanguage(lang).build() }
       store.watch(key)?.takeIf { it.started && !it.percent }?.let { seekTo(it.pos) }
       prepare()
       playWhenReady = true
@@ -398,6 +425,41 @@ fun PlayerPage(store: Store, s: Screen.Play) {
       Anime.watched(ctx, store, s.item, s.season, s.episode)
     }
   }
+
+  // --- Up Next: in the last 30 seconds of an episode, offer the next one; it plays after a 10-second countdown. ---
+  var next by remember { mutableStateOf<NextEp?>(null) }
+  var upNext by remember { mutableStateOf(false) }
+  var dismissed by remember { mutableStateOf(false) }
+  var countdown by remember { mutableIntStateOf(UP_NEXT_SECONDS) }
+  var left by remember { mutableStateOf(false) }
+  fun playNext() {
+    val n = next ?: return
+    if (left) return
+    left = true
+    nav.replace(Screen.Sources(s.item, n.season, n.episode, n.name, autoplay = true))
+  }
+  LaunchedEffect(Unit) {
+    if (s.season != null && s.episode != null) next = withContext(Dispatchers.IO) { runCatching { nextEpisode(Tmdb(store.tmdb), s.item, s.season, s.episode) }.getOrNull() }
+  }
+  LaunchedEffect(next) {
+    if (next == null) return@LaunchedEffect
+    while (!upNext) {
+      delay(500)
+      val d = player.duration
+      if (d > 0 && player.currentPosition > 0 && d - player.currentPosition <= 30_000 && !dismissed) upNext = true
+    }
+  }
+  LaunchedEffect(upNext) {
+    if (!upNext) return@LaunchedEffect
+    countdown = UP_NEXT_SECONDS
+    while (countdown > 0) {
+      delay(1_000)
+      if (dismissed) return@LaunchedEffect
+      if (player.isPlaying) countdown-- // paused: the countdown waits too
+    }
+    playNext()
+  }
+
   LaunchedEffect(player) {
     while (true) {
       delay(10_000)
@@ -407,10 +469,16 @@ fun PlayerPage(store: Store, s: Screen.Play) {
   val lifecycle = LocalLifecycleOwner.current.lifecycle
   DisposableEffect(player) {
     var seeked = false
+    var remembered = false
     val listener = object : Player.Listener {
       override fun onPlayerError(e: PlaybackException) { error = "Couldn't play this source (${e.errorCodeName}). Press Back and choose another." }
       override fun onPlaybackStateChanged(state: Int) {
-        if (state == Player.STATE_READY && !seeked && resumeAt != null && player.duration > 0) { seeked = true; player.seekTo((player.duration * resumeAt).toLong()) }
+        if (state == Player.STATE_READY) {
+          if (!seeked && resumeAt != null && player.duration > 0) { seeked = true; player.seekTo((player.duration * resumeAt).toLong()) }
+          // It plays: remember this source (and its kind, for the next episode).
+          if (!remembered && s.signature.isNotEmpty()) { remembered = true; store.rememberSource(s.item, s.signature) }
+        }
+        if (state == Player.STATE_ENDED && !dismissed) playNext()
       }
       // Trakt "now watching": start when playing, pause when paused, stop when leaving (80%+ counts as watched).
       override fun onIsPlayingChanged(isPlaying: Boolean) {
@@ -428,6 +496,7 @@ fun PlayerPage(store: Store, s: Screen.Play) {
     }
   }
   BackHandler(controls) { view?.hideController() } // first Back hides the controls, the next one leaves
+  BackHandler(upNext && !dismissed) { dismissed = true; view?.requestFocus() } // Back on Up Next keeps watching
 
   Box(Modifier.fillMaxSize().background(Color.Black)) {
     AndroidView(
@@ -451,10 +520,48 @@ fun PlayerPage(store: Store, s: Screen.Play) {
       Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent))).padding(horizontal = Z.Pad, vertical = 28.dp),
     ) {
       Text(s.item.title, style = MaterialTheme.typography.headlineSmall)
-      MetaLine(listOf(s.subtitle, s.source), Modifier.padding(top = 4.dp))
+      MetaLine(listOf(s.subtitle, s.source) + listOfNotNull(s.subs.size.takeIf { it > 0 }?.let { "$it subtitle tracks" }), Modifier.padding(top = 4.dp))
     }
+    val n = next
+    if (upNext && !dismissed && n != null) UpNextCard(s.item, n, countdown, Modifier.align(Alignment.BottomEnd), ::playNext) { dismissed = true; view?.requestFocus() }
     error?.let {
       Text(it, Modifier.align(Alignment.Center).background(Z.Elevated, Z.Medium).padding(24.dp), style = MaterialTheme.typography.bodyLarge)
+    }
+  }
+}
+
+private const val UP_NEXT_SECONDS = 10
+
+/** Subtitle format from the link; addon links often have no extension, and those are almost always SubRip. */
+private fun subtitleMime(url: String): String {
+  val path = url.substringBefore('?').lowercase()
+  return when {
+    path.endsWith(".vtt") -> androidx.media3.common.MimeTypes.TEXT_VTT
+    path.endsWith(".ass") || path.endsWith(".ssa") -> androidx.media3.common.MimeTypes.TEXT_SSA
+    path.endsWith(".ttml") || path.endsWith(".xml") -> androidx.media3.common.MimeTypes.APPLICATION_TTML
+    else -> androidx.media3.common.MimeTypes.APPLICATION_SUBRIP
+  }
+}
+
+@Composable
+fun UpNextCard(item: Item, n: NextEp, countdown: Int, modifier: Modifier, play: () -> Unit, cancel: () -> Unit) {
+  val button = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(60); runCatching { button.requestFocus() } }
+  val fraction by animateFloatAsState(countdown / UP_NEXT_SECONDS.toFloat(), tween(ms(900), easing = androidx.compose.animation.core.LinearEasing), label = "countdown")
+  Column(Modifier.padding(Z.Pad).then(modifier).width(400.dp).background(Z.Surface.copy(alpha = 0.97f), Z.Large).padding(16.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Box(Modifier.width(150.dp).aspectRatio(16f / 9f).clip(Z.Small)) { Artwork(img(n.still, "w300") ?: img(item.backdrop, "w300"), n.name) }
+      Spacer(Modifier.width(14.dp))
+      Column(Modifier.weight(1f)) {
+        Text("Up Next", style = MaterialTheme.typography.labelMedium, color = Z.Text2)
+        Text("S${n.season} E${n.episode}", Modifier.padding(top = 2.dp), style = MaterialTheme.typography.titleSmall)
+        Text(n.name, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+      }
+    }
+    ProgressBar(fraction, Modifier.padding(top = 14.dp).clip(Z.Small))
+    Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+      ZButton("Play Now", play, Modifier.focusRequester(button), primary = true, icon = Icons.Filled.PlayArrow)
+      ZButton("Keep Watching", cancel)
     }
   }
 }

@@ -31,7 +31,9 @@ import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
-enum class SettingsPage(val label: String) { Playback("Playback"), Integrations("Integrations"), Addons("Addons"), Debrid("Debrid Services"), About("About Zylo") }
+enum class SettingsPage(val label: String) {
+  Profiles("Profiles"), Playback("Playback"), Integrations("Integrations"), Addons("Addons"), Debrid("Debrid Services"), Servers("Media Servers"), About("About Zylo")
+}
 
 @Composable
 fun SettingsScreen(store: Store) {
@@ -63,6 +65,8 @@ fun SettingsScreen(store: Store) {
           ServiceCard(store, "premiumize", "Premiumize", "Checks what's cached before you press Play.", "PM", { store.debrid("premiumize") }, { store.setDebrid("premiumize", it) })
         }
         SettingsPage.About -> About()
+        SettingsPage.Profiles -> ProfilesSettings(store)
+        SettingsPage.Servers -> panel?.let { it() } ?: MediaServers(store) { p -> panel = p?.let { content -> { content { panel = null } } } }
       }
     }
   }
@@ -79,7 +83,32 @@ private fun Playback(store: Store) = Column(verticalArrangement = Arrangement.sp
   Header("Playback", "How browsing and previews behave.")
   Toggle("Trailer previews", "Play a muted trailer when you rest on a title.", store.previews) { store.previews = !store.previews }
   Toggle("Trailer sound", "Play preview trailers with sound instead of muted.", store.trailerSound) { store.trailerSound = !store.trailerSound }
+  var cap by remember { mutableStateOf(store.maxQuality) }
+  Choice("Maximum quality", "The highest quality Play picks on its own. Higher sources stay in Choose Source.", cap) {
+    cap = QUALITY_STEPS[(QUALITY_STEPS.indexOf(cap) + 1) % QUALITY_STEPS.size]
+    store.maxQuality = cap
+  }
+  var lang by remember { mutableStateOf(store.subLang) }
+  Choice("Subtitles", "Turned on automatically in this language when a film has them. You can always pick others in the player.",
+    if (lang.isEmpty()) "Off" else languageName(lang)) {
+    lang = SUB_LANGS[(SUB_LANGS.indexOf(lang) + 1) % SUB_LANGS.size]
+    store.subLang = lang
+  }
   Toggle("Reduce motion", "Turn off card growth, fades and focus zoom.", store.reduceMotion) { store.reduceMotion = !store.reduceMotion }
+}
+
+private val SUB_LANGS = listOf("", "en", "es", "fr", "de", "it", "pt", "nl", "pl", "sv", "da", "no", "fi", "ja", "ko", "zh", "ar", "hi", "tr", "ru")
+
+/** A setting with a few values: OK steps to the next one. */
+@Composable
+private fun Choice(title: String, text: String, value: String, next: () -> Unit) = ZSurface(next, Modifier.fillMaxWidth(0.8f), container = Z.Card) {
+  Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+    Column(Modifier.weight(1f)) {
+      Text(title, style = MaterialTheme.typography.titleMedium)
+      Text(text, style = MaterialTheme.typography.bodySmall, color = LocalContentColor.current.copy(alpha = 0.75f))
+    }
+    Text(value, style = MaterialTheme.typography.labelLarge)
+  }
 }
 
 @Composable
@@ -241,6 +270,86 @@ private fun AnimeCard(store: Store, t: String, name: String, connect: (String) -
   }
 }
 
+// --- Media servers ------------------------------------------------------------------------------------
+
+@Composable
+private fun MediaServers(store: Store, open: ((@Composable (close: () -> Unit) -> Unit)?) -> Unit) {
+  val ctx = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var tick by remember { mutableIntStateOf(0) }
+  var busy by remember { mutableStateOf(false) }
+  var message by remember { mutableStateOf<String?>(null) }
+  val plex = remember(tick) { Plex.from(store) }
+  val jellyfin = remember(tick) { Jellyfin.from(store) }
+  Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Header("Media Servers", "Play films and episodes from your own server. They're listed first in Choose Source as Personal Library.")
+    AccountRow("PX", "Plex", if (plex != null) "Connected to ${plex.name}." else "Sign in with a code at plex.tv/link; Zylo finds your server.",
+      false, if (plex != null) "Connected" else "Not connected", if (plex != null) Z.Success else Z.Muted) {
+      if (plex == null) ZButton("Connect", { open { close -> PlexConnect(store) { close(); tick++ } } }, primary = true)
+      else ZButton("Disconnect", { Plex.disconnect(store); tick++ })
+    }
+    AccountRow("JF", "Jellyfin", message ?: if (jellyfin != null) "Connected to ${jellyfin.name}." else "Your server's address, username and password.",
+      message != null, when { busy -> "Checking…"; jellyfin != null -> "Connected"; else -> "Not connected" }, when { busy -> Z.Info; jellyfin != null -> Z.Success; else -> Z.Muted }) {
+      if (jellyfin == null) ZButton("Connect", {
+        ask(ctx, "Jellyfin server address (e.g. 192.168.1.20:8096)", store.str("jf_last")) { address ->
+          if (address.isBlank()) return@ask
+          store.put("jf_last", address.trim())
+          ask(ctx, "Jellyfin username", "") { user ->
+            ask(ctx, "Jellyfin password", "", secret = true) { password ->
+              scope.launch {
+                busy = true
+                message = null
+                withContext(Dispatchers.IO) { runCatching { Jellyfin.connect(store, address, user, password) } }.onFailure { message = it.message }
+                busy = false
+                tick++
+              }
+            }
+          }
+        }
+      }, primary = true)
+      else ZButton("Disconnect", { Jellyfin.disconnect(store); message = null; tick++ })
+    }
+  }
+}
+
+/** Plex link code: entered at plex.tv/link on any phone or computer. */
+@Composable
+private fun PlexConnect(store: Store, close: () -> Unit) {
+  var code by remember { mutableStateOf<String?>(null) }
+  var message by remember { mutableStateOf("Asking Plex for a code…") }
+  val cancel = remember { FocusRequester() }
+  LaunchedEffect(Unit) {
+    delay(80); runCatching { cancel.requestFocus() }
+    val cid = Library.deviceId(store)
+    val pin = withContext(Dispatchers.IO) { runCatching { Plex.pin(cid) } }.getOrElse { message = "Couldn't reach Plex: ${it.message}"; return@LaunchedEffect }
+    code = pin.code
+    message = "Waiting for you to enter the code on plex.tv/link…"
+    val end = System.currentTimeMillis() + 10 * 60_000
+    while (System.currentTimeMillis() < end) {
+      delay(2_000)
+      val token = withContext(Dispatchers.IO) { runCatching { Plex.poll(cid, pin.id) }.getOrNull() } ?: continue
+      message = "Signed in. Looking for your server…"
+      withContext(Dispatchers.IO) { runCatching { Plex.connect(store, cid, token) } }
+        .onSuccess { close() }.onFailure { message = it.message ?: "Couldn't find your server." }
+      return@LaunchedEffect
+    }
+    message = "The code expired. Try connecting again."
+  }
+  Column {
+    Header("Connect Plex", "On your phone or computer, open plex.tv/link (or scan the code) and enter this code.")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Qr("https://plex.tv/link", 168.dp)
+      Spacer(Modifier.width(28.dp))
+      Column {
+        Text("plex.tv/link", style = MaterialTheme.typography.titleLarge, color = Z.Text2)
+        Text(code ?: "", Modifier.padding(vertical = 10.dp), style = MaterialTheme.typography.displayMedium.copy(letterSpacing = 6.sp))
+        Text(message, style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+      }
+    }
+    ZButton("Cancel", close, Modifier.padding(top = 24.dp).focusRequester(cancel))
+  }
+}
+
 /** Trakt device code: shown here, entered at trakt.tv/activate on any phone or computer. */
 @Composable
 private fun TraktConnect(store: Store, clientId: String, close: () -> Unit) {
@@ -382,7 +491,7 @@ private fun Addons(store: Store) {
 private fun About() = Column(Modifier.verticalScroll(rememberScrollState())) {
   Logo(40.dp)
   Text("One interface. Your entire media world.", Modifier.padding(top = 14.dp), style = MaterialTheme.typography.titleLarge, color = Z.Text2)
-  Text("Version 0.12.0", Modifier.padding(top = 24.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+  Text("Version 0.13.0", Modifier.padding(top = 24.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
   Text(
     "Film and TV information and artwork come from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",
     Modifier.padding(top = 8.dp).fillMaxWidth(0.8f), style = MaterialTheme.typography.bodySmall, color = Z.Muted,
@@ -390,8 +499,11 @@ private fun About() = Column(Modifier.verticalScroll(rememberScrollState())) {
 }
 
 /** Native text dialog: the TV keyboard (and the Google TV phone app's keyboard) works best with a plain EditText. */
-fun ask(ctx: Context, title: String, current: String, done: (String) -> Unit) {
-  val input = EditText(ctx).apply { setText(current); setSingleLine(); setSelectAllOnFocus(true) }
+fun ask(ctx: Context, title: String, current: String, secret: Boolean = false, done: (String) -> Unit) {
+  val input = EditText(ctx).apply {
+    setText(current); setSingleLine(); setSelectAllOnFocus(true)
+    if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+  }
   AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(title).setView(input)
     .setPositiveButton("Save") { _, _ -> done(input.text.toString()) }.setNegativeButton("Cancel", null).show()
 }

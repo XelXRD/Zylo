@@ -58,10 +58,26 @@ data class Source(
   val fileIdx: Int? = null,
   val debrid: String? = null, // service that will stream this torrent
   val cached: Boolean = false, // that service said it's ready (Real-Debrid can't say)
-)
+  val library: String? = null, // "plex" / "jellyfin": a file on your own media server
+) {
+  /** What to remember about a source that played: enough to find it again, or one like it for the next episode. */
+  fun signature(): String = JSONObject().put("addon", addon).put("quality", quality ?: "").put("debrid", debrid ?: "").put("library", library ?: "")
+    .put("hash", infoHash ?: "").put("filename", filename ?: "").toString()
+
+  /** 0 = the very source remembered, 1 = the same kind (same addon/server, quality and service), 2 = anything else. */
+  fun likeness(p: JSONObject?): Int {
+    if (p == null) return 2
+    if ((infoHash != null && infoHash == p.str("hash")) || (filename != null && filename == p.str("filename"))) return 0
+    val sameKind = if (library != null) library == p.str("library") else addon == p.optString("addon") && (debrid ?: "") == p.optString("debrid")
+    return if (sameKind && (quality ?: "") == p.optString("quality")) 1 else 2
+  }
+}
 
 private val QUALITY = listOf(Regex("\\b(2160p|4k|uhd)\\b", I) to "4K", Regex("\\b1080p\\b", I) to "1080p", Regex("\\b720p\\b", I) to "720p", Regex("\\b(480p|576p|sd)\\b", I) to "480p")
 private val QUALITIES = QUALITY.map { it.second }
+
+/** "HDR", "DV" or both, from a release name or stream description. */
+fun hdrOf(text: String) = listOfNotNull("HDR".takeIf { Regex("\\bHDR", I).containsMatchIn(text) }, "DV".takeIf { Regex("\\bDV\\b|dolby.?vision", I).containsMatchIn(text) }).joinToString(" ")
 
 fun source(raw: JSONObject, addon: String): Source? {
   val hints = raw.optJSONObject("behaviorHints") ?: JSONObject()
@@ -72,7 +88,7 @@ fun source(raw: JSONObject, addon: String): Source? {
   val base = Source(
     addon, label, detail,
     QUALITY.firstOrNull { it.first.containsMatchIn(text) }?.second,
-    listOfNotNull("HDR".takeIf { Regex("\\bHDR", I).containsMatchIn(text) }, "DV".takeIf { Regex("\\bDV\\b|dolby.?vision", I).containsMatchIn(text) }).joinToString(" "),
+    hdrOf(text),
     Regex("(\\d+(?:[.,]\\d+)?)\\s?(GB|MB|GiB|MiB)\\b", I).find(text)?.let { "${it.groupValues[1]} ${it.groupValues[2]}" },
     filename,
   )
@@ -86,24 +102,76 @@ fun source(raw: JSONObject, addon: String): Source? {
   return null // YouTube, websites, usenet, archives: nothing this player opens
 }
 
-/** Ready first (direct links, cached torrents), then best quality, then addon order. */
-fun rank(all: List<Source>) = all.filter { it.url != null || it.debrid != null }
-  .sortedWith(compareBy({ it.debrid != null && !it.cached }, { QUALITIES.indexOf(it.quality).let { i -> if (i < 0) 9 else i } }))
+val QUALITY_STEPS = QUALITIES.take(3) // the choices for Settings > Playback > Maximum quality
+
+private fun qualityIndex(q: String?) = QUALITIES.indexOf(q).let { if (it < 0) 9 else it }
+
+/**
+ * Best first: anything above the quality cap goes last (still listed, never auto-played); then the source you last
+ * played (or one like it); then your own media servers; then what's ready now (direct links, cached torrents);
+ * then the best quality; then addon order.
+ */
+fun rank(all: List<Source>, cap: String = "4K", pref: JSONObject? = null) = all.filter { it.url != null || it.debrid != null }
+  .sortedWith(compareBy(
+    { qualityIndex(it.quality) < QUALITIES.indexOf(cap).coerceAtLeast(0) },
+    { it.likeness(pref) },
+    { it.library == null },
+    { it.debrid != null && !it.cached },
+    { qualityIndex(it.quality) },
+  ))
+
+fun overCap(s: Source, cap: String) = qualityIndex(s.quality) < QUALITIES.indexOf(cap).coerceAtLeast(0)
 
 class Found(val sources: List<Source>, val errors: List<String>, val waiting: Int)
 
-/** Ask every addon that serves streams for this video. videoId: tt123 for films, tt123:1:2 for episodes. */
-suspend fun findSources(store: Store, type: String, videoId: String): Found = coroutineScope {
-  val stype = if (type == "tv") "series" else "movie"
-  val results = store.addons.filter { it.supports("stream", stype, videoId) }.map { a ->
+/**
+ * Every place this video can play from: your media servers (Plex, Jellyfin) and every addon that serves streams.
+ * videoId: tt123 for films, tt123:1:2 for episodes.
+ */
+suspend fun findSources(store: Store, item: Item, season: Int?, episode: Int?, videoId: String): Found = coroutineScope {
+  val stype = if (item.type == "tv") "series" else "movie"
+  val addons = store.addons.filter { it.supports("stream", stype, videoId) }.map { a ->
     async(Dispatchers.IO) {
       runCatching { getJson("${a.base}/stream/$stype/${enc(videoId)}.json").optJSONArray("streams")?.objects()?.mapNotNull { source(it, a.name) }.orEmpty() }
         .fold({ it to null }, { emptyList<Source>() to "${a.name}: ${it.message}" })
     }
-  }.awaitAll()
+  }
+  val servers = Library.connected(store).map { server ->
+    async(Dispatchers.IO) { runCatching { server.find(item, season, episode) }.fold({ it to null }, { emptyList<Source>() to "${server.name}: ${it.message}" }) }
+  }
+  val results = (servers + addons).awaitAll()
   val all = withDebrid(store, results.flatMap { it.first })
-  Found(rank(all), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null })
+  Found(rank(all, store.maxQuality, store.sourcePref(item)), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null })
 }
+
+// --- Subtitles (the addon "subtitles" resource) -------------------------------------------------
+
+data class Sub(val url: String, val lang: String, val label: String)
+
+/** Subtitles from every addon that offers them, your language first. Embedded subtitles in the file show up too. */
+suspend fun findSubtitles(store: Store, type: String, videoId: String): List<Sub> = coroutineScope {
+  val stype = if (type == "tv") "series" else "movie"
+  val got = store.addons.filter { it.supports("subtitles", stype, videoId) }.map { a ->
+    async(Dispatchers.IO) {
+      runCatching {
+        getJson("${a.base}/subtitles/$stype/${enc(videoId)}.json").optJSONArray("subtitles")?.objects()?.mapNotNull { o ->
+          val url = o.str("url")?.takeIf { Regex("^https?://", I).containsMatchIn(it) } ?: return@mapNotNull null
+          val lang = o.optString("lang").ifEmpty { "und" }
+          Sub(url, lang, "${languageName(lang)} · ${a.name}")
+        }.orEmpty()
+      }.getOrDefault(emptyList())
+    }
+  }.awaitAll().flatten().distinctBy { it.url }
+  val mine = store.subLang
+  got.sortedBy { if (mine.isNotEmpty() && sameLanguage(it.lang, mine)) 0 else 1 }.take(40) // ponytail: 40 tracks; enough to choose from, light on memory
+}
+
+fun languageName(code: String): String = runCatching { java.util.Locale(code).displayLanguage }.getOrNull()?.takeIf { it.isNotBlank() && it != code } ?: code
+
+/** "eng" and "en" are the same language. */
+fun sameLanguage(a: String, b: String) = a.equals(b, true) || runCatching {
+  java.util.Locale(a).isO3Language.equals(java.util.Locale(b).isO3Language, true)
+}.getOrDefault(false)
 
 // --- Debrid ------------------------------------------------------------------------------
 
