@@ -1,5 +1,5 @@
 {
-  "version": "0.21.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.21.0.apk",
-  "notes": "What's new in 0.21.0\n\n• Live TV: move up and down the channel names; Right to see what's on. OK plays the channel.\n• Favourites: hold OK on a channel name to add or remove it. The Favourites category shows only your favourites, instantly.\n• Reminders: OK on a show that hasn't started sets a reminder; Zylo tells you when it starts and can switch to it.\n• The category menu keeps focus until you pick one or press Back."
+  "version": "0.21.1",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.21.1.apk",
+  "notes": "What's new in 0.21.1\n\n• Live TV no longer crashes: your channels load first and are saved on the TV (refreshed once a day), then the TV guide loads once a day, keeping only your channels.\n• Categories switch instantly.\n• Sports: rest on a match for 3 seconds to find which channels show it, or press OK to go straight there.\n• Live TV: move up and down the channel names; hold OK on one to favourite it; OK on a later show sets a reminder."
 }
