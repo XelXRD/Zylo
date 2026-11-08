@@ -151,6 +151,7 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
       if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 14.dp), style = MaterialTheme.typography.displaySmall) }
       if (featured != null) item("hero") { HeroInfo(store, s, featured, nav) }
       if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
+      if (hero) item("live") { LiveHome(store, s.focus, nav) }
       items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = !hero && name == rows.first().first) }
     }
     }
@@ -539,13 +540,19 @@ fun MyListPage(store: Store, nav: Nav, focus: FocusMemory, restore: Boolean) {
 fun SearchPage(store: Store, nav: Nav, focus: FocusMemory) {
   var query by rememberSaveable { mutableStateOf("") }
   var results by remember { mutableStateOf<List<Item>?>(null) }
+  var live by remember { mutableStateOf(emptyList<LiveHit>()) }
+  // One search for everything: films, series and anime from TMDB, plus your live channels, guide listings and fixtures.
+  val withLive = remember { store.profile.kids == null && Xtream.from(store) != null }
+  if (withLive) LaunchedEffect(Unit) { withContext(Dispatchers.IO) { LiveSearch.warm(nav.ui.live) } }
   LaunchedEffect(query) {
     val q = query.trim()
     if (q.length < 2) {
       results = null
+      live = emptyList()
       return@LaunchedEffect
     }
     delay(400) // wait for typing to pause
+    if (withLive) launch { live = withContext(Dispatchers.Default) { runCatching { LiveSearch.find(nav.ui.live, q) }.getOrDefault(emptyList()) } }
     results = withContext(Dispatchers.IO) { runCatching { Tmdb(store.tmdb).list("/search/multi?query=${enc(q)}&include_adult=false", null) }.getOrDefault(emptyList()) }
   }
   RestoreFocus(focus, results?.isNotEmpty() == true && focus.key != null)
@@ -557,9 +564,12 @@ fun SearchPage(store: Store, nav: Nav, focus: FocusMemory) {
     }
     val r = results
     when {
-      r == null -> Text("Search films, series and anime.", Modifier.padding(Z.Pad), color = Z.Text2)
-      r.isEmpty() -> Text("Nothing found for “${query.trim()}”.", Modifier.padding(Z.Pad), color = Z.Text2)
-      else -> Box(Modifier.padding(top = 20.dp)) { PosterGrid(store, r, focus, nav) }
+      r == null -> Text(if (withLive) "Search films, series, anime, channels, the TV guide and fixtures." else "Search films, series and anime.", Modifier.padding(Z.Pad), color = Z.Text2)
+      r.isEmpty() && live.isEmpty() -> Text("Nothing found for “${query.trim()}”.", Modifier.padding(Z.Pad), color = Z.Text2)
+      else -> Column(Modifier.padding(top = 12.dp)) {
+        if (live.isNotEmpty()) LiveHitRow(store, "On Live TV", live, focus, nav)
+        if (r.isNotEmpty()) Box(Modifier.padding(top = 8.dp)) { PosterGrid(store, r, focus, nav) }
+      }
     }
   }
 }

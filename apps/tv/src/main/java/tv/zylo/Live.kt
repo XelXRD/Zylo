@@ -170,7 +170,7 @@ object ChannelCache {
       o.getJSONArray("channels").objects().map(Xtream::channelOf))
   }.getOrNull()
 
-  fun fetch(x: Xtream): Pair<List<Category>, List<Channel>> {
+  fun fetch(x: Xtream): Pair<List<Category>, List<Channel>> = Busy.run("Updating channels") {
     val cats = x.categories()
     val chans = x.channels(null) { http(it, timeout = 20_000, total = 120_000) }.distinctBy { it.id } // some providers list a channel twice
     runCatching {
@@ -178,7 +178,7 @@ object ChannelCache {
         .put("categories", JSONArray(cats.map { JSONObject().put("id", it.id).put("name", it.name) }))
         .put("channels", JSONArray(chans.map(Xtream::channelJson))).toString())
     }
-    return cats to chans
+    cats to chans
   }
 
   fun clear() { if (::dir.isInitialized) file.delete() }

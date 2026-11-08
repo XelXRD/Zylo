@@ -54,7 +54,7 @@ object Updates {
     return false
   }
 
-  fun download(ctx: Context, r: Release, progress: (Float) -> Unit): File {
+  fun download(ctx: Context, r: Release, progress: (Float) -> Unit): File = Busy.run("Downloading update") {
     val dir = File(ctx.cacheDir, "updates").apply { deleteRecursively(); mkdirs() }
     val file = File(dir, "zylo-${r.version}.apk")
     val total = runCatching { okhttp3.OkHttpClient().newCall(okhttp3.Request.Builder().url(r.apk).head().build()).execute().use { it.header("Content-Length")?.toLong() } }.getOrNull() ?: 0L
@@ -62,7 +62,7 @@ object Updates {
       val buf = ByteArray(1 shl 16); var done = 0L
       while (true) { val n = input.read(buf); if (n < 0) break; out.write(buf, 0, n); done += n; if (total > 0) progress(done.toFloat() / total) }
     } }
-    return file
+    file
   }
 
   /** Hands the APK to Android's installer (it asks to allow installs from Zylo the first time). */

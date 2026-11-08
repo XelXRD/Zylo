@@ -181,7 +181,7 @@ object Epg {
    * Downloads every guide source and replaces the cached guide. [sources]: XMLTV links. Returns a summary line;
    * a source that fails is skipped (and named), the others still count.
    */
-  fun refresh(store: Store, sources: List<Pair<String, String>>, channels: List<Channel>? = null, open: (String) -> InputStream = ::openStream): String {
+  fun refresh(store: Store, sources: List<Pair<String, String>>, channels: List<Channel>? = null, open: (String) -> InputStream = ::openStream): String = Busy.run("Updating TV guide") {
     val now = System.currentTimeMillis()
     // Six hours back to two days ahead, and (given your channels) only guide channels you have: a provider's full guide
     // covers thousands of channels for a week, more than a TV's memory holds.
@@ -210,7 +210,7 @@ object Epg {
     }
     val summary = "${guide.size} channels, ${guide.count} programmes" + if (failed.isNotEmpty()) ". Couldn't get: ${failed.joinToString()}" else ""
     store.put("epg_status", summary)
-    return summary
+    summary
   }
 
   /** The sources chosen in Settings > Live TV. */

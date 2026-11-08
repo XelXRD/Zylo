@@ -182,38 +182,40 @@ object Trakt {
   /** Watched history and in-progress playback. Runs at most every 15 minutes unless forced. */
   fun sync(store: Store, force: Boolean = false) {
     if (!connected(store) || (!force && System.currentTimeMillis() - store.long("trakt_synced") < 15 * 60_000)) return
-    val watched = mutableSetOf<String>()
-    val movies = paged(store, "/sync/watched/movies")
-    movies.forEach { o -> o.optJSONObject("movie")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 }?.let { watched += "movie:$it" } }
-    val shows = paged(store, "/sync/watched/shows?extended=progress")
-    val recent = JSONArray() // shows by when you last watched them, for Up Next
-    shows.forEach { o ->
-      val id = o.optJSONObject("show")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 } ?: return@forEach
-      o.optJSONArray("seasons")?.objects()?.forEach { s -> s.optJSONArray("episodes")?.objects()?.forEach { e -> watched += "tv:$id:${s.optInt("number")}:${e.optInt("number")}" } }
-      recent.put(JSONObject().put("id", id).put("at", parseDate(o.optString("last_watched_at"))))
-    }
-    store.setTraktWatched(watched)
-    store.put("trakt_shows", JSONArray(recent.objects().sortedByDescending { it.optLong("at") }.take(60)).toString())
-    val episodes = watched.count { it.startsWith("tv:") }
-
-    // Paused elsewhere: shows up in Continue Watching, unless Zylo has a newer position.
-    val tmdb = Tmdb(store.tmdb)
-    arr(call(store, "/sync/playback?limit=20")).objects().forEach { p ->
-      runCatching {
-        val movie = p.optString("type") == "movie"
-        val id = (if (movie) p.optJSONObject("movie") else p.optJSONObject("show"))?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 } ?: return@forEach
-        val ep = p.optJSONObject("episode")
-        val type = if (movie) "movie" else "tv"
-        val at = parseDate(p.optString("paused_at"))
-        val key = if (movie) "movie:$id" else "tv:$id:${ep?.optInt("season")}:${ep?.optInt("number")}"
-        if ((store.watch(key)?.at ?: 0) >= at) return@forEach
-        val item = Tmdb.item(tmdb.details(type, id), type) ?: return@forEach
-        store.saveWatch(item, ep?.optInt("season"), ep?.optInt("number"), (p.optDouble("progress") * 10).toLong(), 1000, at, percent = true)
+    Busy.run("Syncing Trakt") {
+      val watched = mutableSetOf<String>()
+      val movies = paged(store, "/sync/watched/movies")
+      movies.forEach { o -> o.optJSONObject("movie")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 }?.let { watched += "movie:$it" } }
+      val shows = paged(store, "/sync/watched/shows?extended=progress")
+      val recent = JSONArray() // shows by when you last watched them, for Up Next
+      shows.forEach { o ->
+        val id = o.optJSONObject("show")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 } ?: return@forEach
+        o.optJSONArray("seasons")?.objects()?.forEach { s -> s.optJSONArray("episodes")?.objects()?.forEach { e -> watched += "tv:$id:${s.optInt("number")}:${e.optInt("number")}" } }
+        recent.put(JSONObject().put("id", id).put("at", parseDate(o.optString("last_watched_at"))))
       }
+      store.setTraktWatched(watched)
+      store.put("trakt_shows", JSONArray(recent.objects().sortedByDescending { it.optLong("at") }.take(60)).toString())
+      val episodes = watched.count { it.startsWith("tv:") }
+
+      // Paused elsewhere: shows up in Continue Watching, unless Zylo has a newer position.
+      val tmdb = Tmdb(store.tmdb)
+      arr(call(store, "/sync/playback?limit=20")).objects().forEach { p ->
+        runCatching {
+          val movie = p.optString("type") == "movie"
+          val id = (if (movie) p.optJSONObject("movie") else p.optJSONObject("show"))?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 } ?: return@forEach
+          val ep = p.optJSONObject("episode")
+          val type = if (movie) "movie" else "tv"
+          val at = parseDate(p.optString("paused_at"))
+          val key = if (movie) "movie:$id" else "tv:$id:${ep?.optInt("season")}:${ep?.optInt("number")}"
+          if ((store.watch(key)?.at ?: 0) >= at) return@forEach
+          val item = Tmdb.item(tmdb.details(type, id), type) ?: return@forEach
+          store.saveWatch(item, ep?.optInt("season"), ep?.optInt("number"), (p.optDouble("progress") * 10).toLong(), 1000, at, percent = true)
+        }
+      }
+      store.putLong("trakt_synced", System.currentTimeMillis())
+      store.setStatus("trakt", "ok")
+      Outbox.log(store, "trakt", "Synced from Trakt", "${movies.size} films and $episodes episodes watched (${shows.size} series).", true)
     }
-    store.putLong("trakt_synced", System.currentTimeMillis())
-    store.setStatus("trakt", "ok")
-    Outbox.log(store, "trakt", "Synced from Trakt", "${movies.size} films and $episodes episodes watched (${shows.size} series).", true)
   }
 
   /** Series you've watched on Trakt, most recent first: (TMDB id, last watched time). */

@@ -59,17 +59,92 @@ fun SettingsScreen(store: Store) {
         SettingsPage.Playback -> Playback(store)
         SettingsPage.Integrations -> panel?.let { it() } ?: Integrations(store) { p -> panel = p?.let { content -> { content { panel = null } } } }
         SettingsPage.Addons -> Addons(store)
-        SettingsPage.Debrid -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-          Header("Debrid Services", "Stream torrent sources from your debrid account. Zylo uses the first connected service that has a title ready.")
-          ServiceCard(store, "torbox", "TorBox", "Checks what's cached before you press Play.", "TB", { store.debrid("torbox") }, { store.setDebrid("torbox", it) })
-          ServiceCard(store, "realdebrid", "Real-Debrid", "Can't report its cache: a source is checked when you play it.", "RD", { store.debrid("realdebrid") }, { store.setDebrid("realdebrid", it) })
-          ServiceCard(store, "premiumize", "Premiumize", "Checks what's cached before you press Play.", "PM", { store.debrid("premiumize") }, { store.setDebrid("premiumize", it) })
-        }
+        SettingsPage.Debrid -> Debrid(store)
         SettingsPage.Live -> LiveTvSettings(store)
         SettingsPage.About -> About(store)
         SettingsPage.Profiles -> ProfilesSettings(store)
         SettingsPage.Servers -> panel?.let { it() } ?: MediaServers(store) { p -> panel = p?.let { content -> { content { panel = null } } } }
       }
+    }
+  }
+}
+
+@Composable
+private fun Debrid(store: Store) = Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+  Header("Debrid Services", "Stream torrent sources from your debrid account. Zylo uses the first connected service that has a title ready.")
+  ServiceCard(store, "torbox", "TorBox", "Checks what's cached before you press Play.", "TB", { store.debrid("torbox") }, { store.setDebrid("torbox", it) })
+  ServiceCard(store, "realdebrid", "Real-Debrid", "Can't report its cache: a source is checked when you play it.", "RD", { store.debrid("realdebrid") }, { store.setDebrid("realdebrid", it) })
+  ServiceCard(store, "premiumize", "Premiumize", "Checks what's cached before you press Play.", "PM", { store.debrid("premiumize") }, { store.setDebrid("premiumize", it) })
+}
+
+/**
+ * First launch: TMDB key, then Trakt and anime trackers, debrid, addons (from your phone) and Live TV, one at a time.
+ * Every step but the first can be skipped; all of it stays in Settings afterwards.
+ */
+@Composable
+fun SetupScreen(store: Store, done: () -> Unit) {
+  val ctx = LocalContext.current
+  var step by rememberSaveable { mutableIntStateOf(0) }
+  var panel by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
+  val steps = listOf("Your TMDB key", "Accounts", "Debrid", "Addons", "Live TV")
+  val next = remember { FocusRequester() }
+  LaunchedEffect(step) { delay(120); runCatching { next.requestFocus() } }
+  androidx.activity.compose.BackHandler(step > 0 && panel == null) { step-- }
+  Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad, vertical = 32.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Logo(22.dp)
+      Spacer(Modifier.width(24.dp))
+      steps.forEachIndexed { i, name ->
+        Text("${i + 1}. $name", Modifier.padding(end = 18.dp), style = MaterialTheme.typography.labelLarge, color = if (i == step) Z.Text else Z.Muted)
+      }
+    }
+    Box(Modifier.weight(1f).fillMaxWidth().padding(top = 24.dp)) {
+      panel?.let { it(); return@Box }
+      when (step) {
+        0 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          Header("Welcome to Zylo", "Start with a TMDB key: it's free and gives Zylo its film and TV details and artwork. Sign up at themoviedb.org, then go to Settings > API and copy the 32-character API key. The Google TV app on your phone works as a keyboard.")
+          ServiceCard(store, "tmdb", "TMDB", "Film and TV details, artwork and trailers. Required.", "TM", { store.tmdb }, { store.tmdb = it })
+        }
+        1 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+          Header("Accounts", "Optional. Trakt keeps your watchlist, history and progress in step; AniList or MyAnimeList track anime.")
+          TraktCard(store) { id -> panel = { TraktConnect(store, id) { panel = null } } }
+          Anime.NAMES.forEach { (t, name) -> AnimeCard(store, t, name) { url -> panel = { PasteConnect(store, t, name, url) { panel = null } } } }
+        }
+        2 -> Debrid(store)
+        3 -> Addons(store)
+        else -> LiveTvSettings(store)
+      }
+    }
+    if (panel == null) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+      if (step > 0) ZButton("Back", { step-- })
+      val last = step == steps.lastIndex
+      ZButton(if (last) "Finish" else if (step == 0) "Next" else "Next (or skip)", {
+        when {
+          step == 0 && store.tmdb.isBlank() -> toast(ctx, "Add your TMDB key first: Zylo needs it for everything else.")
+          last -> done()
+          else -> step++
+        }
+      }, Modifier.focusRequester(next), primary = true)
+    }
+  }
+}
+
+/** Settings on a kids profile: locked behind a grown-up's PIN (when one has been set). */
+@Composable
+fun SettingsGate(store: Store, nav: Nav, content: @Composable () -> Unit) {
+  val ctx = LocalContext.current
+  val pins = remember { Pins.forSettings(store) }
+  var open by rememberSaveable { mutableStateOf(pins.isEmpty()) }
+  if (open) return content()
+  fun askPin() = ask(ctx, "Grown-up PIN to open Settings", "", pin = true) { if (it in pins) open = true else toast(ctx, "Wrong PIN") }
+  val r = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(80); runCatching { r.requestFocus() }; askPin() }
+  Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad * 2), verticalArrangement = Arrangement.Center) {
+    Text("Settings are locked", style = MaterialTheme.typography.displaySmall)
+    Text("This is a kids profile. A grown-up's PIN opens Settings.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
+    Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+      ZButton("Enter PIN", { askPin() }, Modifier.focusRequester(r), primary = true)
+      ZButton("Back", { nav.back() })
     }
   }
 }
@@ -81,7 +156,7 @@ private fun Header(title: String, text: String) = Column(Modifier.padding(bottom
 }
 
 @Composable
-private fun Playback(store: Store) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
   Header("Playback", "How browsing and previews behave.")
   Toggle("Trailer previews", "Play a muted trailer when you rest on a title.", store.previews) { store.previews = !store.previews }
   Toggle("Trailer sound", "Play preview trailers with sound instead of muted.", store.trailerSound) { store.trailerSound = !store.trailerSound }
@@ -91,10 +166,25 @@ private fun Playback(store: Store) = Column(verticalArrangement = Arrangement.sp
     store.maxQuality = cap
   }
   var lang by remember { mutableStateOf(store.subLang) }
-  Choice("Subtitles", "Turned on automatically in this language when a film has them. You can always pick others in the player.",
+  Choice("Subtitles", "Turned on automatically in this language (each profile has its own). You can always pick others in the player.",
     if (lang.isEmpty()) "Off" else languageName(lang)) {
     lang = SUB_LANGS[(SUB_LANGS.indexOf(lang) + 1) % SUB_LANGS.size]
     store.subLang = lang
+  }
+  var size by remember { mutableStateOf(SubStyle.size(store).first) }
+  Choice("Subtitle size", "How big subtitles are in the player.", size) {
+    size = SubStyle.SIZES[(SubStyle.SIZES.indexOfFirst { it.first == size } + 1) % SubStyle.SIZES.size].first
+    store.put("sub_size", size)
+  }
+  var bg by remember { mutableStateOf(SubStyle.background(store)) }
+  Choice("Subtitle background", "A shadow, an outline or a dark box behind the words, for reading over bright scenes.", bg) {
+    bg = SubStyle.BACKGROUNDS[(SubStyle.BACKGROUNDS.indexOf(bg) + 1) % SubStyle.BACKGROUNDS.size]
+    store.put("sub_bg", bg)
+  }
+  var pos by remember { mutableStateOf(SubStyle.position(store).first) }
+  Choice("Subtitle position", "Raised keeps them clear of burned-in captions and the TV's edge.", pos) {
+    pos = SubStyle.POSITIONS[(SubStyle.POSITIONS.indexOfFirst { it.first == pos } + 1) % SubStyle.POSITIONS.size].first
+    store.put("sub_pos", pos)
   }
   Toggle("Reduce motion", "Turn off card growth, fades and focus zoom.", store.reduceMotion) { store.reduceMotion = !store.reduceMotion }
 }
@@ -109,6 +199,7 @@ private fun Choice(title: String, text: String, value: String, next: () -> Unit)
       Text(title, style = MaterialTheme.typography.titleMedium)
       Text(text, style = MaterialTheme.typography.bodySmall, color = LocalContentColor.current.copy(alpha = 0.75f))
     }
+    Spacer(Modifier.width(16.dp))
     Text(value, style = MaterialTheme.typography.labelLarge)
   }
 }
@@ -678,10 +769,11 @@ private fun About(store: Store) = Column(Modifier.verticalScroll(rememberScrollS
 }
 
 /** Native text dialog: the TV keyboard (and the Google TV phone app's keyboard) works best with a plain EditText. */
-fun ask(ctx: Context, title: String, current: String, secret: Boolean = false, done: (String) -> Unit) {
+fun ask(ctx: Context, title: String, current: String, secret: Boolean = false, pin: Boolean = false, done: (String) -> Unit) {
   val input = EditText(ctx).apply {
     setText(current); setSingleLine(); setSelectAllOnFocus(true)
     if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
+    if (pin) { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD; filters = arrayOf(android.text.InputFilter.LengthFilter(4)) }
   }
   AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(title).setView(input)
     .setPositiveButton("Save") { _, _ -> done(input.text.toString()) }.setNegativeButton("Cancel", null).show()

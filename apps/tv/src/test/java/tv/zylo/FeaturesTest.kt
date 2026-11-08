@@ -433,3 +433,52 @@ class AnimeQuizAndSavedResultsTest {
     assertEquals(null, SeenOn.get(st, e.copy(start = now - 5 * 3_600_000))) // kept until 4 h after the start
   }
 }
+
+class ExtrasTest {
+  private fun store() = HashMap<String, Mem>().let { files -> Store { files.getOrPut(it) { Mem() } } }
+
+  @Test fun skipSegments() {
+    val intro = """{"imdb_id":"tt0903747","intro":{"start_sec":2.5,"end_sec":61.0,"start_ms":2500,"end_ms":61000},"recap":null,"outro":{"start_ms":2700000,"end_ms":0},"no_intro":false}"""
+    val segs = Skip.introDb(intro)
+    assertEquals(listOf(Segment("intro", 2500, 61000), Segment("credits", 2700000, 0)), segs)
+    assertEquals("intro", Skip.at(segs, 10_000, 2_900_000)?.kind)
+    assertNull(Skip.at(segs, 60_500, 2_900_000)) // the last second: let it finish
+    assertEquals("credits", Skip.at(segs, 2_800_000, 2_900_000)?.kind) // end 0: to the end of the video
+    val ani = """{"found":true,"results":[{"interval":{"startTime":1310.2,"endTime":1400.0},"skipType":"ed","skipId":"b","episodeLength":1420},{"interval":{"startTime":90.5,"endTime":180.5},"skipType":"op","skipId":"a","episodeLength":1420}],"message":"ok","statusCode":200}"""
+    assertEquals(listOf(Segment("intro", 90500, 180500), Segment("credits", 1310200, 1400000)), Skip.aniSkipParse(ani))
+    assertEquals(emptyList<Segment>(), Skip.aniSkipParse("""{"found":false,"results":[]}"""))
+  }
+
+  @Test fun subtitleTiming() {
+    val srt = "1\n00:00:01,000 --> 00:00:02,500\nAt 12:30,000 we go\n\n2\n01:59:59,800 --> 02:00:00,900\nEnd"
+    assertEquals("1\n00:00:01,500 --> 00:00:03,000\nAt 12:30,000 we go\n\n2\n02:00:00,300 --> 02:00:01,400\nEnd", shiftSubs(srt, 500))
+    assertEquals("00:00:00,000 --> 00:00:01,000", shiftSubs("00:00:00,300 --> 00:00:01,500", -500)) // never below zero
+    assertEquals("WEBVTT\n\n00:01:00.500 --> 00:01:02.000\nHi", shiftSubs("WEBVTT\n\n01:01.000 --> 01:02.500\nHi", -500)) // VTT, no hours
+  }
+
+  @Test fun pins() {
+    val files = HashMap<String, Mem>()
+    val st = Store { files.getOrPut(it) { Mem() } }
+    val kid = st.addProfile("Kid")
+    st.setKids(kid.id, 1)
+    assertTrue(Pins.forSettings(st).isEmpty()) // grown-up profile in use: Settings open
+    st.switchProfile(kid.id)
+    val asKid = Store { files.getOrPut(it) { Mem() } }
+    assertTrue(Pins.forSettings(asKid).isEmpty()) // no grown-up PIN yet: nothing to lock with
+    Pins.set(st, "main", "1234")
+    assertEquals(listOf("1234"), Pins.forSettings(asKid))
+    assertTrue(Pins.valid("0007") && !Pins.valid("12a4") && !Pins.valid("123"))
+    assertEquals("1234", Pins.of(st, "main"))
+  }
+
+  @Test fun startingSoonAndBusy() {
+    val st = store()
+    val c = Channel(1, 1, "BBC One", null, "1")
+    val now = 10_000_000L
+    Reminders.toggle(st, c, Programme("Later", "", now + 4 * 3_600_000L, now + 5 * 3_600_000L))
+    Reminders.toggle(st, c, Programme("Soon", "", now + 600_000L, now + 3_600_000L))
+    assertEquals(listOf("Soon"), LiveSearch.soon(st, now).map { it.title })
+    runCatching { Busy.run("Test") { error("boom") } }
+    assertTrue(Busy.now.isEmpty()) // gone even when the job fails
+  }
+}

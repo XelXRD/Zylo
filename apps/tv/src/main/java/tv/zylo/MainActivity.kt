@@ -19,6 +19,7 @@ import androidx.compose.material.icons.filled.Search
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveableStateHolder
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
@@ -127,8 +128,9 @@ class MainActivity : ComponentActivity() {
     setContent {
       ZTheme(store.reduceMotion) {
         // Several people on this TV: ask who's watching when the app opens (not when it rebuilds after a switch).
-        val stack = remember { mutableStateListOf<Screen>(Screen.Main).apply { if (savedInstanceState == null && store.profiles.size > 1) add(Screen.Profiles) } }
+        val stack = remember { mutableStateListOf<Screen>(Screen.Main).apply { if (savedInstanceState == null && (store.profiles.size > 1 || Pins.of(store, store.profileId).isNotEmpty())) add(Screen.Profiles) } }
         val nav = remember { Nav(stack, store, ui) }
+        var setup by rememberSaveable { mutableStateOf(store.tmdb.isEmpty()) } // first launch: the guided setup
         val saved = rememberSaveableStateHolder()
         BackHandler(stack.size > 1) {
           saved.removeState("${stack.lastIndex}${stack.last()}")
@@ -137,8 +139,8 @@ class MainActivity : ComponentActivity() {
         val s = stack.last()
         saved.SaveableStateProvider("${stack.lastIndex}$s") {
           when (s) {
-            Screen.Main -> if (store.tmdb.isEmpty()) Welcome(nav) else Main(store, nav, ui)
-            Screen.Settings -> SettingsScreen(store)
+            Screen.Main -> if (setup) SetupScreen(store) { setup = false } else if (store.tmdb.isEmpty()) Welcome(nav) else Main(store, nav, ui)
+            Screen.Settings -> SettingsGate(store, nav) { SettingsScreen(store) }
             Screen.Search -> SearchPage(store, nav, ui.search)
             is Screen.Title -> TitlePage(store, s.item, nav)
             is Screen.Sources -> SourcesPage(store, s, nav)
@@ -211,6 +213,7 @@ fun TopNav(ui: UiState, nav: Nav) {
       }
     }
     Spacer(Modifier.weight(1f))
+    BusyChip()
     NavIcon(Icons.Filled.Search, down) { nav.push(Screen.Search) }
     NavIcon(Icons.Filled.Settings, down) { nav.push(Screen.Settings) }
     NavSurface({ nav.push(Screen.Profiles) }, down) { Box(Modifier.padding(5.dp)) { Avatar(ui.profile, 28.dp) } }

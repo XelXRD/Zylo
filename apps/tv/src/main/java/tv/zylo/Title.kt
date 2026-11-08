@@ -43,6 +43,7 @@ import androidx.compose.ui.viewinterop.AndroidView
 import androidx.lifecycle.Lifecycle
 import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.compose.LocalLifecycleOwner
+import androidx.media3.common.C
 import androidx.media3.common.MediaItem
 import androidx.media3.common.PlaybackException
 import androidx.media3.common.Player
@@ -487,6 +488,53 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     playNext()
   }
 
+  // --- Skip Intro / Recap / Credits (IntroDB; AniSkip for anime). ---
+  var segments by remember { mutableStateOf(emptyList<Segment>()) }
+  var skip by remember { mutableStateOf<Segment?>(null) }
+  val skipped = remember { mutableSetOf<Segment>() } // passed on with Back: not offered again
+  LaunchedEffect(Unit) { segments = withContext(Dispatchers.IO) { runCatching { Skip.find(ctx, store, s.item, s.season, s.episode) }.getOrDefault(emptyList()) } }
+  LaunchedEffect(segments) {
+    if (segments.isEmpty()) return@LaunchedEffect
+    while (true) {
+      delay(500)
+      skip = Skip.at(segments, player.currentPosition, player.duration).takeIf { it !in skipped }
+    }
+  }
+  fun doSkip(seg: Segment) {
+    skipped += seg
+    skip = null
+    if (seg.kind == "credits" && next != null) playNext()
+    else player.seekTo(if (seg.end > 0) seg.end else player.duration)
+    view?.requestFocus()
+  }
+
+  // --- Subtitle timing: Up (with the controls hidden) opens it; addon subtitles are moved and reloaded in place. ---
+  var timing by remember { mutableStateOf(false) }
+  var offset by remember { mutableLongStateOf(0L) }
+  val originals = remember { HashMap<String, String>() }
+  LaunchedEffect(offset) {
+    if (!timing && offset == 0L) return@LaunchedEffect
+    delay(700) // wait for the presses to stop
+    val text = player.currentTracks.groups.firstOrNull { it.type == C.TRACK_TYPE_TEXT && it.isSelected }?.mediaTrackGroup?.getFormat(0)
+    val sub = s.subs.firstOrNull { it.label == text?.label } ?: s.subs.firstOrNull { text != null && it.lang == text.language }
+    if (sub == null) { toast(ctx, "Timing works on addon subtitles. Pick one with the subtitles button first."); return@LaunchedEffect }
+    val file = withContext(Dispatchers.IO) {
+      runCatching {
+        val raw = originals.getOrPut(sub.url) { http(sub.url, timeout = 15_000) }
+        val ext = if (subtitleMime(sub.url) == androidx.media3.common.MimeTypes.TEXT_VTT) "vtt" else "srt"
+        java.io.File(ctx.cacheDir, "subs").apply { deleteRecursively(); mkdirs() }.let { java.io.File(it, "shift-${System.nanoTime()}.$ext") }.apply { writeText(shiftSubs(raw, offset)) }
+      }.getOrNull()
+    } ?: run { toast(ctx, "Couldn't load that subtitle to move it."); return@LaunchedEffect }
+    val configs = s.subs.map { x ->
+      val b = if (x == sub) MediaItem.SubtitleConfiguration.Builder(Uri.fromFile(file)).setMimeType(if (file.extension == "vtt") androidx.media3.common.MimeTypes.TEXT_VTT else androidx.media3.common.MimeTypes.APPLICATION_SUBRIP).setSelectionFlags(C.SELECTION_FLAG_DEFAULT)
+      else MediaItem.SubtitleConfiguration.Builder(Uri.parse(x.url)).setMimeType(subtitleMime(x.url))
+      b.setLanguage(x.lang).setLabel(x.label).build()
+    }
+    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredTextLanguage(sub.lang).build()
+    player.setMediaItem(MediaItem.Builder().setUri(s.url).setSubtitleConfigurations(configs).build(), player.currentPosition)
+    player.prepare()
+  }
+
   LaunchedEffect(player) {
     while (true) {
       delay(10_000)
@@ -527,12 +575,24 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   }
   BackHandler(controls) { view?.hideController() } // first Back hides the controls, the next one leaves
   BackHandler(upNext && !dismissed) { dismissed = true; view?.requestFocus() } // Back on Up Next keeps watching
+  BackHandler(skip != null && !upNext) { skip?.let { skipped += it }; skip = null; view?.requestFocus() } // Back: no thanks
+  BackHandler(timing) { timing = false; view?.requestFocus() }
 
   Box(Modifier.fillMaxSize().background(Color.Black)) {
     AndroidView(
       factory = {
-        PlayerView(it).apply {
+        object : PlayerView(it) {
+          // Up with the controls hidden: subtitle timing (PlayerView would only show its controls).
+          override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+            if (event.keyCode == android.view.KeyEvent.KEYCODE_DPAD_UP && !isControllerFullyVisible && s.subs.isNotEmpty()) {
+              if (event.action == android.view.KeyEvent.ACTION_DOWN && event.repeatCount == 0) timing = true
+              return true
+            }
+            return super.dispatchKeyEvent(event)
+          }
+        }.apply {
           this.player = player
+          subtitleView?.let { v -> SubStyle.apply(store, v) }
           keepScreenOn = true
           setShowSubtitleButton(true)
           setControllerVisibilityListener(PlayerView.ControllerVisibilityListener { v -> controls = v == View.VISIBLE })
@@ -550,8 +610,11 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
       Modifier.fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Black.copy(alpha = 0.8f), Color.Transparent))).padding(horizontal = Z.Pad, vertical = 28.dp),
     ) {
       Text(s.item.title, style = MaterialTheme.typography.headlineSmall)
-      MetaLine(listOf(s.subtitle, s.source) + listOfNotNull(s.subs.size.takeIf { it > 0 }?.let { "$it subtitle tracks" }), Modifier.padding(top = 4.dp))
+      MetaLine(listOf(s.subtitle, s.source) + listOfNotNull(s.subs.size.takeIf { it > 0 }?.let { "$it subtitle tracks  ·  Up: subtitle timing" }), Modifier.padding(top = 4.dp))
     }
+    val sk = skip
+    if (sk != null && !upNext && !timing) SkipButton(Skip.label(sk.kind).let { if (sk.kind == "credits" && next != null) "Next Episode" else it }, Modifier.align(Alignment.BottomEnd)) { doSkip(sk) }
+    if (timing) SubtitleTiming(offset, Modifier.align(Alignment.BottomStart), { offset += it }) { timing = false; view?.requestFocus() }
     val n = next
     if (upNext && !dismissed && n != null) UpNextCard(s.item, n, countdown, Modifier.align(Alignment.BottomEnd), ::playNext) { dismissed = true; view?.requestFocus() }
     error?.let {
@@ -561,6 +624,36 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
 }
 
 private const val UP_NEXT_SECONDS = 10
+
+/** Takes focus once when it appears, so OK skips; it goes when the part is over. */
+@Composable
+private fun SkipButton(text: String, modifier: Modifier, onClick: () -> Unit) {
+  val r = remember { FocusRequester() }
+  LaunchedEffect(text) { delay(60); runCatching { r.requestFocus() } }
+  Box(Modifier.padding(Z.Pad).padding(bottom = 60.dp).then(modifier)) {
+    ZButton(text, onClick, Modifier.focusRequester(r), primary = true, icon = Icons.Filled.PlayArrow)
+  }
+}
+
+@Composable
+private fun SubtitleTiming(offset: Long, modifier: Modifier, move: (Long) -> Unit, close: () -> Unit) {
+  val r = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(60); runCatching { r.requestFocus() } }
+  Column(Modifier.padding(Z.Pad).then(modifier).background(Z.Surface.copy(alpha = 0.95f), Z.Large).padding(18.dp)) {
+    Text("Subtitle timing", style = MaterialTheme.typography.titleMedium)
+    Text(when {
+      offset == 0L -> "In step with the file"
+      offset > 0 -> "Shown %.1f s later".format(offset / 1000f)
+      else -> "Shown %.1f s earlier".format(-offset / 1000f)
+    }, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+    Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+      ZButton("Earlier −0.5 s", { move(-500) }, Modifier.focusRequester(r))
+      ZButton("Later +0.5 s", { move(500) })
+      ZButton("Reset", { move(-offset) })
+      ZButton("Done", close, primary = true)
+    }
+  }
+}
 
 /** Subtitle format from the link; addon links often have no extension, and those are almost always SubRip. */
 private fun subtitleMime(url: String): String {
