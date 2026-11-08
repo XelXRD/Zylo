@@ -1,5 +1,5 @@
 {
-  "version": "0.23.1",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.23.1.apk",
-  "notes": "What's new in 0.23.1\n\n• The player's controls and timeline now come up every time you press OK, not just the first.\n• Back while watching goes to Choose Source, so you can try another source if one is broken.\n• Settings > Playback > Play next episode: always, 3, 5 or 10 in a row, or Off (pick the next one yourself, or go to the episode list).\n• Settings > Playback > Audio language: films and episodes play in your language when the file has it, instead of whatever track the file starts on."
+  "version": "0.23.2",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.23.2.apk",
+  "notes": "What's new in 0.23.2\n\n• Settings > Playback > Pick a source for me: Play chooses a source once 1, 3, 5, 10 or 20 are found, or turn it Off to always choose from the list yourself. With fewer than your number, the list opens for you to pick.\n• The player's controls and timeline come up every time you press OK.\n• Back while watching goes to Choose Source, so you can try another source.\n• Settings > Playback > Audio language: plays your language's audio whenever the file has it."
 }
