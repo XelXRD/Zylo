@@ -1,5 +1,5 @@
 {
-  "version": "0.21.2",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.21.2.apk",
-  "notes": "What's new in 0.21.2\n\n• Sports no longer crashes or freezes, and finds channels for a match by itself after a moment (or press OK to go straight there).\n• Live TV loads your channels first and keeps them on the TV, refreshing once a day; the TV guide follows once a day."
+  "version": "0.22.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.22.0.apk",
+  "notes": "What's new in 0.22.0\n\n• Live TV: Left goes back to your last channel; type a channel number to jump to it; OK while watching opens a channel list with what's on now and next; the guide previews the channel you rest on.\n• Hold the OK button on a channel to add it to Favourites — it now works on every remote.\n• Sports remembers which channels show a match until it's over.\n• Easier-to-read highlights: no more white text on white.\n• Zylo opens with the top bar selected, and the featured titles change every launch (and every 4 hours).\n• Pick for Me now in Anime too."
 }
