@@ -432,6 +432,9 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
   Column(Modifier.fillMaxSize().padding(top = 76.dp)) {
     Text(title, Modifier.padding(horizontal = Z.Pad), style = MaterialTheme.typography.displaySmall)
     LazyRow(contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+      // Can't decide? A few questions, then a pick (Quiz.kt).
+      if (!b.anime) item { Chip("✦ Pick for Me", false) { nav.push(Screen.Quiz(b.type)) } }
+      if (!b.anime) item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
       itemsIndexed(listOf("Popular", "Top Rated", "New Releases")) { i, label -> Chip(label, b.sort == i) { pick(i, b.genre) } }
       item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
       item { Chip("All Genres", b.genre == null) { pick(b.sort, null) } }

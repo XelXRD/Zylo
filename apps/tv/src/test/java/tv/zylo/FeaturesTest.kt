@@ -209,6 +209,7 @@ class XtreamTest {
     val web = { u: String -> asked += u; when {
       "get_live_categories" in u -> """[{"category_id":"3","category_name":"UK | Sport "}]"""
       "get_live_streams" in u -> """[{"num":101,"name":"Sky Sports","stream_id":55,"stream_icon":"http://l/1.png","category_id":"3"},{"num":0,"name":"bad","stream_id":0}]"""
+      "get_simple_data_table" in u -> """{"epg_listings":[]}"""
       "get_short_epg" in u -> """{"epg_listings":[{"title":"TWF0Y2ggb2YgdGhlIERheQ==","description":"SGlnaGxpZ2h0cw==","start_timestamp":"1762610400","stop_timestamp":"1762614000"}]}"""
       else -> """{"user_info":{"auth":1,"status":"Active","allowed_output_formats":["m3u8","ts"]}}"""
     } }
@@ -217,9 +218,20 @@ class XtreamTest {
     val ch = x.channels("3", web)
     assertEquals(listOf(Channel(55, 101, "Sky Sports", "http://l/1.png", "3")), ch)
     assertEquals(true, asked.last().endsWith("action=get_live_streams&category_id=3"))
-    assertEquals(listOf(Programme("Match of the Day", "Highlights", 1762610400000, 1762614000000)), x.guide(55, web))
+    assertEquals(listOf(Programme("Match of the Day", "Highlights", 1762610400000, 1762614000000)), x.guide(55, web)) // full table empty → now and next
     assertEquals("http://tv.example:8080/live/alex/p%40ss/55.m3u8", x.streamUrl(ch[0]))
     assertEquals("http://tv.example:8080/live/alex/p%40ss/55.ts", Xtream(x.server, "alex", "p@ss", listOf("ts")).streamUrl(ch[0]))
+  }
+
+  @Test fun catchUp() {
+    val c = Channel(55, 1, "BBC One", null, "1", archive = 7)
+    val now = 1762617600000L // 16:00 UTC, 8 Nov 2026
+    val p = Programme("Football Focus", "", now - 4 * 3_600_000, now - 3 * 3_600_000, archive = true, startText = "2026-11-08 12:00:00")
+    assertEquals("http://tv.example:8080/timeshift/alex/p%40ss/60/2026-11-08:12-00/55.ts", x.catchupUrl(c, p))
+    assertEquals(true, x.canCatchUp(c, p, now))
+    assertEquals(false, x.canCatchUp(c.copy(archive = 0), p, now)) // channel without an archive
+    assertEquals(false, x.canCatchUp(c, p.copy(end = now + 60_000), now)) // still on
+    assertEquals(false, x.canCatchUp(c.copy(archive = 1), p.copy(start = now - 3 * 86_400_000, end = now - 3 * 86_400_000 + 3_600_000), now)) // older than the archive
   }
 
   @Test fun refusedLogins() {
@@ -227,5 +239,16 @@ class XtreamTest {
     assertEquals("The provider didn't accept that username and password.", bad)
     val expired = runCatching { x.login { """{"user_info":{"auth":1,"status":"Expired"}}""" } }.exceptionOrNull()?.message
     assertEquals("The provider says this account is Expired.", expired)
+  }
+}
+
+class QuizTest {
+  @Test fun answersBuildTheSearch() {
+    val q = quiz("movie")
+    val path = quizPath("movie", listOf(q[0].answers[0], q[1].answers[3], q[2].answers[0], q[3].answers[0], q[4].answers[0]))
+    assertEquals(true, "with_genres=35" in path && "primary_release_date.gte=1990-01-01" in path && "with_runtime.lte=100" in path && "vote_count.gte=800" in path)
+    val any = quizPath("tv", quiz("tv").map { it.answers.last() })
+    assertEquals("/discover/tv?sort_by=popularity.desc&include_adult=false&page=1&vote_count.gte=50", any) // all "don't mind": just popular, with a few votes
+    assertEquals(5, quiz("tv").size)
   }
 }

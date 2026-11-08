@@ -225,8 +225,8 @@ fun ZCard(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composab
 
 /** Clickable row/tab surface: transparent, white with dark text when focused. */
 @Composable
-fun ZSurface(onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, container: Color = Color.Transparent, content: @Composable BoxScope.() -> Unit) = Surface(
-  onClick, modifier,
+fun ZSurface(onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, container: Color = Color.Transparent, onLongClick: (() -> Unit)? = null, content: @Composable BoxScope.() -> Unit) = Surface(
+  onClick, modifier, onLongClick = onLongClick,
   shape = ClickableSurfaceDefaults.shape(Z.Small),
   colors = ClickableSurfaceDefaults.colors(
     containerColor = if (selected) Z.Red.copy(alpha = 0.18f) else container,

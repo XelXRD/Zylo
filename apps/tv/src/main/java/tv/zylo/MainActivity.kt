@@ -54,6 +54,7 @@ sealed interface Screen {
   ) : Screen
   data object Profiles : Screen
   data object LivePlay : Screen
+  data class Quiz(val type: String) : Screen
 }
 
 enum class Section(val label: String) { Home("Home"), Movies("Movies"), Series("Series"), Anime("Anime"), Live("Live TV"), Discover("Discover"), MyList("My List") }
@@ -135,6 +136,7 @@ class MainActivity : ComponentActivity() {
             is Screen.Play -> PlayerPage(store, s, nav)
             Screen.Profiles -> ProfilesPage(store, nav)
             Screen.LivePlay -> LivePlayer(store, ui.live, nav)
+            is Screen.Quiz -> QuizPage(store, s.type, nav)
           }
         }
       }
