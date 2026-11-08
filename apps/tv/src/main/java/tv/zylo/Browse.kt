@@ -36,6 +36,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.input.key.Key
 import androidx.compose.ui.input.key.KeyEventType
@@ -375,6 +378,7 @@ class BrowseState(val type: String, val anime: Boolean = false) {
   private var loading = false
   val grid = LazyGridState()
   val focus = FocusMemory()
+  val chips = FocusRequester() // the filter row: where Down from the top bar lands
 
   fun reset() {
     items = emptyList()
@@ -431,7 +435,7 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
   }
   Column(Modifier.fillMaxSize().padding(top = 76.dp)) {
     Text(title, Modifier.padding(horizontal = Z.Pad), style = MaterialTheme.typography.displaySmall)
-    LazyRow(contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
+    LazyRow(Modifier.focusRequester(b.chips).focusRestorer(), contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
       // Can't decide? A few questions, then a pick (Quiz.kt).
       if (!b.anime) item { Chip("✦ Pick for Me", false) { nav.push(Screen.Quiz(b.type)) } }
       if (!b.anime) item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }

@@ -29,6 +29,10 @@ object Trakt {
   private const val AUTH = "https://auth.trakt.tv"
   private const val REDIRECT = "urn:ietf:wg:oauth:2.0:oob" // never visited (device code); Trakt checks it on refresh
   val io = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+  // Scrobbles go one at a time, in order: sent side by side, a "start" could land after the "stop", leaving Trakt
+  // thinking you're still watching until it marked the whole thing watched.
+  @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+  private val inOrder = Dispatchers.IO.limitedParallelism(1)
 
   fun connected(store: Store) = store.str("trakt_client").isNotEmpty() && store.str("trakt_access").isNotEmpty()
 
@@ -245,19 +249,25 @@ object Trakt {
     val finished = action == "stop" && progress >= 80f
     if (finished) store.setTraktWatched(store.traktWatched() + progressKey(item, season, episode))
     val at = isoNow()
-    io.launch {
+    io.launch(inOrder) {
       try {
         call(store, "/scrobble/$action", "POST", b)
         if (action == "stop") Outbox.log(store, "trakt", label(item, season, episode), if (finished) "Watched, sent to Trakt." else "Progress (${progress.toInt()}%) sent to Trakt.", true)
       } catch (e: HttpError) {
         if (e.code == 409) Outbox.log(store, "trakt", label(item, season, episode), "Already recorded on Trakt.", true)
         else if (finished) Outbox.add(store, label(item, season, episode), JSONObject().put("service", "trakt").put("path", "/sync/history").put("body", body(item, season, episode) { put("watched_at", at) }))
+        else if (action == "stop") stopLater(store, item, season, episode, b)
         else if (action != "pause") Outbox.log(store, "trakt", label(item, season, episode), "Now-watching update failed: ${e.message}", false)
       } catch (e: Exception) {
         if (finished) Outbox.add(store, label(item, season, episode), JSONObject().put("service", "trakt").put("path", "/sync/history").put("body", body(item, season, episode) { put("watched_at", at) }))
+        else if (action == "stop") stopLater(store, item, season, episode, b)
       }
     }
   }
+
+  /** A "stop" that didn't get through is retried, so Trakt doesn't go on thinking you're watching (and finish it for you). */
+  private fun stopLater(store: Store, item: Item, season: Int?, episode: Int?, b: JSONObject) =
+    Outbox.add(store, label(item, season, episode) + " stopped at ${b.optDouble("progress").toInt()}%", JSONObject().put("service", "trakt").put("path", "/scrobble/stop").put("body", b))
 
   fun setWatched(store: Store, item: Item, season: Int?, episode: Int?, watched: Boolean) {
     val key = progressKey(item, season, episode)

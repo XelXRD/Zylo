@@ -109,14 +109,14 @@ fun QuizPage(store: Store, type: String, nav: Nav) {
   val picks = remember { mutableStateListOf<Int>() }
   BackHandler(step in 1..questions.size) { if (step == questions.size) step-- else { step--; picks.removeAt(picks.lastIndex) } }
   Box(Modifier.fillMaxSize().background(Z.Bg)) {
-    if (step < questions.size) QuestionStep(type, questions, step) { i -> picks += i; step++ }
-    else Result(store, type, picks.mapIndexed { q, i -> questions[q].answers[i] }, nav, again = { picks.clear(); step = 0 })
+    // One answer per question: a second press while the next question slides in is ignored (it used to run past the end).
+    if (step < questions.size) QuestionStep(type, questions, step) { asked, i -> if (asked == step && picks.size == step) { picks += i; step++ } }
+    else Result(store, type, picks.take(questions.size).mapIndexed { q, i -> questions[q].answers[i] }, nav, again = { picks.clear(); step = 0 })
   }
 }
 
 @Composable
-private fun QuestionStep(type: String, questions: List<Question>, step: Int, answer: (Int) -> Unit) {
-  val q = questions[step]
+private fun QuestionStep(type: String, questions: List<Question>, step: Int, answer: (asked: Int, Int) -> Unit) {
   val first = remember(step) { FocusRequester() }
   LaunchedEffect(step) { delay(60); runCatching { first.requestFocus() } }
   val slide = ms(260)
@@ -133,17 +133,18 @@ private fun QuestionStep(type: String, questions: List<Question>, step: Int, ans
     }
     AnimatedContent(step, transitionSpec = {
       (slideInHorizontally(tween(slide, easing = Z.EaseOut)) { it / 6 } + fadeIn(tween(fade))) togetherWith fadeOut(tween(out))
-    }, label = "question") { _ ->
+    }, label = "question") { shown ->
+      val q = questions[shown] // the question this copy shows (the old one is still on screen while it slides out)
       Column {
         Text(q.ask, Modifier.padding(top = 56.dp), style = MaterialTheme.typography.displaySmall)
-        Text("Question ${step + 1} of ${questions.size}" + if (step > 0) "  ·  Back to change your last answer" else "", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+        Text("Question ${shown + 1} of ${questions.size}" + if (shown > 0) "  ·  Back to change your last answer" else "", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
         // Answers as big tiles, four to a row.
         Column(Modifier.padding(top = 36.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
           q.answers.chunked(4).forEachIndexed { r, row ->
             Row(horizontalArrangement = Arrangement.spacedBy(14.dp)) {
               row.forEachIndexed { c, a ->
                 val i = r * 4 + c
-                ZCard({ answer(i) }, (if (i == 0) Modifier.focusRequester(first) else Modifier).width(200.dp).height(104.dp)) {
+                ZCard({ answer(shown, i) }, (if (i == 0 && shown == step) Modifier.focusRequester(first) else Modifier).width(200.dp).height(104.dp)) {
                   Column(Modifier.fillMaxSize().background(Z.Card).padding(16.dp), verticalArrangement = Arrangement.Bottom) {
                     Text(a.label, style = MaterialTheme.typography.titleMedium, maxLines = 1)
                     Text(a.hint, Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)

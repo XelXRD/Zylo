@@ -104,6 +104,12 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     val store = Store(this)
     Ratings.max = store.profile.kids
+    // Keep the last crash's details (shown in Settings > About), then crash as normal.
+    val previous = Thread.getDefaultUncaughtExceptionHandler()
+    Thread.setDefaultUncaughtExceptionHandler { t, e ->
+      runCatching { getSharedPreferences("zylo", MODE_PRIVATE).edit().putString("last_crash", "${java.util.Date()}  ·  ${BuildConfig.VERSION_NAME}\n" + e.stackTraceToString().take(4000)).commit() }
+      previous?.uncaughtException(t, e)
+    }
     Dom.app = applicationContext
     val ui = UiState(store)
     coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
@@ -173,7 +179,8 @@ fun TopNav(ui: UiState, nav: Nav) {
     ui.stayInNav = true
     ui.section = s
   }
-  val down = Modifier.focusProperties { this.down = ui.content }
+  // Down from the top bar: the filter row on Movies, Series and Anime (Pick for Me lives there), else back into the page.
+  val down = Modifier.focusProperties { this.down = ui.browse[ui.section]?.chips ?: ui.content }
   Row(
     Modifier.fillMaxWidth()
       // A soft scroll-edge fade, not a bar: artwork stays visible behind the navigation.

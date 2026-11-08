@@ -66,7 +66,7 @@ fun SettingsScreen(store: Store) {
           ServiceCard(store, "premiumize", "Premiumize", "Checks what's cached before you press Play.", "PM", { store.debrid("premiumize") }, { store.setDebrid("premiumize", it) })
         }
         SettingsPage.Live -> LiveTvSettings(store)
-        SettingsPage.About -> About()
+        SettingsPage.About -> About(store)
         SettingsPage.Profiles -> ProfilesSettings(store)
         SettingsPage.Servers -> panel?.let { it() } ?: MediaServers(store) { p -> panel = p?.let { content -> { content { panel = null } } } }
       }
@@ -610,7 +610,7 @@ private fun Addons(store: Store) {
 }
 
 @Composable
-private fun About() = Column(Modifier.verticalScroll(rememberScrollState())) {
+private fun About(store: Store) = Column(Modifier.verticalScroll(rememberScrollState())) {
   Logo(40.dp)
   Text("One interface. Your entire media world.", Modifier.padding(top = 14.dp), style = MaterialTheme.typography.titleLarge, color = Z.Text2)
   Text("Version ${BuildConfig.VERSION_NAME}", Modifier.padding(top = 24.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
@@ -618,6 +618,15 @@ private fun About() = Column(Modifier.verticalScroll(rememberScrollState())) {
     "Film and TV information and artwork come from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",
     Modifier.padding(top = 8.dp).fillMaxWidth(0.8f), style = MaterialTheme.typography.bodySmall, color = Z.Muted,
   )
+  // The last crash, so it can be photographed and sent for fixing.
+  var crash by remember { mutableStateOf(store.str("last_crash")) }
+  if (crash.isNotEmpty()) {
+    Text("Last crash", Modifier.padding(top = 28.dp), style = MaterialTheme.typography.titleMedium)
+    Text("Take a photo of this and send it over: it says exactly where Zylo went wrong.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
+    Text(crash.lines().take(14).joinToString("\n"), Modifier.padding(top = 10.dp).fillMaxWidth().background(Z.Card, Z.Medium).padding(14.dp),
+      style = MaterialTheme.typography.bodySmall.copy(fontFamily = androidx.compose.ui.text.font.FontFamily.Monospace), color = Z.Text2)
+    ZButton("Clear", { store.put("last_crash", ""); crash = "" }, Modifier.padding(top = 10.dp))
+  }
 }
 
 /** Native text dialog: the TV keyboard (and the Google TV phone app's keyboard) works best with a plain EditText. */
