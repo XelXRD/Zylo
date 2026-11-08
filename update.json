@@ -1,5 +1,5 @@
 {
-  "version": "0.23.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.23.0.apk",
-  "notes": "What's new in 0.23.0\n\n• PINs: give grown-up profiles a 4-digit PIN (Settings > Profiles). Kids can't switch to them, and Settings on a kids profile asks for it.\n• One search for everything: films, series and anime plus your live channels, what's on the TV guide in the next 24 hours, and fixtures.\n• Home shows On Live TV Now (your favourite channels) and Starting Soon (your reminders).\n• Skip Intro, Skip Recap and Skip Credits buttons when the community databases know the timings (IntroDB; AniSkip for anime).\n• Subtitles: choose size, background and position (Settings > Playback). Out of step? Press Up while watching to move them 0.5 s at a time.\n• A small note in the top bar shows when Zylo is updating channels, the guide, Trakt or downloading an update.\n• New installs get a step-by-step setup: TMDB, accounts, debrid, addons and Live TV."
+  "version": "0.23.1",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.23.1.apk",
+  "notes": "What's new in 0.23.1\n\n• The player's controls and timeline now come up every time you press OK, not just the first.\n• Back while watching goes to Choose Source, so you can try another source if one is broken.\n• Settings > Playback > Play next episode: always, 3, 5 or 10 in a row, or Off (pick the next one yourself, or go to the episode list).\n• Settings > Playback > Audio language: films and episodes play in your language when the file has it, instead of whatever track the file starts on."
 }
