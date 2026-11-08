@@ -20,6 +20,8 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.focus.focusProperties
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.unit.sp
@@ -36,6 +38,7 @@ enum class SettingsPage(val label: String) {
   Profiles("Profiles"), Playback("Playback"), Integrations("Integrations"), Addons("Addons"), Debrid("Debrid Services"), Servers("Media Servers"), Live("Live TV"), About("About Zylo")
 }
 
+@OptIn(androidx.compose.ui.ExperimentalComposeUiApi::class)
 @Composable
 fun SettingsScreen(store: Store) {
   var page by rememberSaveable { mutableStateOf(if (store.tmdb.isEmpty()) SettingsPage.Integrations else SettingsPage.Playback) }
@@ -44,7 +47,9 @@ fun SettingsScreen(store: Store) {
   val first = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
   Row(Modifier.fillMaxSize()) {
-    Column(Modifier.width(250.dp).fillMaxHeight().background(Z.Surface).padding(horizontal = 18.dp, vertical = 32.dp)) {
+    // Left from a page always lands on that page's own entry: landing on the nearest one switched pages under you.
+    Column(Modifier.width(250.dp).fillMaxHeight().background(Z.Surface).padding(horizontal = 18.dp, vertical = 32.dp)
+      .focusProperties { @Suppress("DEPRECATION") enter = { first } }.focusGroup()) {
       Box(Modifier.padding(start = 12.dp, bottom = 28.dp)) { Logo(20.dp) }
       Text("Settings", Modifier.padding(start = 12.dp, bottom = 12.dp), style = MaterialTheme.typography.headlineSmall)
       SettingsPage.entries.forEach { p ->
@@ -178,6 +183,11 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     val all = listOf("") + SUB_LANGS.drop(1) + "file"
     audio = all[(all.indexOf(audio) + 1) % all.size]
     store.put("audiolang", audio)
+  }
+  var dubs by remember { mutableStateOf(store.animeDubs) }
+  Choice("Anime audio", "Dubbed: English-dubbed and dual-audio releases first, in your audio language. Original: Japanese audio with subtitles.", if (dubs) "Prefer dubs" else "Original + subtitles") {
+    dubs = !dubs
+    store.animeDubs = dubs
   }
   var autoSource by remember { mutableIntStateOf(AutoSource.min(store)) }
   Choice("Pick a source for me", "Play chooses the best source once this many are found, so it has more to choose from. Off: you always choose from the list.", AutoSource.label(autoSource)) {

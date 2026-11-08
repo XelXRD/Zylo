@@ -79,7 +79,6 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   var tab by rememberSaveable { mutableIntStateOf(0) }
   var season by rememberSaveable { mutableStateOf<Int?>(null) }
   var episodes by remember { mutableStateOf<List<JSONObject>>(emptyList()) }
-  var inList by remember { mutableStateOf(store.inMyList(item)) }
   var tick by remember { mutableIntStateOf(0) }
   val latest = remember(tick) { store.latest(item) }
   val look = rememberLook(store, item)
@@ -147,7 +146,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
           Row(Modifier.padding(top = 20.dp).onFocusChanged { if (it.hasFocus) scope.launch { scroll.animateScrollTo(0) } }, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ZButton(playLabel, { nav.push(Screen.Sources(item, playSeason, playEpisode, autoplay = true)) }, Modifier.focusMemory(focus, "play", default = true), primary = true, icon = Icons.Filled.PlayArrow)
             ZButton("Choose Source", { nav.push(Screen.Sources(item, playSeason, playEpisode)) }, Modifier.focusMemory(focus, "source"))
-            ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(focus, "list"), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+            MyListButton(store, item, Modifier.focusMemory(focus, "list"))
             if (trailer != null) ZButton("Trailer", { popup = true }, Modifier.focusMemory(focus, "trailer"))
             if (!tv) {
               val watched = remember(tick) { store.watched(progressKey(item, null, null)) }
@@ -457,6 +456,8 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
         MediaItem.SubtitleConfiguration.Builder(Uri.parse(sub.url)).setMimeType(subtitleMime(sub.url)).setLanguage(sub.lang).setLabel(sub.label).build()
       }).build())
       store.subLang.takeIf { it.isNotEmpty() }?.let { lang -> trackSelectionParameters = trackSelectionParameters.buildUpon().setPreferredTextLanguage(lang).build() }
+      // Subtitles off: a file's "default" subtitle track (often a foreign one) stays off too; forced ones still show.
+        ?: run { trackSelectionParameters = trackSelectionParameters.buildUpon().setIgnoredTextSelectionFlags(C.SELECTION_FLAG_DEFAULT).build() }
       // Audio in your language when the file has it (files often mark a dub as their default track).
       store.audioLang?.let { lang -> trackSelectionParameters = trackSelectionParameters.buildUpon().setPreferredAudioLanguage(lang).build() }
       store.watch(key)?.takeIf { it.started && !it.percent }?.let { seekTo(it.pos) }
@@ -509,6 +510,15 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
       if (player.isPlaying) countdown-- // paused: the countdown waits too
     }
     playNext()
+  }
+
+  // Anime without "prefer dubs": the Japanese audio, with subtitles in your language (or the TV's).
+  LaunchedEffect(Unit) {
+    if (store.animeDubs) return@LaunchedEffect
+    val d = withContext(Dispatchers.IO) { Tmdb(store.tmdb).preview(s.item) }
+    if (!isAnime(d)) return@LaunchedEffect
+    player.trackSelectionParameters = player.trackSelectionParameters.buildUpon().setPreferredAudioLanguage("ja")
+      .setPreferredTextLanguage(store.subLang.ifEmpty { java.util.Locale.getDefault().language.ifEmpty { "en" } }).setIgnoredTextSelectionFlags(0).build()
   }
 
   // --- Skip Intro / Recap / Credits (IntroDB; AniSkip for anime). ---

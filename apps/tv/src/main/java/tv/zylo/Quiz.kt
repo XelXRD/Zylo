@@ -122,7 +122,8 @@ fun QuizPage(store: Store, type: String, nav: Nav) {
   val questions = remember { quiz(type) }
   var step by rememberSaveable { mutableIntStateOf(0) }
   val picks = remember { mutableStateListOf<Int>() }
-  BackHandler(step in 1..questions.size) { if (step == questions.size) step-- else { step--; picks.removeAt(picks.lastIndex) } }
+  // Back on a question: the one before. Back on your pick: out of the quiz, to Movies / Series / Anime.
+  BackHandler(step in 1 until questions.size) { step--; picks.removeAt(picks.lastIndex) }
   Box(Modifier.fillMaxSize().background(Z.Bg)) {
     // One answer per question: a second press while the next question slides in is ignored (it used to run past the end).
     if (step < questions.size) QuestionStep(type, questions, step) { asked, i -> if (asked == step && picks.size == step) { picks += i; step++ } }

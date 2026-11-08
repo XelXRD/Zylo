@@ -18,7 +18,7 @@ object Skip {
   fun find(ctx: Context, store: Store, item: Item, season: Int?, episode: Int?): List<Segment> {
     val d = Tmdb(store.tmdb).details(item.type, item.id)
     val imdb = d.optJSONObject("external_ids")?.str("imdb_id")
-    val anime = d.optJSONArray("genres")?.objects()?.any { it.optInt("id") == 16 } == true && d.optString("original_language") == "ja"
+    val anime = isAnime(d)
     if (anime) runCatching { aniSkip(ctx, d, item, season, episode) }.getOrNull()?.takeIf { it.isNotEmpty() }?.let { return it }
     if (imdb == null) return emptyList()
     val q = if (season != null && episode != null) "imdb_id=$imdb&season=$season&episode=$episode" else "imdb_id=$imdb&is_movie=true"

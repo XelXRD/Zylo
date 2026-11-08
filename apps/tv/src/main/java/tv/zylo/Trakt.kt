@@ -169,6 +169,15 @@ object Trakt {
     return (mine + liked).filter { it.id.isNotEmpty() }
   }
 
+  /** Lists you own (the ones you can add to). */
+  fun ownLists(store: Store) = arr(call(store, "/users/me/lists")).objects().mapNotNull { o ->
+    o.optJSONObject("ids")?.optString("trakt")?.takeIf { it.isNotEmpty() }?.let { TraktList(o.optString("name"), "me", it, o.optInt("item_count")) }
+  }
+
+  fun setListed(store: Store, item: Item, l: TraktList, add: Boolean) =
+    Outbox.add(store, item.title + if (add) " added to ${l.name}" else " removed from ${l.name}",
+      JSONObject().put("service", "trakt").put("path", "/users/me/lists/${l.id}/items" + if (add) "" else "/remove").put("body", body(item, null, null)))
+
   fun listItems(store: Store, l: TraktList) = refs(JSONArray(paged(store, "/users/${l.user}/lists/${l.id}/items/movie,show")))
 
   /** Turn refs into cards via TMDB (cached), a few at a time. */

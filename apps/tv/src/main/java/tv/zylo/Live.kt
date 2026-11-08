@@ -4,6 +4,7 @@ package tv.zylo
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusable
 import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.*
@@ -578,12 +579,16 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
       // Catch-up can be paused and skipped through; on live, Left is the last channel.
       Key.DirectionLeft -> { if (past != null) player.seekTo((player.currentPosition - 30_000).coerceAtLeast(0)) else last?.let(::go); banner++; true }
       Key.DirectionRight -> { if (past != null) player.seekTo(player.currentPosition + 30_000); banner++; true }
-      Key.DirectionCenter, Key.Enter, Key.MediaPlayPause -> { if (past != null) player.playWhenReady = !player.playWhenReady else mini = true; banner++; true }
+      // OK: the info bar first; OK again with it showing opens the mini guide.
+      Key.DirectionCenter, Key.Enter, Key.MediaPlayPause -> { if (past != null) player.playWhenReady = !player.playWhenReady else if (showBanner) mini = true; banner++; true }
       Key.Info, Key.Guide -> { if (past == null) mini = true; banner++; true }
       else -> false
     }
-  }) {
-    AndroidView({ PlayerView(it).apply { useController = false; this.player = player; keepScreenOn = true } }, Modifier.fillMaxSize())
+  }.focusable()) { // focusable: without it the key handler above never had focus, so OK and Up/Down did nothing
+    AndroidView({ PlayerView(it).apply {
+      useController = false; this.player = player; keepScreenOn = true
+      isFocusable = false; descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+    } }, Modifier.fillMaxSize())
     error?.let { Text(it, Modifier.align(Alignment.Center).padding(40.dp), style = MaterialTheme.typography.titleMedium, color = Z.Text) }
     if (showBanner) {
       val now = System.currentTimeMillis()
@@ -604,7 +609,7 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
           else if (on != null) ProgressBar((now - on.start).toFloat() / (on.end - on.start), Modifier.padding(top = 8.dp).width(320.dp))
           if (past == null) next?.let { Text("Next  ${hm(it.start)}  ${it.title}", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 1) }
         }
-        Text(if (past != null) "◀ ▶  30 s  ·  OK  Pause  ·  ▲ ▼  Back to live" else "▲ ▼  Channel  ·  ◀  Last channel  ·  OK  Guide", style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+        Text(if (past != null) "◀ ▶  30 s  ·  OK  Pause  ·  ▲ ▼  Back to live" else "▲ ▼  Channel  ·  ◀  Last channel  ·  OK  Channel list", style = MaterialTheme.typography.labelMedium, color = Z.Muted)
       }
     }
     if (typed.isNotEmpty()) Text(typed, Modifier.align(Alignment.TopEnd).padding(36.dp).background(Z.Bg.copy(alpha = 0.85f), Z.Medium).padding(horizontal = 22.dp, vertical = 10.dp),

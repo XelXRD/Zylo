@@ -118,14 +118,21 @@ private fun qualityIndex(q: String?) = QUALITIES.indexOf(q).let { if (it < 0) 9 
  * played (or one like it); then your own media servers; then what's ready now (direct links, cached torrents);
  * then the best quality; then addon order.
  */
-fun rank(all: List<Source>, cap: String = "4K", pref: JSONObject? = null) = all.filter { it.url != null || it.debrid != null }
+fun rank(all: List<Source>, cap: String = "4K", pref: JSONObject? = null, dubs: Boolean = false) = all.filter { it.url != null || it.debrid != null }
   .sortedWith(compareBy(
     { qualityIndex(it.quality) < QUALITIES.indexOf(cap).coerceAtLeast(0) },
+    { dubs && !isDub(it) }, // anime with "prefer dubs" on: English-dubbed / dual-audio releases first
     { it.likeness(pref) },
     { it.library == null },
     { it.debrid != null && !it.cached },
     { qualityIndex(it.quality) },
   ))
+
+private val DUB = Regex("""\b(dub|dubbed|dual[ ._-]?audio|multi[ ._-]?audio|eng(lish)?[ ._-]?dub)\b""", RegexOption.IGNORE_CASE)
+fun isDub(s: Source) = DUB.containsMatchIn(listOfNotNull(s.label, s.detail, s.filename).joinToString(" "))
+
+/** Japanese animation (TMDB's Animation genre, Japanese original): what Zylo treats as anime. */
+fun isAnime(d: JSONObject?) = d != null && d.optString("original_language") == "ja" && d.optJSONArray("genres")?.objects()?.any { it.optInt("id") == 16 } == true
 
 fun overCap(s: Source, cap: String) = qualityIndex(s.quality) < QUALITIES.indexOf(cap).coerceAtLeast(0)
 
@@ -152,7 +159,8 @@ suspend fun findSources(store: Store, item: Item, season: Int?, episode: Int?, v
   }
   val results = (servers + addons + syncler).awaitAll()
   val all = withDebrid(store, results.flatMap { it.first })
-  Found(rank(all, store.maxQuality, store.sourcePref(item)), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null })
+  val dubs = store.animeDubs && isAnime(Tmdb(store.tmdb).preview(item))
+  Found(rank(all, store.maxQuality, store.sourcePref(item), dubs), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null })
 }
 
 // --- Subtitles (the addon "subtitles" resource) -------------------------------------------------

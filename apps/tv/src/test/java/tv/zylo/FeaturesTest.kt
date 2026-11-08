@@ -480,6 +480,19 @@ class ExtrasTest {
     st.put("audiolang", "file"); assertNull(st.audioLang)
   }
 
+  @Test fun animeDubsFirst() {
+    fun src(file: String) = Source("A", "A", "", "1080p", "", null, file, url = "http://x/$file")
+    val sub = src("[SubsPlease] Frieren - 01 (1080p).mkv")
+    val dub = src("Frieren S01E01 1080p WEB Dual Audio.mkv")
+    val eng = src("Frieren.S01E01.English.Dub.1080p.mkv")
+    assertTrue(isDub(dub) && isDub(eng) && !isDub(sub))
+    assertEquals(sub, rank(listOf(sub, dub, eng), dubs = true).last())
+    assertEquals(sub, rank(listOf(sub, dub), dubs = true).last())
+    assertEquals(sub, rank(listOf(sub, dub), dubs = false).first()) // off: order untouched
+    assertTrue(isAnime(org.json.JSONObject("""{"original_language":"ja","genres":[{"id":16}]}""")))
+    assertTrue(!isAnime(org.json.JSONObject("""{"original_language":"en","genres":[{"id":16}]}""")))
+  }
+
   @Test fun startingSoonAndBusy() {
     val st = store()
     val c = Channel(1, 1, "BBC One", null, "1")

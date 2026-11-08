@@ -29,6 +29,7 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -48,6 +49,7 @@ sealed interface Screen {
   data object Settings : Screen
   data object Search : Screen
   data class Title(val item: Item) : Screen
+  data class More(val title: String, val path: String, val type: String?) : Screen
   data class Sources(val item: Item, val season: Int?, val episode: Int?, val episodeName: String = "", val autoplay: Boolean = false) : Screen
   data class Play(
     val item: Item, val season: Int?, val episode: Int?, val url: String, val headers: Map<String, String>, val subtitle: String, val source: String,
@@ -72,6 +74,8 @@ class UiState(store: Store) {
   val search = FocusMemory()
   val titles = HashMap<String, FocusMemory>()
   val content = FocusRequester() // the current page, so Down from the top bar always lands back in it
+  val navActive = FocusRequester() // the current section in the top bar
+  var navFocused by mutableStateOf(false)
   val profile = store.profile
   var listTab by mutableStateOf("mine")
 }
@@ -142,6 +146,7 @@ class MainActivity : ComponentActivity() {
             Screen.Main -> if (setup) SetupScreen(store) { setup = false } else if (store.tmdb.isEmpty()) Welcome(nav) else Main(store, nav, ui)
             Screen.Settings -> SettingsGate(store, nav) { SettingsScreen(store) }
             Screen.Search -> SearchPage(store, nav, ui.search)
+            is Screen.More -> MorePage(store, s, nav)
             is Screen.Title -> TitlePage(store, s.item, nav)
             is Screen.Sources -> SourcesPage(store, s, nav)
             is Screen.Play -> PlayerPage(store, s, nav)
@@ -161,7 +166,11 @@ class MainActivity : ComponentActivity() {
 
 @Composable
 fun Main(store: Store, nav: Nav, ui: UiState) {
-  BackHandler(ui.section != Section.Home) { ui.stayInNav = true; ui.section = Section.Home }
+  // Back on a main page: up to the top bar first; from the top bar, Home; on Home's top bar, Back leaves the app.
+  BackHandler(!ui.navFocused || ui.section != Section.Home) {
+    if (!ui.navFocused) runCatching { ui.navActive.requestFocus() }
+    else { ui.stayInNav = true; ui.section = Section.Home }
+  }
   val restore = !ui.stayInNav
   Box(Modifier.fillMaxSize()) {
     // focusRestorer: coming back down from the top bar returns to the card you left, even if it scrolled away.
@@ -183,7 +192,7 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
 @OptIn(ExperimentalComposeUiApi::class)
 @Composable
 fun TopNav(ui: UiState, nav: Nav) {
-  val active = remember { FocusRequester() }
+  val active = ui.navActive
   // Opening the app: focus starts (and stays) on the current section in the top bar, not on the hero's Play.
   LaunchedEffect(Unit) { if (ui.stayInNav) { delay(120); runCatching { active.requestFocus() } } }
   fun go(s: Section) {
@@ -198,10 +207,11 @@ fun TopNav(ui: UiState, nav: Nav) {
       .background(Brush.verticalGradient(listOf(Z.Bg.copy(alpha = 0.8f), Z.Bg.copy(alpha = 0.35f), Color.Transparent)))
       .padding(start = Z.Pad - 10.dp, end = Z.Pad - 10.dp, top = 14.dp, bottom = 22.dp)
       .focusProperties { @Suppress("DEPRECATION") enter = { active } } // coming up from content lands on the current section
+      .onFocusChanged { ui.navFocused = it.hasFocus }
       .focusGroup(),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    NavSurface({ go(Section.Home) }, down) { Box(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) { Logo(20.dp, color = LocalContentColor.current) } }
+    Box(Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) { Logo(20.dp) } // not a button
     Spacer(Modifier.width(20.dp))
     Section.entries.filter { it != Section.Live || ui.profile.kids == null }.forEach { s -> // no live channels on a kids profile
       val selected = ui.section == s

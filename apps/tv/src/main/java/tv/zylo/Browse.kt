@@ -80,6 +80,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
   var rows by mutableStateOf<List<Pair<String, List<Item>>>>(emptyList())
   var error by mutableStateOf<String?>(null)
   var loadedFor = ""
+  var specsByTitle = emptyMap<String, RowSpec>() // for Show More: the TMDB list behind each row
   val list = LazyListState()
   val rowLists = HashMap<String, LazyListState>()
   val focus = FocusMemory()
@@ -89,6 +90,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
   suspend fun load(t: Tmdb, key: String) = withContext(Dispatchers.IO) {
     loadedFor = key
     error = null
+    specsByTitle = specs().associateBy { it.title }
     val got = specs().map { spec ->
       async {
         spec.title to runCatching { spec.load?.invoke(t) ?: t.list(spec.path, spec.type) }.getOrElse {
@@ -145,8 +147,14 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   }
   Box(Modifier.fillMaxSize()) {
     if (featured != null) HeroBackdrop(store, s, featured, Modifier.fillMaxSize().alpha(artAlpha))
-    // Rows scroll just into view, clear of the top bar.
-    CompositionLocalProvider(LocalBringIntoViewSpec provides keepInView(100.dp, 32.dp)) {
+    // The focused row moves to the middle of the screen (Alex: a focal point, never cut off at the bottom). In the hero
+    // the page stays at the top. Rows supply their own sideways behaviour (PivotRow).
+    val centre = remember(s) {
+      object : BringIntoViewSpec {
+        override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = if (s.heroFocused) 0f else offset - (containerSize - size) / 2f
+      }
+    }
+    CompositionLocalProvider(LocalBringIntoViewSpec provides centre) {
     LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 84.dp, bottom = 56.dp)) {
       if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 14.dp), style = MaterialTheme.typography.displaySmall) }
       if (featured != null) item("hero") { HeroInfo(store, s, featured, nav) }
@@ -207,7 +215,6 @@ private fun HeroBackdrop(store: Store, s: RowsState, item: Item, modifier: Modif
  */
 @Composable
 private fun HeroInfo(store: Store, s: RowsState, item: Item, nav: Nav) {
-  var inList by remember(item) { mutableStateOf(store.inMyList(item)) }
   fun Modifier.edge(key: Key, step: Int) = onPreviewKeyEvent { e ->
     if (e.type == KeyEventType.KeyDown && e.key == key) { s.moveHero(step); true } else false
   }
@@ -235,7 +242,7 @@ private fun HeroInfo(store: Store, s: RowsState, item: Item, nav: Nav) {
     Row(Modifier.padding(top = 18.dp).onFocusChanged { s.heroFocused = it.hasFocus }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
       ZButton("Play", { nav.play(item) }, Modifier.focusMemory(s.focus, "hero/play", default = true).edge(Key.DirectionLeft, -1), primary = true, icon = Icons.Filled.PlayArrow)
       ZButton("More Info", { nav.push(Screen.Title(item)) }, Modifier.focusMemory(s.focus, "hero/info"), icon = Icons.Filled.Info)
-      ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(s.focus, "hero/list").edge(Key.DirectionRight, 1), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+      MyListButton(store, item, Modifier.focusMemory(s.focus, "hero/list").edge(Key.DirectionRight, 1))
     }
     Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
       val index = s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))
@@ -247,8 +254,52 @@ private fun HeroInfo(store: Store, s: RowsState, item: Item, nav: Nav) {
   }
 }
 
-/** My List, mirrored to the Trakt watchlist when Trakt is connected. Returns true if it's now on the list. */
-fun toggleList(store: Store, item: Item) = store.toggleMyList(item).also { Trakt.setWatchlisted(store, item, it) }
+/**
+ * The My List button. Without Trakt it just adds or removes. With Trakt it asks where: Zylo's My List, your Trakt
+ * watchlist or one of your own Trakt lists (ticked where it already is). [done] gets whether it's on My List.
+ */
+@Composable
+fun MyListButton(store: Store, item: Item, modifier: Modifier) {
+  var inList by remember(item) { mutableStateOf(store.inMyList(item)) }
+  var choosing by remember { mutableStateOf(false) }
+  ZButton("My List", { if (Trakt.connected(store)) choosing = true else inList = store.toggleMyList(item) }, modifier, icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+  if (choosing) SaveTo(store, item) { choosing = false; inList = store.inMyList(item) }
+}
+
+@Composable
+private fun SaveTo(store: Store, item: Item, close: () -> Unit) = androidx.compose.ui.window.Dialog(onDismissRequest = close) {
+  var mine by remember { mutableStateOf(store.inMyList(item)) }
+  var watchlist by remember { mutableStateOf<Boolean?>(null) }
+  var lists by remember { mutableStateOf<List<Pair<TraktList, Boolean>>?>(null) }
+  val ref = Ref(item.type, item.id)
+  LaunchedEffect(Unit) {
+    withContext(Dispatchers.IO) {
+      watchlist = runCatching { ref in Trakt.watchlist(store) }.getOrDefault(false)
+      lists = runCatching { Trakt.ownLists(store).map { l -> l to runCatching { ref in Trakt.listItems(store, l) }.getOrDefault(false) } }.getOrDefault(emptyList())
+    }
+  }
+  val first = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
+  @Composable
+  fun Entry(label: String, on: Boolean?, modifier: Modifier = Modifier, toggle: () -> Unit) =
+    ZSurface({ if (on != null) toggle() }, modifier.fillMaxWidth(), container = Z.Card) {
+      Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        Text(when (on) { null -> "…"; true -> "✓ Saved"; false -> "+ Add" }, style = MaterialTheme.typography.labelLarge)
+      }
+    }
+  Column(Modifier.width(520.dp).background(Z.Surface, Z.Large).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Text("Save ${item.title} to", style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+    Spacer(Modifier.height(6.dp))
+    Entry("My List (Zylo)", mine, Modifier.focusRequester(first)) { mine = store.toggleMyList(item) }
+    Entry("Trakt Watchlist", watchlist) { val add = watchlist != true; Trakt.setWatchlisted(store, item, add); watchlist = add }
+    lists?.forEachIndexed { i, (l, on) ->
+      Entry(l.name, on) { Trakt.setListed(store, item, l, !on); lists = lists?.toMutableList()?.also { it[i] = l to !on } }
+    } ?: Text("Loading your Trakt lists…", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+    Spacer(Modifier.height(6.dp))
+    ZButton("Done", close, primary = true)
+  }
+}
 
 @Composable
 fun Rating(rating: Double, modifier: Modifier = Modifier) {
@@ -287,7 +338,44 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
         onFocus = { f -> if (f) s.focused = k else if (s.focused == k) s.focused = null },
       ) { nav.push(Screen.Title(item)) }
     }
+    // End of a row: the whole list, page after page.
+    s.specsByTitle[name]?.takeIf { it.load == null && it.path.isNotEmpty() }?.let { spec ->
+      item("more") {
+        ZSurface({ nav.push(Screen.More(spec.title, spec.path, spec.type)) }, Modifier.focusMemory(s.focus, "$name/more").width(124.dp).height(186.dp), container = Z.Card) {
+          Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+            Glyph(Icons.Filled.Add, 28.dp)
+            Text("Show more", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
+          }
+        }
+      }
+    }
   }
+  }
+}
+
+/** Show More: a Home / Discover row as a grid, loading further pages as you scroll down. */
+@Composable
+fun MorePage(store: Store, m: Screen.More, nav: Nav) {
+  val focus = remember { FocusMemory() }
+  var items by remember { mutableStateOf<List<Item>?>(null) }
+  var page by remember { mutableIntStateOf(1) }
+  var done by remember { mutableStateOf(false) }
+  var busy by remember { mutableStateOf(true) }
+  val tmdb = remember { Tmdb(store.tmdb) }
+  fun path(p: Int) = m.path + (if ('?' in m.path) "&" else "?") + "page=$p"
+  LaunchedEffect(page) {
+    val got = withContext(Dispatchers.IO) { runCatching { tmdb.list(path(page), m.type) }.getOrDefault(emptyList()) }
+    if (got.isEmpty()) done = true
+    items = (items.orEmpty() + got).distinctBy { it.key }
+    busy = false
+  }
+  RestoreFocus(focus, items?.isNotEmpty() == true)
+  Column(Modifier.fillMaxSize().padding(top = 40.dp)) {
+    Text(m.title, Modifier.padding(start = Z.Pad, bottom = 16.dp), style = MaterialTheme.typography.displaySmall)
+    when (val list = items) {
+      null -> Loading(null)
+      else -> PosterGrid(store, list, focus, nav, nearEnd = { if (!done && !busy && page < 20) { busy = true; page++ } })
+    }
   }
 }
 

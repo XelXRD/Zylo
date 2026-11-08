@@ -166,7 +166,7 @@ class Store(private val open: (String) -> SharedPreferences) {
     g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color).apply { it.kids?.let { k -> put("kids", k) } } }).toString()).apply()
 
   companion object {
-    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "outbox", "synclog", "xc_favs", "reminders")
+    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "anime_dub", "outbox", "synclog", "xc_favs", "reminders")
     val AVATARS = listOf(0xFFBD1422, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
 
     private fun profilesIn(g: SharedPreferences): List<Profile> =
@@ -209,6 +209,11 @@ class Store(private val open: (String) -> SharedPreferences) {
   /** Preferred subtitle language (ISO 639-1, e.g. "en"); "" = subtitles off unless the file forces them. */
   /** Audio language: set in Settings, else the TV's language; null = the file's own default ("file"). */
   val audioLang: String? get() = when (val v = str("audiolang")) { "file" -> null; "" -> java.util.Locale.getDefault().language.ifEmpty { "en" }; else -> v }
+
+  /** Anime: dubbed releases first and audio in your language; off = the original Japanese with subtitles. */
+  var animeDubs: Boolean
+    get() = str("anime_dub") == "1"
+    set(v) = put("anime_dub", if (v) "1" else "")
 
   var subLang: String
     get() = str("sublang")
