@@ -495,17 +495,34 @@ private fun Addons(store: Store) {
   val ctx = LocalContext.current
   val scope = rememberCoroutineScope()
   var addons by remember { mutableStateOf(store.addons) }
+  /** Blocking (call off the main thread). One link per line; returns what happened, for a toast or the phone. */
+  fun install(text: String): String = text.split(Regex("\\s+")).filter { it.isNotBlank() }.joinToString("\n") { url ->
+    runCatching { Addon.load(url) }.fold({ a -> store.addons = store.addons.filter { it.url != a.url } + a; addons = store.addons; "Added ${a.name}." }, { it.message ?: "Couldn't add that addon." })
+  }.ifEmpty { "Paste a link first." }
+  var phone by remember { mutableStateOf<PhoneDrop?>(null) }
+  DisposableEffect(Unit) { onDispose { phone?.stop() } }
   Column {
-    Header("Addons", "Stremio addons find streams for Zylo. Add one by pasting its manifest link.")
-    ZButton("Add Addon", {
-      ask(ctx, "Addon manifest link", "") { url ->
-        scope.launch {
-          withContext(Dispatchers.IO) { runCatching { Addon.load(url) } }
-            .onSuccess { a -> store.addons = store.addons.filter { it.url != a.url } + a; addons = store.addons; toast(ctx, "Added ${a.name}") }
-            .onFailure { toast(ctx, it.message ?: "Couldn't add that addon.") }
+    Header("Addons", "Stremio addons find streams for Zylo. Add one by pasting its manifest link — easiest from your phone.")
+    Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+      ZButton(if (phone == null) "Add from Phone" else "Close Phone Link", {
+        phone = phone?.let { it.stop(); null } ?: runCatching { PhoneDrop { t -> install(t).also { msg -> scope.launch { toast(ctx, msg) } } } }.getOrNull()
+      }, primary = true, icon = Icons.Filled.Add)
+      ZButton("Type a Link", {
+        ask(ctx, "Addon manifest link", "") { url -> scope.launch { toast(ctx, withContext(Dispatchers.IO) { install(url) }) } }
+      })
+    }
+    phone?.let { p ->
+      Row(Modifier.padding(top = 16.dp).background(Z.Card, Z.Medium).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Qr(p.url, 150.dp)
+        Spacer(Modifier.width(20.dp))
+        Column(Modifier.weight(1f)) {
+          Text("Scan with your phone", style = MaterialTheme.typography.titleMedium)
+          Text("Your phone must be on the same Wi-Fi as the TV. Paste the addon's manifest link on the page that opens; it's added here straight away. You can send several.",
+            Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+          Text(p.url.substringBefore("?"), Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = Z.Muted)
         }
       }
-    }, primary = true, icon = Icons.Filled.Add)
+    }
     if (addons.isEmpty()) Text("No addons yet.", Modifier.padding(top = 16.dp), color = Z.Text2)
     LazyColumn(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
       items(addons, key = { it.url }) { a ->

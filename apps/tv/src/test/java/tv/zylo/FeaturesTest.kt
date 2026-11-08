@@ -137,3 +137,23 @@ class KidsTest {
     assertEquals(null, st.profiles.first { it.id == kid.id }.kids)
   }
 }
+
+class PhoneDropTest {
+  @Test fun phoneSendsLinkToTv() {
+    var got = ""
+    val d = PhoneDrop { got = it; "Added Comet." }
+    try {
+      val port = d.url.substringAfterLast(':').substringBefore('/')
+      val k = d.url.substringAfter("?k=")
+      fun post(key: String) = (java.net.URL("http://127.0.0.1:$port/?k=$key").openConnection() as java.net.HttpURLConnection).run {
+        requestMethod = "POST"; doOutput = true
+        outputStream.write(java.net.URLEncoder.encode("https://x.example/abc==/manifest.json", "UTF-8").toByteArray())
+        responseCode to (if (responseCode < 400) inputStream else errorStream).bufferedReader().readText()
+      }
+      assertEquals(403, post("wrong").first) // a different device on the Wi-Fi can't add addons
+      assertEquals("" , got)
+      assertEquals(200 to "Added Comet.", post(k))
+      assertEquals("https://x.example/abc==/manifest.json", got)
+    } finally { d.stop() }
+  }
+}

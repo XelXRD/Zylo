@@ -35,7 +35,7 @@ class Addon(val url: String, val manifest: JSONObject) {
 
   companion object {
     fun load(input: String): Addon {
-      var url = input.trim().replace(Regex("^stremio://", I), "https://")
+      var url = input.replace(Regex("\\s"), "").replace(Regex("^stremio://", I), "https://") // pasted links can pick up line breaks
       if (!Regex("^https?://", I).containsMatchIn(url)) throw Exception("That isn't a web address.")
       // People often paste the addon's home or /configure page rather than its manifest link.
       if (!url.substringBefore('?').endsWith("manifest.json")) url = url.substringBefore('?').removeSuffix("/").removeSuffix("/configure") + "/manifest.json"
