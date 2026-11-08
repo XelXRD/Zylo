@@ -102,10 +102,20 @@ object Anime {
     (a.optJSONObject("my_list_status")?.optInt("num_episodes_watched") ?: 0) to a.optInt("num_episodes").takeIf { it > 0 }
   }
 
+  /** Move one tracker entry forward to this episode (never backwards). Returns what happened, for the activity log. */
+  fun push(store: Store, t: String, id: Int, episode: Int): String {
+    if (!connected(store, t)) throw HttpError(401, "${NAMES[t]} isn't connected on this profile.")
+    val (now, total) = progress(store, t, id)
+    if (now >= episode) return "Already at episode $now on ${NAMES[t]}."
+    val completed = total != null && episode >= total
+    save(store, t, id, episode, completed)
+    return "${NAMES[t]} updated to episode $episode" + if (completed) " (completed)." else "."
+  }
+
   private fun save(store: Store, t: String, id: Int, progress: Int, completed: Boolean) {
     if (t == "anilist") anilistQuery(store.str("anilist_token"), "mutation(\$id:Int,\$p:Int,\$s:MediaListStatus){ SaveMediaListEntry(mediaId:\$id, progress:\$p, status:\$s){ id } }",
       JSONObject().put("id", id).put("p", progress).put("s", if (completed) "COMPLETED" else "CURRENT"))
-    else mal(store, "/anime/$id/my_list_status", "PATCH", form("status" to if (completed) "completed" else "watching", "num_watched_episodes" to "$progress"))
+    else mal(store, "/anime/$id/my_list_status", "PUT", form("status" to if (completed) "completed" else "watching", "num_watched_episodes" to "$progress"))
   }
 
   /** Tracker ids on a list: "watching" or "planning". */
@@ -156,28 +166,36 @@ object Anime {
     return null
   }
 
-  /** Finished a film or episode: move each connected tracker forward. Never throws. */
+  /**
+   * Finished a film or episode: find it on each connected tracker and queue the update in the Outbox (sent now,
+   * retried if it fails). A title that can't be matched is written to the activity log, not silently skipped.
+   */
   fun watched(ctx: Context, store: Store, item: Item, season: Int?, episode: Int?) {
     val trackers = NAMES.keys.filter { connected(store, it) }
     if (trackers.isEmpty()) return
+    val label = item.title + if (season != null) " S${season}E$episode" else ""
     Trakt.io.launch {
-      runCatching {
-        val d = Tmdb(store.tmdb).details(item.type, item.id)
-        val genres = d.optJSONArray("genres")?.objects()?.map { it.optInt("id") }.orEmpty()
-        if (16 !in genres) return@launch // only animation can be anime
-        val all = ids(ctx)
-        for (t in trackers) runCatching {
-          val hit = if (item.type == "movie") {
-            d.optJSONObject("external_ids")?.str("imdb_id")?.let { all.byImdb[it] }?.firstOrNull { it.ids(t).isNotEmpty() }?.let { it.ids(t)[0] to 1 }
-          } else {
-            val rows = d.optJSONObject("external_ids")?.optInt("tvdb_id")?.let { all.byTvdb[it] } ?: return@runCatching
-            // ponytail: assumes TMDB and TVDB number episodes the same; absolute order from TMDB season sizes covers most of the rest
-            val absolute = d.optJSONArray("seasons")?.objects()?.filter { it.optInt("season_number") in 1 until season!! }?.sumOf { it.optInt("episode_count") }?.plus(episode!!)
-            pickEntry(rows, t, season!!, episode!!, absolute)
-          } ?: return@runCatching
-          val (now, total) = progress(store, t, hit.first)
-          if (now < hit.second) save(store, t, hit.first, hit.second, total != null && hit.second >= total)
+      val d = runCatching { Tmdb(store.tmdb).details(item.type, item.id) }.getOrElse {
+        trackers.forEach { t -> Outbox.log(store, t, label, "Couldn't look the title up on TMDB: ${it.message}", false) }
+        return@launch
+      }
+      val genres = d.optJSONArray("genres")?.objects()?.map { it.optInt("id") }.orEmpty()
+      if (16 !in genres) return@launch // only animation can be anime
+      val all = runCatching { ids(ctx) }.getOrElse {
+        trackers.forEach { t -> Outbox.log(store, t, label, "Couldn't load the anime ID list: ${it.message}", false) }
+        return@launch
+      }
+      for (t in trackers) {
+        val hit = if (item.type == "movie") {
+          d.optJSONObject("external_ids")?.str("imdb_id")?.let { all.byImdb[it] }?.firstOrNull { it.ids(t).isNotEmpty() }?.let { it.ids(t)[0] to 1 }
+        } else {
+          val rows = d.optJSONObject("external_ids")?.optInt("tvdb_id")?.let { all.byTvdb[it] }.orEmpty()
+          // ponytail: assumes TMDB and TVDB number episodes the same; absolute order from TMDB season sizes covers most of the rest
+          val absolute = d.optJSONArray("seasons")?.objects()?.filter { it.optInt("season_number") in 1 until season!! }?.sumOf { it.optInt("episode_count") }?.plus(episode!!)
+          if (rows.isEmpty()) null else pickEntry(rows, t, season!!, episode!!, absolute)
         }
+        if (hit == null) Outbox.log(store, t, label, "Couldn't find this title on ${NAMES[t]} (not in the anime ID list).", false)
+        else Outbox.add(store, label, JSONObject().put("service", t).put("id", hit.first).put("episode", hit.second))
       }
     }
   }

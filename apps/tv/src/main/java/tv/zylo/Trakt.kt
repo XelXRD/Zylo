@@ -196,7 +196,11 @@ object Trakt {
     SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.UK).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(s.take(19))!!.time
   }.getOrDefault(0L)
 
-  // --- Zylo → Trakt (fire and forget: tracking must never get in the way of watching) ---------
+  // --- Zylo → Trakt. Lasting changes go through the Outbox (retried, logged); "now watching" is sent directly. ------
+
+  fun post(store: Store, path: String, body: JSONObject): String = call(store, path, "POST", body)
+
+  private fun label(item: Item, season: Int?, episode: Int?) = item.title + if (season != null) " S${season}E$episode" else ""
 
   private fun body(item: Item, season: Int?, episode: Int?, extra: JSONObject.() -> Unit = {}): JSONObject {
     val ids = JSONObject().put("ids", JSONObject().put("tmdb", item.id))
@@ -205,23 +209,44 @@ object Trakt {
     else JSONObject().put("shows", JSONArray().put(ids.put("seasons", JSONArray().put(JSONObject().put("number", season).put("episodes", JSONArray().put(JSONObject().put("number", episode).apply(extra)))))))
   }
 
-  /** "Now watching". start/pause just inform; stop at 80%+ records a play on Trakt (409 = already recorded). */
+  /**
+   * "Now watching". start/pause just inform Trakt. stop at 80%+ records the play (409 means it's already recorded,
+   * which counts as sent); if stop can't be delivered, the play goes into the Outbox as a history entry with the time
+   * you finished, so it still lands later.
+   */
   fun scrobble(store: Store, action: String, item: Item, season: Int?, episode: Int?, progress: Float) {
     if (!connected(store)) return
     val b = if (item.type == "movie") JSONObject().put("movie", JSONObject().put("ids", JSONObject().put("tmdb", item.id)))
     else JSONObject().put("show", JSONObject().put("ids", JSONObject().put("tmdb", item.id))).put("episode", JSONObject().put("season", season).put("number", episode))
     b.put("progress", progress.coerceIn(0f, 100f).toDouble())
-    io.launch { runCatching { call(store, "/scrobble/$action", "POST", b) } }
-    if (action == "stop" && progress >= 80f) store.setTraktWatched(store.traktWatched() + progressKey(item, season, episode))
+    val finished = action == "stop" && progress >= 80f
+    if (finished) store.setTraktWatched(store.traktWatched() + progressKey(item, season, episode))
+    val at = isoNow()
+    io.launch {
+      try {
+        call(store, "/scrobble/$action", "POST", b)
+        if (action == "stop") Outbox.log(store, "trakt", label(item, season, episode), if (finished) "Watched, sent to Trakt." else "Progress (${progress.toInt()}%) sent to Trakt.", true)
+      } catch (e: HttpError) {
+        if (e.code == 409) Outbox.log(store, "trakt", label(item, season, episode), "Already recorded on Trakt.", true)
+        else if (finished) Outbox.add(store, label(item, season, episode), JSONObject().put("service", "trakt").put("path", "/sync/history").put("body", body(item, season, episode) { put("watched_at", at) }))
+        else if (action != "pause") Outbox.log(store, "trakt", label(item, season, episode), "Now-watching update failed: ${e.message}", false)
+      } catch (e: Exception) {
+        if (finished) Outbox.add(store, label(item, season, episode), JSONObject().put("service", "trakt").put("path", "/sync/history").put("body", body(item, season, episode) { put("watched_at", at) }))
+      }
+    }
   }
 
   fun setWatched(store: Store, item: Item, season: Int?, episode: Int?, watched: Boolean) {
     val key = progressKey(item, season, episode)
     store.setTraktWatched(if (watched) store.traktWatched() + key else store.traktWatched() - key)
-    if (connected(store)) io.launch { runCatching { call(store, if (watched) "/sync/history" else "/sync/history/remove", "POST", body(item, season, episode)) } }
+    if (connected(store)) Outbox.add(store, label(item, season, episode) + if (watched) " marked watched" else " marked unwatched",
+      JSONObject().put("service", "trakt").put("path", if (watched) "/sync/history" else "/sync/history/remove").put("body", body(item, season, episode)))
   }
 
   fun setWatchlisted(store: Store, item: Item, add: Boolean) {
-    if (connected(store)) io.launch { runCatching { call(store, if (add) "/sync/watchlist" else "/sync/watchlist/remove", "POST", body(item, null, null)) } }
+    if (connected(store)) Outbox.add(store, item.title + if (add) " added to watchlist" else " removed from watchlist",
+      JSONObject().put("service", "trakt").put("path", if (add) "/sync/watchlist" else "/sync/watchlist/remove").put("body", body(item, null, null)))
   }
+
+  private fun isoNow() = SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss'.000Z'", Locale.UK).apply { timeZone = TimeZone.getTimeZone("UTC") }.format(java.util.Date())
 }

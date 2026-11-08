@@ -99,7 +99,10 @@ class MainActivity : ComponentActivity() {
     val store = Store(this)
     val ui = UiState(store)
     coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
-    Trakt.io.launch { runCatching { Trakt.sync(store) } } // history and paused-elsewhere titles, at most every 15 minutes
+    Trakt.io.launch {
+      runCatching { Trakt.sync(store) } // history and paused-elsewhere titles, at most every 15 minutes
+      Outbox.flush(store) // anything that couldn't be sent last time
+    }
     setContent {
       ZTheme(store.reduceMotion) {
         // Several people on this TV: ask who's watching when the app opens (not when it rebuilds after a switch).

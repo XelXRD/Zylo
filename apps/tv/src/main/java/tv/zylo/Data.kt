@@ -126,7 +126,7 @@ class Store(private val open: (String) -> SharedPreferences) {
     g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color) }).toString()).apply()
 
   companion object {
-    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang")
+    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "outbox", "synclog")
     val AVATARS = listOf(0xFFBD1422, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
 
     private fun profilesIn(g: SharedPreferences): List<Profile> =

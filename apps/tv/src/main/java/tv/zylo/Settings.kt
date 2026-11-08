@@ -189,6 +189,7 @@ private fun Integrations(store: Store, open: ((@Composable (close: () -> Unit) -
       { store.str("fanart_key") }, { store.put("fanart_key", it) })
     TraktCard(store) { clientId -> open { close -> TraktConnect(store, clientId, close) } }
     Anime.NAMES.forEach { (t, name) -> AnimeCard(store, t, name) { url -> open { close -> PasteConnect(store, t, name, url, close) } } }
+    SyncActivity(store)
   }
 }
 
@@ -204,7 +205,7 @@ private fun TraktCard(store: Store, connect: (String) -> Unit) {
   val synced = remember(tick) { store.long("trakt_synced") }
   fun sync() = scope.launch {
     busy = true
-    val r = withContext(Dispatchers.IO) { runCatching { Trakt.sync(store, force = true) } }
+    val r = withContext(Dispatchers.IO) { runCatching { Trakt.sync(store, force = true) }.also { Outbox.flush(store) } }
     store.setStatus("trakt", if (r.isSuccess) "ok" else "fail:${r.exceptionOrNull()?.message}")
     busy = false
     tick++
@@ -347,6 +348,45 @@ private fun PlexConnect(store: Store, close: () -> Unit) {
       }
     }
     ZButton("Cancel", close, Modifier.padding(top = 24.dp).focusRequester(cancel))
+  }
+}
+
+/** What was sent to Trakt, AniList and MyAnimeList, and why anything failed. */
+@Composable
+private fun SyncActivity(store: Store) {
+  val ctx = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var tick by remember { mutableIntStateOf(0) }
+  var sending by remember { mutableStateOf(false) }
+  val entries = remember(tick) { Outbox.entries(store).take(10) }
+  val pending = remember(tick) { Outbox.pending(store) }
+  if (entries.isEmpty() && pending == 0) return
+  Column(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Text("Sync activity", Modifier.weight(1f), style = MaterialTheme.typography.titleLarge)
+      if (pending > 0) StatusChip("$pending waiting to send", Z.Warning)
+      Spacer(Modifier.width(12.dp))
+      ZButton(if (sending) "Sending…" else "Send Now", {
+        if (!sending) scope.launch {
+          sending = true
+          withContext(Dispatchers.IO) { Outbox.flush(store) }
+          sending = false
+          tick++
+        }
+      })
+    }
+    entries.forEach { e ->
+      Row(Modifier.fillMaxWidth().background(Z.Card, Z.Small).padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+        Box(Modifier.size(8.dp).background(if (e.ok) Z.Success else Z.Warning, androidx.compose.foundation.shape.CircleShape))
+        Spacer(Modifier.width(12.dp))
+        Text(when (e.service) { "trakt" -> "Trakt"; "anilist" -> "AniList"; "mal" -> "MyAnimeList"; else -> e.service }, Modifier.width(96.dp), style = MaterialTheme.typography.labelLarge, color = Z.Text2)
+        Column(Modifier.weight(1f)) {
+          Text(e.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          Text(e.result, style = MaterialTheme.typography.bodySmall, color = if (e.ok) Z.Text2 else Z.Warning, maxLines = 2, overflow = TextOverflow.Ellipsis)
+        }
+        Text(ago(e.at), style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+      }
+    }
   }
 }
 

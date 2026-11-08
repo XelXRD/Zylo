@@ -470,6 +470,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   DisposableEffect(player) {
     var seeked = false
     var remembered = false
+    var scrobbling = false
     val listener = object : Player.Listener {
       override fun onPlayerError(e: PlaybackException) { error = "Couldn't play this source (${e.errorCodeName}). Press Back and choose another." }
       override fun onPlaybackStateChanged(state: Int) {
@@ -477,12 +478,14 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
           if (!seeked && resumeAt != null && player.duration > 0) { seeked = true; player.seekTo((player.duration * resumeAt).toLong()) }
           // It plays: remember this source (and its kind, for the next episode).
           if (!remembered && s.signature.isNotEmpty()) { remembered = true; store.rememberSource(s.item, s.signature) }
+          // Trakt "now watching" starts once, when the video is actually ready.
+          if (!scrobbling && player.duration > 0) { scrobbling = true; Trakt.scrobble(store, "start", s.item, s.season, s.episode, progress()) }
         }
         if (state == Player.STATE_ENDED && !dismissed) playNext()
       }
-      // Trakt "now watching": start when playing, pause when paused, stop when leaving (80%+ counts as watched).
-      override fun onIsPlayingChanged(isPlaying: Boolean) {
-        if (player.duration > 0) Trakt.scrobble(store, if (isPlaying) "start" else "pause", s.item, s.season, s.episode, progress())
+      // Pause and resume by you (not every buffering stall, which would flood Trakt) update "now watching".
+      override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
+        if (scrobbling && player.duration > 0) Trakt.scrobble(store, if (playWhenReady) "start" else "pause", s.item, s.season, s.episode, progress())
       }
     }
     val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) { save(); player.pause() } }
@@ -491,7 +494,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     onDispose {
       lifecycle.removeObserver(observer)
       save()
-      if (player.duration > 0) Trakt.scrobble(store, "stop", s.item, s.season, s.episode, progress())
+      if (player.duration > 0) Trakt.scrobble(store, "stop", s.item, s.season, s.episode, progress()) // 80%+ records the play
       player.release()
     }
   }
