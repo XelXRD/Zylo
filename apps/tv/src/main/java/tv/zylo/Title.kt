@@ -328,7 +328,14 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
     if (!s.autoplay || autoTried || f.sources.isEmpty()) return@LaunchedEffect
     autoTried = true
     // Play never picks a source above the quality cap on its own; those stay in the list to choose by hand.
-    val candidates = f.sources.filter { !overCap(it, cap) }.take(4)
+    val within = f.sources.filter { !overCap(it, cap) }
+    val need = AutoSource.min(store)
+    if (need == 0) return@LaunchedEffect // Settings: always choose by hand
+    if (within.isNotEmpty() && within.size < need) {
+      notes = notes + "Found ${within.size} source${if (within.size == 1) "" else "s"}, fewer than the $need Play waits for (Settings > Playback). Pick one below."
+      return@LaunchedEffect
+    }
+    val candidates = within.take(4)
     if (candidates.isEmpty()) {
       notes = notes + "Every source is above your $cap limit. Pick one below, or change it in Settings > Playback."
       return@LaunchedEffect
@@ -475,23 +482,12 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   var dismissed by remember { mutableStateOf(false) }
   var countdown by remember { mutableIntStateOf(UP_NEXT_SECONDS) }
   var left by remember { mutableStateOf(false) }
-  // Settings > Playback: play the next episode on its own always, up to a few in a row, or never.
-  val auto = remember { Autoplay.started(); Autoplay.streak < Autoplay.limit(store) }
-  /** byItself: the countdown ran out or the episode ended (counts towards the limit); else you chose it. */
-  fun playNext(byItself: Boolean = false) {
+  fun playNext() {
     val n = next ?: return
     if (left) return
     left = true
-    if (byItself) { Autoplay.streak++; Autoplay.pending = true }
     nav.back() // the player, then this episode's sources become the next one's: Back still means "pick another source"
     nav.replace(Screen.Sources(s.item, n.season, n.episode, n.name, autoplay = true))
-  }
-  /** Back to the title page's episode list. */
-  fun episodes() {
-    if (left) return
-    left = true
-    nav.back(); nav.back()
-    if ((nav.top as? Screen.Title)?.item != s.item) nav.push(Screen.Title(s.item))
   }
   LaunchedEffect(Unit) {
     if (s.season != null && s.episode != null) next = withContext(Dispatchers.IO) { runCatching { nextEpisode(Tmdb(store.tmdb), s.item, s.season, s.episode) }.getOrNull() }
@@ -505,14 +501,14 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     }
   }
   LaunchedEffect(upNext) {
-    if (!upNext || !auto) return@LaunchedEffect
+    if (!upNext) return@LaunchedEffect
     countdown = UP_NEXT_SECONDS
     while (countdown > 0) {
       delay(1_000)
       if (dismissed) return@LaunchedEffect
       if (player.isPlaying) countdown-- // paused: the countdown waits too
     }
-    playNext(byItself = true)
+    playNext()
   }
 
   // --- Skip Intro / Recap / Credits (IntroDB; AniSkip for anime). ---
@@ -583,7 +579,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
           // Trakt "now watching" starts once, when the video is actually ready.
           if (!scrobbling && player.duration > 0) { scrobbling = true; Trakt.scrobble(store, "start", s.item, s.season, s.episode, progress()) }
         }
-        if (state == Player.STATE_ENDED) { if (auto && !dismissed) playNext(byItself = true) else if (next != null) { dismissed = false; upNext = true } }
+        if (state == Player.STATE_ENDED && !dismissed) playNext()
       }
       // Pause and resume by you (not every buffering stall, which would flood Trakt) update "now watching".
       override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -649,7 +645,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     if (sk != null && !upNext && !timing) SkipButton(Skip.label(sk.kind).let { if (sk.kind == "credits" && next != null) "Next Episode" else it }, Modifier.align(Alignment.BottomEnd)) { doSkip(sk) }
     if (timing) SubtitleTiming(offset, Modifier.align(Alignment.BottomStart), { offset += it }) { timing = false; view?.requestFocus() }
     val n = next
-    if (upNext && !dismissed && n != null) UpNextCard(s.item, n, countdown, auto, Modifier.align(Alignment.BottomEnd), { playNext() }, ::episodes) { dismissed = true; view?.requestFocus() }
+    if (upNext && !dismissed && n != null) UpNextCard(s.item, n, countdown, Modifier.align(Alignment.BottomEnd), ::playNext) { dismissed = true; view?.requestFocus() }
     error?.let {
       Text(it, Modifier.align(Alignment.Center).background(Z.Elevated, Z.Medium).padding(24.dp), style = MaterialTheme.typography.bodyLarge)
     }
@@ -658,15 +654,11 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
 
 private const val UP_NEXT_SECONDS = 10
 
-/** Next-episode autoplay: how many play on their own in a row before Zylo waits for you. */
-object Autoplay {
-  val CHOICES = listOf(-1 to "Always", 3 to "3 episodes in a row", 5 to "5 episodes in a row", 10 to "10 episodes in a row", 0 to "Off")
-  var streak = 0
-  var pending = false // the episode starting now was played by autoplay
-  fun limit(store: Store) = store.str("autonext").toIntOrNull()?.let { if (it < 0) Int.MAX_VALUE else it } ?: 5
-  fun label(store: Store) = CHOICES.find { it.first == (store.str("autonext").toIntOrNull() ?: 5) }?.second ?: "5 episodes in a row"
-  /** A player opened: by autoplay keeps the count going, by you starts it again. */
-  fun started() { if (!pending) streak = 0; pending = false }
+/** Play picks a source by itself once at least this many are found (Settings > Playback); 0 = never, you choose. */
+object AutoSource {
+  val CHOICES = listOf(1, 3, 5, 10, 20, 0)
+  fun min(store: Store) = store.str("autosource").toIntOrNull() ?: 1
+  fun label(n: Int) = if (n == 0) "Off" else if (n == 1) "As soon as one is found" else "When $n+ are found"
 }
 
 /** Takes focus once when it appears, so OK skips; it goes when the part is over. */
@@ -711,8 +703,7 @@ private fun subtitleMime(url: String): String {
 }
 
 @Composable
-/** auto: counts down and plays on its own; otherwise it waits, with Episodes to pick from the list. */
-fun UpNextCard(item: Item, n: NextEp, countdown: Int, auto: Boolean, modifier: Modifier, play: () -> Unit, episodes: () -> Unit, cancel: () -> Unit) {
+fun UpNextCard(item: Item, n: NextEp, countdown: Int, modifier: Modifier, play: () -> Unit, cancel: () -> Unit) {
   val button = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(60); runCatching { button.requestFocus() } }
   val fraction by animateFloatAsState(countdown / UP_NEXT_SECONDS.toFloat(), tween(ms(900), easing = androidx.compose.animation.core.LinearEasing), label = "countdown")
@@ -726,11 +717,10 @@ fun UpNextCard(item: Item, n: NextEp, countdown: Int, auto: Boolean, modifier: M
         Text(n.name, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
       }
     }
-    if (auto) ProgressBar(fraction, Modifier.padding(top = 14.dp).clip(Z.Small))
+    ProgressBar(fraction, Modifier.padding(top = 14.dp).clip(Z.Small))
     Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-      ZButton(if (auto) "Play Now" else "Play", play, Modifier.focusRequester(button), primary = true, icon = Icons.Filled.PlayArrow)
-      if (!auto) ZButton("Episodes", episodes)
-      ZButton(if (auto) "Keep Watching" else "Not Now", cancel)
+      ZButton("Play Now", play, Modifier.focusRequester(button), primary = true, icon = Icons.Filled.PlayArrow)
+      ZButton("Keep Watching", cancel)
     }
   }
 }

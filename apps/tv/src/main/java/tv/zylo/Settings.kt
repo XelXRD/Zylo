@@ -179,11 +179,10 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     audio = all[(all.indexOf(audio) + 1) % all.size]
     store.put("audiolang", audio)
   }
-  var autoNext by remember { mutableStateOf(Autoplay.label(store)) }
-  Choice("Play next episode", "Plays the next episode on its own, up to a few in a row, then waits. Off: choose it from the list.", autoNext) {
-    val i = Autoplay.CHOICES.indexOfFirst { it.second == autoNext }
-    store.put("autonext", Autoplay.CHOICES[(i + 1) % Autoplay.CHOICES.size].first.toString())
-    autoNext = Autoplay.label(store)
+  var autoSource by remember { mutableIntStateOf(AutoSource.min(store)) }
+  Choice("Pick a source for me", "Play chooses the best source once this many are found, so it has more to choose from. Off: you always choose from the list.", AutoSource.label(autoSource)) {
+    autoSource = AutoSource.CHOICES[(AutoSource.CHOICES.indexOf(autoSource) + 1) % AutoSource.CHOICES.size]
+    store.put("autosource", autoSource.toString())
   }
   var size by remember { mutableStateOf(SubStyle.size(store).first) }
   Choice("Subtitle size", "How big subtitles are in the player.", size) {
