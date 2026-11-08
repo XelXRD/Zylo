@@ -195,3 +195,37 @@ class SynclerTest {
 
   @Test fun base32Hashes() = assertEquals("0123456789abcdef0123456789abcdef01234567", Syncler.hex("AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH"))
 }
+
+class XtreamTest {
+  private val x = Xtream("http://tv.example:8080", "alex", "p@ss", listOf("m3u8", "ts"))
+
+  @Test fun readsTheM3uLinkProvidersGive() {
+    assertEquals(Triple("http://tv.example:8080", "alex", "p@ss"), Xtream.parse("tv.example:8080/get.php?username=alex&password=p%40ss&type=m3u_plus&output=ts"))
+    assertEquals(Triple("https://tv.example", null, null), Xtream.parse(" https://tv.example/ "))
+  }
+
+  @Test fun loginCategoriesChannelsGuide() {
+    val asked = mutableListOf<String>()
+    val web = { u: String -> asked += u; when {
+      "get_live_categories" in u -> """[{"category_id":"3","category_name":"UK | Sport "}]"""
+      "get_live_streams" in u -> """[{"num":101,"name":"Sky Sports","stream_id":55,"stream_icon":"http://l/1.png","category_id":"3"},{"num":0,"name":"bad","stream_id":0}]"""
+      "get_short_epg" in u -> """{"epg_listings":[{"title":"TWF0Y2ggb2YgdGhlIERheQ==","description":"SGlnaGxpZ2h0cw==","start_timestamp":"1762610400","stop_timestamp":"1762614000"}]}"""
+      else -> """{"user_info":{"auth":1,"status":"Active","allowed_output_formats":["m3u8","ts"]}}"""
+    } }
+    x.login(web)
+    assertEquals(listOf(Category("3", "UK | Sport")), x.categories(web))
+    val ch = x.channels("3", web)
+    assertEquals(listOf(Channel(55, 101, "Sky Sports", "http://l/1.png", "3")), ch)
+    assertEquals(true, asked.last().endsWith("action=get_live_streams&category_id=3"))
+    assertEquals(listOf(Programme("Match of the Day", "Highlights", 1762610400000, 1762614000000)), x.guide(55, web))
+    assertEquals("http://tv.example:8080/live/alex/p%40ss/55.m3u8", x.streamUrl(ch[0]))
+    assertEquals("http://tv.example:8080/live/alex/p%40ss/55.ts", Xtream(x.server, "alex", "p@ss", listOf("ts")).streamUrl(ch[0]))
+  }
+
+  @Test fun refusedLogins() {
+    val bad = runCatching { x.login { """{"user_info":{"auth":0}}""" } }.exceptionOrNull()?.message
+    assertEquals("The provider didn't accept that username and password.", bad)
+    val expired = runCatching { x.login { """{"user_info":{"auth":1,"status":"Expired"}}""" } }.exceptionOrNull()?.message
+    assertEquals("The provider says this account is Expired.", expired)
+  }
+}

@@ -28,11 +28,12 @@ import androidx.compose.ui.unit.dp
 import androidx.tv.material3.*
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import org.json.JSONObject
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 
 enum class SettingsPage(val label: String) {
-  Profiles("Profiles"), Playback("Playback"), Integrations("Integrations"), Addons("Addons"), Debrid("Debrid Services"), Servers("Media Servers"), About("About Zylo")
+  Profiles("Profiles"), Playback("Playback"), Integrations("Integrations"), Addons("Addons"), Debrid("Debrid Services"), Servers("Media Servers"), Live("Live TV"), About("About Zylo")
 }
 
 @Composable
@@ -64,6 +65,7 @@ fun SettingsScreen(store: Store) {
           ServiceCard(store, "realdebrid", "Real-Debrid", "Can't report its cache: a source is checked when you play it.", "RD", { store.debrid("realdebrid") }, { store.setDebrid("realdebrid", it) })
           ServiceCard(store, "premiumize", "Premiumize", "Checks what's cached before you press Play.", "PM", { store.debrid("premiumize") }, { store.setDebrid("premiumize", it) })
         }
+        SettingsPage.Live -> LiveTvSettings(store)
         SettingsPage.About -> About()
         SettingsPage.Profiles -> ProfilesSettings(store)
         SettingsPage.Servers -> panel?.let { it() } ?: MediaServers(store) { p -> panel = p?.let { content -> { content { panel = null } } } }
@@ -310,6 +312,49 @@ private fun MediaServers(store: Store, open: ((@Composable (close: () -> Unit) -
       }, primary = true)
       else ZButton("Disconnect", { Jellyfin.disconnect(store); message = null; tick++ })
     }
+  }
+}
+
+/** Settings > Live TV: an Xtream Codes account (server, username, password — or the provider's M3U link, which has all three). */
+@Composable
+private fun LiveTvSettings(store: Store) {
+  val ctx = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var tick by remember { mutableIntStateOf(0) }
+  var busy by remember { mutableStateOf(false) }
+  var message by remember { mutableStateOf<String?>(null) }
+  val x = remember(tick) { Xtream.from(store) }
+  val info = remember(tick) { runCatching { JSONObject(store.str("xc_info")).optJSONObject("user_info") }.getOrNull() }
+  fun connect(server: String, user: String, pass: String) = scope.launch {
+    busy = true
+    message = null
+    withContext(Dispatchers.IO) { runCatching { Xtream.connect(store, server, user, pass) } }.onFailure { message = it.message }
+    busy = false
+    tick++
+  }
+  Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Header("Live TV", "Watch your TV provider's channels with a programme guide. Zylo uses the Xtream Codes details your provider gave you.")
+    val details = info?.let { i ->
+      listOfNotNull(
+        i.optString("exp_date").toLongOrNull()?.let { "expires " + java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.UK).format(java.util.Date(it * 1000)) },
+        i.optString("max_connections").takeIf { it.isNotEmpty() && it != "0" }?.let { "$it connection" + if (it == "1") "" else "s" },
+      ).joinToString(", ")
+    }.orEmpty()
+    AccountRow("XC", "Xtream Codes", message ?: if (x != null) "Connected to ${x.server.substringAfter("://")} as ${x.user}" + (if (details.isNotEmpty()) " ($details)." else ".")
+      else "Enter the server address, username and password, or paste the M3U link (it includes all three).",
+      message != null, when { busy -> "Checking…"; x != null -> "Connected"; else -> "Not connected" }, when { busy -> Z.Info; x != null -> Z.Success; else -> Z.Muted }) {
+      if (x == null) ZButton("Connect", {
+        ask(ctx, "Server address or M3U link", store.str("xc_last")) { input ->
+          if (input.isBlank()) return@ask
+          store.put("xc_last", input.trim())
+          val (server, user, pass) = Xtream.parse(input)
+          if (user != null && pass != null) connect(server, user, pass)
+          else ask(ctx, "Username", "") { u -> ask(ctx, "Password", "", secret = true) { p -> connect(server, u, p) } }
+        }
+      }, primary = true)
+      else ZButton("Disconnect", { Xtream.disconnect(store); message = null; tick++ })
+    }
+    Text("Live TV appears in the top bar. It isn't shown on kids profiles.", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
   }
 }
 

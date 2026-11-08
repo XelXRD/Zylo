@@ -53,9 +53,10 @@ sealed interface Screen {
     val subs: List<Sub> = emptyList(), val signature: String = "",
   ) : Screen
   data object Profiles : Screen
+  data object LivePlay : Screen
 }
 
-enum class Section(val label: String) { Home("Home"), Movies("Movies"), Series("Series"), Anime("Anime"), Discover("Discover"), MyList("My List") }
+enum class Section(val label: String) { Home("Home"), Movies("Movies"), Series("Series"), Anime("Anime"), Live("Live TV"), Discover("Discover"), MyList("My List") }
 
 /** State that outlives a screen, so rows, scroll and focus are where you left them when you come back. */
 class UiState(store: Store) {
@@ -64,6 +65,7 @@ class UiState(store: Store) {
   val home = RowsState({ homeRows(store) }, ::latestReleases)
   val discover = RowsState({ DISCOVER_ROWS })
   val browse = mapOf(Section.Movies to BrowseState("movie"), Section.Series to BrowseState("tv"), Section.Anime to BrowseState("tv", anime = true))
+  val live = LiveState()
   val myList = FocusMemory()
   val search = FocusMemory()
   val titles = HashMap<String, FocusMemory>()
@@ -132,6 +134,7 @@ class MainActivity : ComponentActivity() {
             is Screen.Sources -> SourcesPage(store, s, nav)
             is Screen.Play -> PlayerPage(store, s, nav)
             Screen.Profiles -> ProfilesPage(store, nav)
+            Screen.LivePlay -> LivePlayer(store, ui.live, nav)
           }
         }
       }
@@ -150,6 +153,7 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
         Section.Home -> RowsPage(store, ui.home, nav, restore, hero = true)
         Section.Discover -> RowsPage(store, ui.discover, nav, restore, title = "Discover")
         Section.MyList -> MyListPage(store, nav, ui.myList, restore)
+        Section.Live -> LivePage(store, ui.live, nav, restore)
         else -> BrowsePage(store, ui.browse.getValue(s), nav, s.label, restore)
       }
     } }
@@ -179,7 +183,7 @@ fun TopNav(ui: UiState, nav: Nav) {
   ) {
     NavSurface({ go(Section.Home) }, down) { Box(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) { Logo(20.dp, color = LocalContentColor.current) } }
     Spacer(Modifier.width(20.dp))
-    Section.entries.forEach { s ->
+    Section.entries.filter { it != Section.Live || ui.profile.kids == null }.forEach { s -> // no live channels on a kids profile
       val selected = ui.section == s
       NavSurface({ go(s) }, down.then(if (selected) Modifier.focusRequester(active) else Modifier), selected) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
