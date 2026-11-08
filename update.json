@@ -1,5 +1,5 @@
 {
-  "version": "0.22.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.22.0.apk",
-  "notes": "What's new in 0.22.0\n\n• Live TV: Left goes back to your last channel; type a channel number to jump to it; OK while watching opens a channel list with what's on now and next; the guide previews the channel you rest on.\n• Hold the OK button on a channel to add it to Favourites — it now works on every remote.\n• Sports remembers which channels show a match until it's over.\n• Easier-to-read highlights: no more white text on white.\n• Zylo opens with the top bar selected, and the featured titles change every launch (and every 4 hours).\n• Pick for Me now in Anime too."
+  "version": "0.23.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.23.0.apk",
+  "notes": "What's new in 0.23.0\n\n• PINs: give grown-up profiles a 4-digit PIN (Settings > Profiles). Kids can't switch to them, and Settings on a kids profile asks for it.\n• One search for everything: films, series and anime plus your live channels, what's on the TV guide in the next 24 hours, and fixtures.\n• Home shows On Live TV Now (your favourite channels) and Starting Soon (your reminders).\n• Skip Intro, Skip Recap and Skip Credits buttons when the community databases know the timings (IntroDB; AniSkip for anime).\n• Subtitles: choose size, background and position (Settings > Playback). Out of step? Press Up while watching to move them 0.5 s at a time.\n• A small note in the top bar shows when Zylo is updating channels, the guide, Trakt or downloading an update.\n• New installs get a step-by-step setup: TMDB, accounts, debrid, addons and Live TV."
 }
