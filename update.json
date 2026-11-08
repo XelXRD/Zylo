@@ -1,5 +1,5 @@
 {
-  "version": "0.20.2",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.20.2.apk",
-  "notes": "What's new in 0.20.2\n\n• Sports: where to watch now finds your channels by name, even when your provider names them differently. A best guess shows straight away (hold OK to change it), and Link lists the closest channels first.\n• Sports: fixtures for every sport load, a week ahead."
+  "version": "0.20.3",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.20.3.apk",
+  "notes": "What's new in 0.20.3\n\n• Sports: press OK on a match to go straight to the channel showing it.\n• Sports: when your TV guide lists the match on one of your channels, it's marked Watch automatically.\n• Sports: understands UK listing names (Man Utd, Spurs, Wolves and more), and finds channels once the guides finish downloading.\n• Sports: fixtures for every sport, a week ahead."
 }
