@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
-const val UA = "Zylo/0.14.3 (Android TV)"
+val UA = "Zylo/${BuildConfig.VERSION_NAME} (Android TV)"
 
 class HttpError(val code: Int, message: String) : Exception(message)
 
@@ -34,7 +34,10 @@ fun http(url: String, method: String = "GET", headers: Map<String, String> = emp
     // ponytail: reads the whole body; add a size cap if an addon ever sends something huge
     val text = r.body?.string() ?: ""
     if (code == 401) throw HttpError(code, "$host didn't accept the key (401).")
-    if (code == 403) throw HttpError(code, "$host refused the request (403).")
+    // Say who refused: a Cloudflare block page and the addon itself need different fixes.
+    val why = Regex("<title>(.*?)</title>", RegexOption.DOT_MATCHES_ALL).find(text)?.groupValues?.get(1)?.trim()?.take(80)
+      ?: text.trim().take(80).takeIf { it.isNotEmpty() && !it.startsWith("<") }
+    if (code == 403) throw HttpError(code, "$host refused the request (403" + (r.header("server")?.let { ", $it" } ?: "") + ")." + (why?.let { " It said: \"$it\"" } ?: ""))
     if (code >= 400) throw HttpError(code, "$host answered $code.")
     return text
   }

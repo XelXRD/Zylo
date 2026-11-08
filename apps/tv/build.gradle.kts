@@ -13,13 +13,13 @@ android {
     applicationId = "tv.zylo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 14
-    versionName = "0.14.3"
+    versionCode = 15
+    versionName = "0.14.4"
   }
   // Same key as the old WebView build, so this installs over it.
   signingConfigs { getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "zylo"; keyPassword = "android" } }
   buildTypes { release { signingConfig = signingConfigs.getByName("debug") } }
-  buildFeatures { compose = true }
+  buildFeatures { compose = true; buildConfig = true }
   compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
 

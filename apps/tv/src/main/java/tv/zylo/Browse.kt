@@ -90,9 +90,11 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
         }
       }
     }.awaitAll()
-    rows = got.filter { it.second.isNotEmpty() } // only rows that have something in them
+    val full = got.filter { it.second.isNotEmpty() } // only rows that have something in them
+    // The hero is set before the rows: added afterwards, the list kept the rows in place and pushed the hero off the top.
     heroItems = hero?.let { h -> runCatching { h(t) }.getOrDefault(emptyList()).filter { it.backdrop != null }.take(8) }.orEmpty()
-      .ifEmpty { if (hero != null) rows.firstOrNull()?.second?.filter { it.backdrop != null }?.take(8).orEmpty() else emptyList() }
+      .ifEmpty { if (hero != null) full.firstOrNull()?.second?.filter { it.backdrop != null }?.take(8).orEmpty() else emptyList() }
+    rows = full
     if (rows.isEmpty() && error == null) error = "Couldn't reach TMDB. Check the internet connection."
   }
 }
@@ -122,7 +124,7 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows
   val featured = if (hero) s.heroItems.getOrNull(s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))) else null
   // Focus in the hero keeps the page at the very top, so the hero is never cut off.
-  LaunchedEffect(s.heroFocused) { if (s.heroFocused) s.list.animateScrollToItem(0) }
+  LaunchedEffect(s.heroFocused, watching.size) { if (s.heroFocused) s.list.animateScrollToItem(0) }
   val density = LocalDensity.current
   // The hero's artwork sits behind the whole page and fades away as the rows scroll up over it.
   val artAlpha by remember {
