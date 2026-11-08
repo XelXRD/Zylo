@@ -49,7 +49,7 @@ fun ProfilesPage(store: Store, nav: Nav) {
     Text("Who's watching?", Modifier.padding(top = 28.dp, bottom = 36.dp), style = MaterialTheme.typography.displaySmall)
     Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
       profiles.forEach { p ->
-        ProfileTile(p.name, if (p.id == store.profileId) Modifier.focusRequester(current) else Modifier, onClick = {
+        ProfileTile(p.name + (p.kids?.let { "  ·  Kids" } ?: ""), if (p.id == store.profileId) Modifier.focusRequester(current) else Modifier, onClick = {
           if (p.id == store.profileId) nav.back() else switchTo(ctx as? Activity, store, p.id)
         }) { Avatar(p, 96.dp) }
       }
@@ -83,7 +83,7 @@ fun ProfilesSettings(store: Store) {
   var profiles by remember { mutableStateOf(store.profiles) }
   Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Text("Profiles", style = MaterialTheme.typography.displaySmall)
-    Text("Each profile keeps its own Continue Watching, My List, Trakt and anime sign-ins, remembered sources and subtitle language. Keys, addons and media servers are shared.",
+    Text("Each profile keeps its own Continue Watching, My List, Trakt and anime sign-ins, remembered sources and subtitle language. Keys, addons and media servers are shared. A kids profile only shows titles rated at or below its level; unrated titles are hidden.",
       Modifier.padding(bottom = 8.dp).fillMaxWidth(0.85f), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
     profiles.forEach { p ->
       Row(Modifier.fillMaxWidth().background(Z.Card, Z.Medium).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
@@ -94,6 +94,13 @@ fun ProfilesSettings(store: Store) {
         Spacer(Modifier.width(16.dp))
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
           ZButton("Rename", { ask(ctx, "Profile name", p.name) { store.renameProfile(p.id, it); profiles = store.profiles } })
+          // Off → U → PG → 12 → 15 → Off. The profile in use takes it at once (its rows reload).
+          ZButton("Kids: " + (p.kids?.let { Ratings.LEVELS[it] + " and under" } ?: "Off"), {
+            val next = when (val k = p.kids) { null -> 0; Ratings.LEVELS.lastIndex -> null; else -> k + 1 }
+            store.setKids(p.id, next)
+            profiles = store.profiles
+            if (p.id == store.profileId) (ctx as? Activity)?.recreate()
+          })
           if (p.id != store.profileId) ZButton("Switch", { switchTo(ctx as? Activity, store, p.id) })
           if (p.id != "main" && p.id != store.profileId) ZButton("Remove", { store.deleteProfile(p.id); profiles = store.profiles; toast(ctx, "Removed ${p.name}") })
         }

@@ -100,7 +100,21 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   }
   RestoreFocus(focus, d != null)
 
-  val recs = d?.optJSONObject("recommendations")?.optJSONArray("results")?.objects()?.mapNotNull { Tmdb.item(it, null) }.orEmpty()
+  var recs by remember(item) { mutableStateOf<List<Item>>(emptyList()) }
+  LaunchedEffect(d) { d?.let { dd -> recs = withContext(Dispatchers.IO) { t.safe(dd.optJSONObject("recommendations")?.optJSONArray("results")?.objects()?.mapNotNull { Tmdb.item(it, null) }.orEmpty()) } } }
+  // Kids profiles: anything above the profile's rating (or unrated) can't be opened, whichever way you reached it.
+  if (d != null && !Ratings.allows(Tmdb.certification(d!!))) {
+    val cert = Tmdb.certification(d!!)
+    Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
+      Text(item.title, style = MaterialTheme.typography.displaySmall)
+      Text(if (cert == null) "This title has no age rating, so it isn't available on ${store.profile.name}'s profile." else "Rated $cert, so it isn't available on ${store.profile.name}'s profile.",
+        Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
+      val back = remember { FocusRequester() }
+      LaunchedEffect(Unit) { delay(80); runCatching { back.requestFocus() } }
+      ZButton("Go Back", { nav.back() }, Modifier.padding(top = 24.dp).focusRequester(back), primary = true)
+    }
+    return
+  }
   val tabs = listOfNotNull("Episodes".takeIf { tv }, "Overview", "More Like This".takeIf { recs.isNotEmpty() })
   val trailer = Tmdb.trailer(d)
   // Where Play starts: a film where you stopped; a series at your next episode (or where you stopped in it).

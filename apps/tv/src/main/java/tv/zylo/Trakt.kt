@@ -170,7 +170,7 @@ object Trakt {
   /** Turn refs into cards via TMDB (cached), a few at a time. */
   fun items(t: Tmdb, refs: List<Ref>, max: Int = 60): List<Item> = runBlocking(Dispatchers.IO) {
     val gate = Semaphore(6)
-    refs.take(max).map { r -> async { gate.withPermit { runCatching { Tmdb.item(t.details(r.type, r.tmdb), r.type) }.getOrNull() } } }.awaitAll().filterNotNull()
+    refs.take(max).map { r -> async { gate.withPermit { runCatching { t.details(r.type, r.tmdb).takeIf { Ratings.allows(Tmdb.certification(it)) }?.let { Tmdb.item(it, r.type) } }.getOrNull() } } }.awaitAll().filterNotNull()
   }
 
   // --- Sync: Trakt → Zylo ------------------------------------------------------------

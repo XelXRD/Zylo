@@ -4,6 +4,12 @@ package tv.zylo
 import android.content.Context
 import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateOf
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONArray
 import org.json.JSONObject
 import okhttp3.MediaType.Companion.toMediaTypeOrNull
@@ -78,7 +84,25 @@ fun progressKey(item: Item, season: Int?, episode: Int?) = "${item.type}:${item.
 
 // --- Storage ------------------------------------------------------------------------
 
-data class Profile(val id: String, val name: String, val color: Int)
+/** [kids]: a kids profile's highest allowed rating, as an index into Ratings.LEVELS; null for a normal profile. */
+data class Profile(val id: String, val name: String, val color: Int, val kids: Int? = null)
+
+/** Age ratings, lowest first (UK, with US film and TV equivalents). Kids profiles hide anything above their level and anything unrated. */
+object Ratings {
+  val LEVELS = listOf("U", "PG", "12", "15")
+  private val LEVEL = mapOf(
+    "U" to 0, "G" to 0, "TV-Y" to 0, "TV-G" to 0,
+    "PG" to 1, "TV-Y7" to 1, "TV-Y7-FV" to 1, "TV-PG" to 1,
+    "12" to 2, "12A" to 2, "PG-13" to 2, "TV-14" to 2,
+    "15" to 3, "R" to 3,
+    "18" to 4, "R18" to 4, "NC-17" to 4, "TV-MA" to 4,
+  )
+  fun level(cert: String?) = cert?.trim()?.uppercase()?.let(LEVEL::get)
+
+  // ponytail: process-wide; set from the active profile at launch (switching profile recreates the activity)
+  @Volatile var max: Int? = null
+  fun allows(cert: String?) = max.let { m -> m == null || (level(cert) ?: Int.MAX_VALUE) <= m }
+}
 
 /**
  * Settings and data, on the TV. Two layers:
@@ -112,6 +136,8 @@ class Store(private val open: (String) -> SharedPreferences) {
     return made
   }
 
+  fun setKids(id: String, level: Int?) = saveProfiles(profiles.map { if (it.id == id) it.copy(kids = level) else it })
+
   fun renameProfile(id: String, name: String) = saveProfiles(profiles.map { if (it.id == id && name.isNotBlank()) it.copy(name = name.trim()) else it })
 
   /** Removes the profile and everything it saved. The main profile and the one in use can't be removed. */
@@ -125,14 +151,14 @@ class Store(private val open: (String) -> SharedPreferences) {
   fun switchProfile(id: String) = g.edit().putString("profile", id).commit()
 
   private fun saveProfiles(list: List<Profile>) =
-    g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color) }).toString()).apply()
+    g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color).apply { it.kids?.let { k -> put("kids", k) } } }).toString()).apply()
 
   companion object {
     private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "outbox", "synclog")
     val AVATARS = listOf(0xFFBD1422, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
 
     private fun profilesIn(g: SharedPreferences): List<Profile> =
-      JSONArray(g.getString("profiles", "[]")).objects().map { Profile(it.getString("id"), it.optString("name"), it.optInt("color", AVATARS[0])) }
+      JSONArray(g.getString("profiles", "[]")).objects().map { Profile(it.getString("id"), it.optString("name"), it.optInt("color", AVATARS[0]), if (it.has("kids")) it.optInt("kids") else null) }
         .ifEmpty { listOf(Profile("main", "Me", AVATARS[0])) }
   }
 
@@ -246,7 +272,19 @@ class Tmdb(private val key: String) {
     return getJson(url, if (v3) emptyMap() else mapOf("Authorization" to "Bearer $key"))
   }
 
-  fun list(path: String, type: String?) = get(path).optJSONArray("results")?.objects()?.mapNotNull { item(it, type) }?.distinctBy { it.key }.orEmpty()
+  fun list(path: String, type: String?) = safe(get(path).optJSONArray("results")?.objects()?.mapNotNull { item(it, type) }?.distinctBy { it.key }.orEmpty())
+
+  /** On a kids profile, only titles rated at or below its level. Every list goes through here, so rows, search and browse all agree. */
+  fun safe(items: List<Item>): List<Item> = if (Ratings.max == null) items else runBlocking(Dispatchers.IO) {
+    val gate = Semaphore(8)
+    items.map { i -> async { gate.withPermit { i.takeIf { Ratings.allows(rating(i)) } } } }.awaitAll().filterNotNull()
+  }
+
+  /** A title's age rating (UK, else US), cached. Empty when it has none. */
+  fun rating(item: Item): String = ratings.getOrPut(item.key) {
+    val part = if (item.type == "movie") "release_dates" else "content_ratings"
+    runCatching { certification(JSONObject().put(part, get("/${item.type}/${item.id}/$part"))) }.getOrNull() ?: ""
+  }
 
   /** Everything a detail page or preview needs, in one request. Cached for the session. */
   fun details(type: String, id: Int): JSONObject = cache.getOrPut("$type:$id") {
@@ -268,6 +306,7 @@ class Tmdb(private val key: String) {
   companion object {
     // ponytail: unbounded session cache (~50 KB a title); add an LRU if memory gets tight on cheaper TVs
     private val cache = ConcurrentHashMap<String, JSONObject>()
+    private val ratings = ConcurrentHashMap<String, String>()
     private val failed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     fun cached(item: Item): JSONObject? = cache["${item.type}:${item.id}"]
@@ -313,7 +352,21 @@ class Tmdb(private val key: String) {
 /** A row of titles: a TMDB list path, or a custom loader (Trakt, anime trackers). */
 class RowSpec(val title: String, val path: String, val type: String?, val load: ((Tmdb) -> List<Item>)? = null)
 
+/** A kids profile's Home: family and children's titles up to its rating (lists are filtered again in Tmdb.safe). */
+fun kidsRows(level: Int): List<RowSpec> {
+  val cert = "certification_country=GB&certification.lte=${Ratings.LEVELS[level]}&sort_by=popularity.desc"
+  return listOf(
+    RowSpec("Family Films", "/discover/movie?with_genres=10751&$cert", "movie"),
+    RowSpec("Kids' Series", "/discover/tv?with_genres=10762&sort_by=popularity.desc", "tv"),
+    RowSpec("Animated Films", "/discover/movie?with_genres=16&$cert", "movie"),
+    RowSpec("Family Series", "/discover/tv?with_genres=10751&sort_by=popularity.desc", "tv"),
+    RowSpec("Animated Series", "/discover/tv?with_genres=16&with_original_language=en&sort_by=popularity.desc", "tv"),
+    RowSpec("Family Favourites", "/discover/movie?with_genres=10751&vote_count.gte=500&certification_country=GB&certification.lte=${Ratings.LEVELS[level]}&sort_by=vote_average.desc", "movie"),
+  )
+}
+
 fun homeRows(store: Store): List<RowSpec> {
+  store.profile.kids?.let { return kidsRows(it) }
   val last = store.watches().maxByOrNull { it.at }?.item
   val trakt = if (Trakt.connected(store)) listOf(
     RowSpec("Your Trakt Watchlist", "", null) { Trakt.items(it, Trakt.watchlist(store)) },

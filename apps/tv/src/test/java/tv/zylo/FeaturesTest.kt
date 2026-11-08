@@ -114,3 +114,26 @@ class ScrollTest {
     assertEquals(80f, keepDistance(950f, 100f, 1000f, 100f, 30f)) // off the bottom: up just enough
   }
 }
+
+class KidsTest {
+  @Test fun ratingGate() {
+    try {
+      Ratings.max = 1 // PG and under
+      assertEquals(true, Ratings.allows("U") && Ratings.allows("PG") && Ratings.allows("TV-Y7") && Ratings.allows("G"))
+      assertEquals(false, Ratings.allows("12A") || Ratings.allows("TV-14") || Ratings.allows("18"))
+      assertEquals(false, Ratings.allows(null)) // unrated is hidden on a kids profile
+      Ratings.max = null
+      assertEquals(true, Ratings.allows("18") && Ratings.allows(null)) // normal profiles see everything
+    } finally { Ratings.max = null }
+  }
+
+  @Test fun kidsSettingSaves() {
+    val files = HashMap<String, Mem>()
+    val st = Store { files.getOrPut(it) { Mem() } }
+    val kid = st.addProfile("Kids")
+    st.setKids(kid.id, 0)
+    assertEquals(0, Store { files.getOrPut(it) { Mem() } }.profiles.first { it.id == kid.id }.kids)
+    st.setKids(kid.id, null)
+    assertEquals(null, st.profiles.first { it.id == kid.id }.kids)
+  }
+}
