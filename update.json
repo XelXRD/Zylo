@@ -1,0 +1,5 @@
+{
+  "version": "0.20.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.20.0.apk",
+  "notes": "What's new in 0.20.0\n\n• Zylo now checks for updates when it opens, and can download and install them for you.\n• Sports schedule in Live TV: fixtures, live scores, and which of your channels show each match.\n• Better TV guide: your provider's full guide plus free country guides from epgshare01.\n• Pick for Me quiz in Movies and Series.\n• Live TV catch-up, favourites and guide paging."
+}
