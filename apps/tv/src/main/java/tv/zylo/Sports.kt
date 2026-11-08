@@ -87,8 +87,22 @@ object Sports {
   }.orEmpty()
 
   /** Ways a TV listing might name a team: "Brighton & Hove Albion" → brighton and hove albion, brighton. */
-  fun variants(t: Team): List<String> = listOf(t.name, t.short, t.name.replace(Regex("\\b(FC|AFC|CF|SC)\\b"), ""), t.name.substringBefore(" & "))
-    .map(::words).filter { it.length >= 3 }.distinct()
+  fun variants(t: Team): List<String> {
+    val base = listOf(t.name, t.short, t.name.replace(Regex("\\b(FC|AFC|CF|SC)\\b"), ""), t.name.substringBefore(" & ")).map(::words)
+    // How UK listings shorten names: "Man Utd", "Nott'm Forest", "Spurs", "Wolves"; else the distinctive first word.
+    val short = base.flatMap { n -> listOf(n.replace("manchester", "man").replace("united", "utd"), n.replace("nottingham", "nottm"), n.replace(Regex(" (united|city|town|county|rovers|athletic|albion|wanderers|hotspur)$"), "")) }
+    val first = base.mapNotNull { n -> n.substringBefore(' ').takeIf { it.length >= 5 && it !in AMBIGUOUS && ' ' in n } }
+    return (base + short + first + NICKNAMES[words(t.name)].orEmpty()).filter { it.length >= 3 && it !in AMBIGUOUS }.distinct()
+  }
+
+  /** First words shared by several clubs ("Manchester United/City"): never enough alone. */
+  private val AMBIGUOUS = setOf("man", "manchester", "athletic", "sporting", "inter", "atletico", "borussia", "olympique", "real", "racing", "deportivo", "hertha", "dynamo", "west", "sheffield", "queens", "bristol")
+  private val NICKNAMES = mapOf(
+    "tottenham hotspur" to listOf("spurs"), "wolverhampton wanderers" to listOf("wolves"), "nottingham forest" to listOf("forest", "nottm forest"),
+    "manchester united" to listOf("man utd", "man united"), "manchester city" to listOf("man city"), "brighton and hove albion" to listOf("brighton"),
+    "west ham united" to listOf("west ham"), "paris saint germain" to listOf("psg", "paris st germain"), "internazionale" to listOf("inter milan", "inter"),
+    "bayern munich" to listOf("bayern", "bayern munchen"), "queens park rangers" to listOf("qpr"), "sheffield wednesday" to listOf("sheff wed"), "sheffield united" to listOf("sheff utd"),
+  )
 
   private val COMMON = setOf("championship", "championships", "open", "presented", "masters", "classic", "invitational", "tournament", "grand", "cruises")
 

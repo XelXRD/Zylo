@@ -3,6 +3,8 @@
 // EPG id or by name. Used to fill gaps in the provider's guide and to find which channels show a sporting event.
 package tv.zylo
 
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.setValue
 import org.xmlpull.v1.XmlPullParser
 import org.xmlpull.v1.XmlPullParserFactory
 import java.io.File
@@ -142,7 +144,10 @@ object Epg {
 
   @Volatile var current: Guide = Guide.EMPTY
     private set
-  @Volatile var busy = false // a download is running
+  /** A download is running (shown on the Sports page). */
+  var busy by androidx.compose.runtime.mutableStateOf(false)
+  /** Bumps whenever the guide changes, so screens using it look again. */
+  var changes by androidx.compose.runtime.mutableIntStateOf(0)
   lateinit var dir: File
   private val cache get() = File(dir, "guide.tsv.gz")
 
@@ -160,6 +165,7 @@ object Epg {
         }
       }
       current = Guide(chans, progs.mapValues { (_, v) -> v.sortedBy { it.start } })
+      changes++
     }
   }
 
@@ -180,6 +186,7 @@ object Epg {
     val guide = Guide(chans, progs.mapValues { (_, v) -> v.distinctBy { it.start }.sortedBy { it.start } })
     if (guide.size > 0 || failed.isEmpty()) {
       current = guide
+      changes++
       if (::dir.isInitialized) runCatching {
         java.util.zip.GZIPOutputStream(cache.outputStream()).bufferedWriter().use { w ->
           chans.values.forEach { c -> w.write("C\t${c.id}\t${c.names.joinToString("\t") { it.esc() }}\n") }

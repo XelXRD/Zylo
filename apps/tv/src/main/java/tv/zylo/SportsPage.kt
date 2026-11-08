@@ -53,6 +53,7 @@ private fun dayLabel(t: Long, now: Long): String {
 @Composable
 fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
   val s = live.sched
+  val ctx = LocalContext.current
   BackHandler { live.sports = false }
   LaunchedEffect(Unit) {
     if (s.events == null || System.currentTimeMillis() - s.loadedAt > 10 * 60_000L) {
@@ -62,7 +63,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
     if (s.all.isEmpty()) s.all = withContext(Dispatchers.IO) { runCatching { x.channels(null) }.getOrDefault(emptyList()) }
   }
   // Where to watch the focused event: searched across every guide loaded, after a moment on it.
-  LaunchedEffect(s.focused, s.all, s.links) {
+  LaunchedEffect(s.focused, s.all, s.links, Epg.changes) {
     val e = s.focused ?: return@LaunchedEffect
     s.options = null
     delay(250)
@@ -77,7 +78,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
       Row(Modifier.padding(horizontal = Z.Pad), verticalAlignment = Alignment.CenterVertically) {
         Text("Sports", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.width(16.dp))
-        Text("This week's fixtures from ESPN · where to watch from your TV guides", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
+        Text("OK on a match to watch it · fixtures from ESPN, channels from your TV guides", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
         Spacer(Modifier.weight(1f))
         ZButton("TV Guide", { live.sports = false })
       }
@@ -92,7 +93,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
           LazyColumn(Modifier.weight(0.56f).fillMaxHeight(), contentPadding = PaddingValues(start = Z.Pad, end = 12.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             shown.groupBy { dayLabel(it.start, now) }.forEach { (day, list) ->
               item(key = "d$day") { Text(day, Modifier.padding(top = 10.dp, bottom = 2.dp), style = MaterialTheme.typography.titleSmall, color = Z.Text2) }
-              items(list, key = { it.id }) { e -> EventRow(e, s, Modifier.focusMemory(s.focus, "e${e.id}", default = e == shown.first())) }
+              items(list, key = { it.id }) { e -> EventRow(e, s, Modifier.focusMemory(s.focus, "e${e.id}", default = e == shown.first())) { watchNow(ctx, s, live, nav) } }
             }
           }
           WhereToWatch(store, s, live, nav, Modifier.weight(0.44f).fillMaxHeight().padding(end = Z.Pad))
@@ -103,9 +104,25 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
   }
 }
 
+/** OK on a fixture: straight to the channel Zylo is sure shows it (else the best guess); otherwise say how to pick one. */
+private fun watchNow(ctx: android.content.Context, s: SportsState, live: LiveState, nav: Nav) {
+  val o = s.options
+  val pick = o?.firstOrNull { it.channel != null && !it.guessed } ?: o?.firstOrNull { it.channel != null }
+  when {
+    pick != null -> play(pick.channel!!, live, nav)
+    o == null -> toast(ctx, "Still looking for channels showing this…")
+    else -> toast(ctx, "No channel found for this yet. Pick one under Where to watch.")
+  }
+}
+
+private fun play(c: Channel, live: LiveState, nav: Nav) {
+  live.playing = live.channels.indexOfFirst { it.id == c.id }.takeIf { it >= 0 } ?: run { live.channels = listOf(c) + live.channels; 0 }
+  nav.push(Screen.LivePlay)
+}
+
 @Composable
-private fun EventRow(e: SportEvent, s: SportsState, modifier: Modifier) =
-  ZSurface({ }, modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) s.focused = e }, container = Z.Card) {
+private fun EventRow(e: SportEvent, s: SportsState, modifier: Modifier, onClick: () -> Unit) =
+  ZSurface(onClick, modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) s.focused = e }, container = Z.Card) {
     Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
       Column(Modifier.width(64.dp)) {
         Text(when { e.live -> "LIVE"; e.over -> "FT"; e.allDay && e.start < System.currentTimeMillis() -> "Today"; else -> hm(e.start) }, style = MaterialTheme.typography.titleSmall, color = if (e.live) Z.Red else Z.Text)
@@ -133,9 +150,12 @@ private fun options(store: Store, e: SportEvent, all: List<Channel>, live: LiveS
   val guides = g.programmes.map { (id, list) -> Triple(g.channels[id]?.names?.firstOrNull() ?: Guide.idName(id), mine[id], list) } +
     live.guide.mapNotNull { (cid, list) -> all.find { it.id == cid }?.let { c -> Triple(c.name, c, list) } }
   // Not linked and not in your guide: the closest of your channels by name, when it's a clear match (changeable).
+  // A guide listing naming the match is proof: if one of your channels is clearly that channel, it's a sure Watch.
+  // A US broadcaster's name alone is only a best guess.
   return Sports.whereToWatch(e, all, guides, Sports.links(store)).map { w ->
-    if (w.channel != null) w else bestChannel(w.label, all)?.let { w.copy(channel = it, guessed = true) } ?: w
+    if (w.channel != null) w else bestChannel(w.label, all)?.let { w.copy(channel = it, guessed = w.programme == null) } ?: w
   }.distinctBy { it.channel?.id?.toString() ?: "b:${it.label}" }
+    .sortedBy { when { it.channel != null && !it.guessed -> 0; it.channel != null -> 1; else -> 2 } }
 }
 
 @Composable
@@ -147,18 +167,20 @@ private fun WhereToWatch(store: Store, s: SportsState, live: LiveState, nav: Nav
     Text(e.name, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
     Text("${dayLabel(e.start, System.currentTimeMillis())} · ${hm(e.start)}" + if (e.live) " · Live ${e.detail}" else if (e.over) " · Full time" else "",
       Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
-    Text("WHERE TO WATCH", Modifier.padding(top = 16.dp, bottom = 6.dp), style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+    Row(Modifier.padding(top = 16.dp, bottom = 6.dp)) {
+      Text("WHERE TO WATCH", style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+      if (Epg.busy) Text("  ·  downloading TV guides, more may appear", style = MaterialTheme.typography.labelMedium, color = Z.Info)
+    }
     val o = s.options
     when {
-      o == null -> Text("Searching your TV guides…", color = Z.Text2)
+      o == null -> Text(if (Epg.busy) "Downloading TV guides…" else "Searching your TV guides…", color = Z.Text2)
       o.isEmpty() -> Text(if (Epg.current.size == 0) "Turn on the better TV guide in Settings > Live TV so Zylo can find which channels show this."
         else "No channel in your TV guides lists this yet. Listings often appear a day or two before.", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
       else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
         items(o, key = { (it.channel?.id?.toString() ?: "") + it.label + it.from }) { w ->
           ZSurface({
             val c = w.channel
-            if (c == null) s.linking = w
-            else { live.playing = live.channels.indexOf(c).takeIf { it >= 0 } ?: run { live.channels = listOf(c) + live.channels; 0 }; nav.push(Screen.LivePlay) }
+            if (c == null) s.linking = w else play(c, live, nav)
           }, Modifier.fillMaxWidth(), container = Z.Card, onLongClick = { s.linking = w }) {
             Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
               Column(Modifier.weight(1f)) {

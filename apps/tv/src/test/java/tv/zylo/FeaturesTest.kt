@@ -313,6 +313,15 @@ class SportsTest {
     assertEquals(listOf("Sky Sports Main Event HD" to sky, "Canal+ Sport" to null, "USA Net" to usa, "Peacock" to null), got.map { it.label to it.channel })
   }
 
+  @Test fun ukListingNames() {
+    val e = Sports.parse(Sports.LEAGUES.first(), """{"events":[{"id":"2","date":"2026-11-08T16:30Z","competitions":[{"competitors":[
+      {"homeAway":"home","team":{"displayName":"Manchester United","shortDisplayName":"Man United"}},{"homeAway":"away","team":{"displayName":"Tottenham Hotspur","shortDisplayName":"Spurs"}}]}]}]}""").single()
+    fun on(title: String) = Sports.matches(e, Programme(title, "", e.start - 1_800_000, e.start + 7_200_000))
+    assertEquals(true, on("Live: Man Utd v Spurs"))
+    assertEquals(true, on("Premier League: Manchester United v Tottenham"))
+    assertEquals(false, on("Live: Man City v Spurs")) // the other Manchester
+  }
+
   @Test fun ranksChannelsForLinking() {
     val all = listOf(Channel(11, 0, "BBC One", null, ""), Channel(12, 0, "UK | Sky Sports Arena", null, ""), Channel(10, 0, "UK: SKY SPORTS MAIN EVENT ᶠᴴᴰ", null, ""),
       Channel(13, 0, "UK | TNT Sports 1 HD", null, ""), Channel(14, 0, "UK | TNT Sports 2 HD", null, ""), Channel(15, 0, "US: USA Network", null, ""))
