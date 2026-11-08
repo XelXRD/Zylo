@@ -4,6 +4,12 @@
 // guide search is what makes this work beyond the US.
 package tv.zylo
 
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.async
+import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.runBlocking
+import kotlinx.coroutines.sync.Semaphore
+import kotlinx.coroutines.sync.withPermit
 import org.json.JSONObject
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -43,12 +49,18 @@ object Sports {
 
   private val day = SimpleDateFormat("yyyyMMdd", Locale.US)
 
-  /** Today and the next [days] days, every league. A league that fails is skipped. */
-  fun schedule(days: Int = 2, fetch: (String) -> String = { http(it) }, now: Long = System.currentTimeMillis()): List<SportEvent> {
-    val range = day.format(Date(now)) + "-" + day.format(Date(now + days * 86_400_000L))
-    return LEAGUES.flatMap { l ->
-      runCatching { parse(l, fetch("https://site.api.espn.com/apis/site/v2/sports/${l.path}/scoreboard?dates=$range&limit=200")) }.getOrDefault(emptyList())
-    }.distinctBy { it.id }.sortedBy { it.start }
+  /**
+   * Today and the next [days] days, every league, one request per league per day (ESPN answers 400 to a date range for
+   * team sports). Requests run 8 at a time; one that fails is skipped, and if they all fail the error is passed on.
+   */
+  fun schedule(days: Int = 6, fetch: (String) -> String = { http(it) }, now: Long = System.currentTimeMillis()): List<SportEvent> = runBlocking(Dispatchers.IO) {
+    val gate = Semaphore(8)
+    val asks = LEAGUES.flatMap { l -> (0..days).map { d -> l to day.format(Date(now + d * 86_400_000L)) } }
+    val got = asks.map { (l, date) ->
+      async { gate.withPermit { runCatching { parse(l, fetch("https://site.api.espn.com/apis/site/v2/sports/${l.path}/scoreboard?dates=$date&limit=200")) } } }
+    }.awaitAll()
+    if (got.all { it.isFailure }) throw got.first().exceptionOrNull()!!
+    got.flatMap { it.getOrDefault(emptyList()) }.distinctBy { it.id }.sortedBy { it.start }
   }
 
   fun parse(l: League, body: String): List<SportEvent> = JSONObject(body).optJSONArray("events")?.objects()?.mapNotNull { e ->

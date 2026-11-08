@@ -334,3 +334,16 @@ class UpdateTest {
     assertEquals(Release("0.20.0", "https://x/z.apk", ""), Updates.latest("https://x/update.json") { """{"version":"0.20.0","apk":"https://x/z.apk"}""" })
   }
 }
+
+class ScheduleTest {
+  @Test fun asksOneDayAtATime() {
+    val asked = java.util.Collections.synchronizedList(mutableListOf<String>())
+    val now = 1794153600000L // 8 Nov 2026
+    val nfl = """{"events":[{"id":"9","date":"2026-11-08T18:00Z","competitions":[{"competitors":[{"homeAway":"home","team":{"displayName":"Atlanta Falcons"}},{"homeAway":"away","team":{"displayName":"Cincinnati Bengals"}}]}]}]}"""
+    val got = Sports.schedule(1, { u -> asked += u; if ("-" in u.substringAfter("dates=").substringBefore('&')) throw HttpError(400, "range"); if ("football/nfl" in u && "20261108" in u) nfl else """{"events":[]}""" }, now)
+    assertEquals(listOf("Atlanta Falcons v Cincinnati Bengals"), got.map { it.name })
+    assertEquals(Sports.LEAGUES.size * 2, asked.size) // today and tomorrow, every league
+    assertEquals(true, asked.all { Regex("dates=\\d{8}&").containsMatchIn(it) })
+    assertEquals("all down", runCatching { Sports.schedule(0, { throw java.io.IOException("all down") }, now) }.exceptionOrNull()?.message)
+  }
+}

@@ -77,7 +77,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
       Row(Modifier.padding(horizontal = Z.Pad), verticalAlignment = Alignment.CenterVertically) {
         Text("Sports", style = MaterialTheme.typography.headlineSmall)
         Spacer(Modifier.width(16.dp))
-        Text("Fixtures from ESPN · where to watch from your TV guides", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
+        Text("This week's fixtures from ESPN · where to watch from your TV guides", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
         Spacer(Modifier.weight(1f))
         ZButton("TV Guide", { live.sports = false })
       }
@@ -86,7 +86,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
       }
       when {
         s.events == null && s.error == null -> Loading("Loading fixtures…")
-        shown.isEmpty() -> Text(s.error ?: "No ${if (s.sport == "All") "" else s.sport.lowercase() + " "}fixtures in the next few days.", Modifier.padding(start = Z.Pad, top = 16.dp), color = Z.Text2)
+        shown.isEmpty() -> Text(s.error ?: "No ${if (s.sport == "All") "" else s.sport.lowercase() + " "}fixtures this week.", Modifier.padding(start = Z.Pad, top = 16.dp), color = Z.Text2)
         else -> Row(Modifier.fillMaxSize()) {
           // Fixtures, by day.
           LazyColumn(Modifier.weight(0.56f).fillMaxHeight(), contentPadding = PaddingValues(start = Z.Pad, end = 12.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
