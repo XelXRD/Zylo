@@ -369,7 +369,7 @@ private fun BetterGuide(store: Store) {
   var status by remember { mutableStateOf(store.str("epg_status")) }
   var busy by remember { mutableStateOf(false) }
   Text("Better TV guide", Modifier.padding(top = 18.dp), style = MaterialTheme.typography.titleLarge)
-  Text("Fills gaps in your provider's guide and lets Sports find which channels show a match. Guides download twice a day.",
+  Text("Fills gaps in your provider's guide and lets Sports find which channels show a match. Guides download once a day, after your channels, and keep only the channels you have.",
     style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
   Toggle("Your provider's full guide", "Every channel's listings in one download (xmltv.php)", provider) {
     provider = !provider; store.put("epg_provider", if (provider) "" else "off")
@@ -388,7 +388,7 @@ private fun BetterGuide(store: Store) {
       if (busy || Epg.busy) return@ZButton
       busy = true; Epg.busy = true
       scope.launch {
-        status = withContext(Dispatchers.IO) { runCatching { Epg.refresh(store, Epg.sources(store)) }.getOrElse { "Couldn't update: ${it.message}" } }
+        status = withContext(Dispatchers.IO) { runCatching { Epg.refresh(store, Epg.sources(store), ChannelCache.load()?.third) }.getOrElse { "Couldn't update: ${it.message}" } }
         Epg.busy = false; busy = false
       }
     }, primary = true)

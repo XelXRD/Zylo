@@ -76,7 +76,9 @@ class Xtream(val server: String, val user: String, val pass: String, val formats
   fun channels(category: String?, fetch: (String) -> String = { http(it, timeout = 15_000) }) =
     JSONArray(fetch(api("get_live_streams", category?.let { "&category_id=${enc(it)}" } ?: ""))).objects().mapNotNull {
       val id = it.optInt("stream_id").takeIf { n -> n > 0 } ?: return@mapNotNull null
-      Channel(id, it.optInt("num"), it.optString("name").trim(), it.str("stream_icon")?.takeIf { u -> u.startsWith("http") }, it.optString("category_id"),
+      Channel(id, it.optInt("num"), it.optString("name").trim(), it.str("stream_icon")?.takeIf { u -> u.startsWith("http") },
+        (listOf(it.optString("category_id")) + strings(it.optJSONArray("category_ids")) + (it.optJSONArray("category_ids")?.let { a -> (0 until a.length()).mapNotNull { i -> a.opt(i) as? Int }.map(Int::toString) } ?: emptyList()))
+          .filter { c -> c.isNotEmpty() && c != "null" }.distinct().joinToString(","),
         if (it.optString("tv_archive") == "1") it.optString("tv_archive_duration").toIntOrNull() ?: 1 else 0, it.str("epg_channel_id"))
     }
 
@@ -135,7 +137,8 @@ class Xtream(val server: String, val user: String, val pass: String, val formats
       store.put("xc_info", o.toString())
     }
 
-    fun disconnect(store: Store) = listOf("xc_server", "xc_user", "xc_pass", "xc_formats", "xc_info", "xc_cat", "xc_favs").forEach { store.put(it, "") }
+    fun disconnect(store: Store) = ChannelCache.clear().also { forget(store) }
+    private fun forget(store: Store) = listOf("xc_server", "xc_user", "xc_pass", "xc_formats", "xc_info", "xc_cat", "xc_favs").forEach { store.put(it, "") }
 
     /** Favourite channels, kept whole so the Favourites list needs no download (and never shows anything else). */
     fun favourites(store: Store): List<Channel> = runCatching { JSONArray(store.str("xc_favs")).objects().map(::channelOf) }.getOrDefault(emptyList())
@@ -152,11 +155,40 @@ class Xtream(val server: String, val user: String, val pass: String, val formats
   }
 }
 
+/**
+ * Every channel and category, saved on the TV and fetched again once a day (one request for all channels; categories
+ * then just filter it). Loading per category on every visit timed out on big providers.
+ */
+object ChannelCache {
+  lateinit var dir: java.io.File
+  private val file get() = java.io.File(dir, "channels.json")
+
+  fun load(): Triple<Long, List<Category>, List<Channel>>? = runCatching {
+    val o = JSONObject(file.readText())
+    Triple(o.getLong("at"), o.getJSONArray("categories").objects().map { Category(it.getString("id"), it.getString("name")) },
+      o.getJSONArray("channels").objects().map(Xtream::channelOf))
+  }.getOrNull()
+
+  fun fetch(x: Xtream): Pair<List<Category>, List<Channel>> {
+    val cats = x.categories()
+    val chans = x.channels(null) { http(it, timeout = 20_000, total = 120_000) }.distinctBy { it.id } // some providers list a channel twice
+    runCatching {
+      file.writeText(JSONObject().put("at", System.currentTimeMillis())
+        .put("categories", JSONArray(cats.map { JSONObject().put("id", it.id).put("name", it.name) }))
+        .put("channels", JSONArray(chans.map(Xtream::channelJson))).toString())
+    }
+    return cats to chans
+  }
+
+  fun clear() { if (::dir.isInitialized) file.delete() }
+}
+
 /** Live TV page state; kept across visits so the category, list and guide are where you left them. */
 class LiveState {
   var categories by mutableStateOf<List<Category>>(emptyList())
   var category by mutableStateOf<Category?>(null)
-  var channels by mutableStateOf<List<Channel>>(emptyList())
+  var channels by mutableStateOf<List<Channel>>(emptyList()) // what the guide shows (the chosen category)
+  var all by mutableStateOf<List<Channel>>(emptyList()) // every channel (saved on the TV, fetched daily)
   var error by mutableStateOf<String?>(null)
   var loading by mutableStateOf(false)
   val guide: SnapshotStateMap<Int, List<Programme>> = mutableStateMapOf()
@@ -176,6 +208,9 @@ class LiveState {
 /** The provider's guide for a channel, or the better guide's when the provider has nothing from now on. */
 fun bestGuide(x: Xtream, c: Channel): List<Programme> {
   val now = System.currentTimeMillis()
+  // The daily guide is already on the TV: use it, and only ask the provider for channels with catch-up (it marks what
+  // can be replayed) or ones the daily guide doesn't cover.
+  if (c.archive == 0) Epg.current.forChannel(c)?.takeIf { l -> l.any { it.end > now } }?.let { return it }
   val own = runCatching { x.guide(c.id) }.getOrDefault(emptyList())
   if (own.any { it.end > now }) return own
   return Epg.current.forChannel(c)?.let { extra -> (own.filter { it.archive } + extra.filter { e -> own.none { it.start == e.start } }).sortedBy { it.start } } ?: own
@@ -198,31 +233,40 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
     return
   }
   if (s.favs == null) { s.favs = Xtream.favourites(store); s.reminders = Reminders.all(store) }
-  // The better guide: last download from disk, and a fresh one in the background twice a day.
+  // 1. Channels: from the TV at once, from the provider once a day. 2. Then the better guide, once a day, kept to
+  // your channels. Fixtures (Sports) load separately, only when opened.
   LaunchedEffect(Unit) {
+    if (s.all.isEmpty()) {
+      s.loading = true
+      val saved = withContext(Dispatchers.IO) { ChannelCache.load() }
+      if (saved != null) { s.categories = saved.second; s.all = saved.third }
+      if (saved == null || System.currentTimeMillis() - saved.first > 86_400_000L || saved.third.isEmpty()) {
+        runCatching { withContext(Dispatchers.IO) { ChannelCache.fetch(x) } }
+          .onSuccess { (cats, chans) -> s.categories = cats; s.all = chans; s.error = null }
+          .onFailure { if (s.all.isEmpty()) s.error = "Couldn't load your channels: ${it.message}" }
+      }
+      s.loading = false
+    }
+    if (s.category == null) s.category = (listOf(FAVS) + s.categories).find { it.id == store.str("xc_cat") } ?: ALL
     withContext(Dispatchers.IO) {
       Epg.load()
       val sources = Epg.sources(store)
-      if (sources.isNotEmpty() && Epg.age(store) > 12 * 3_600_000L && !Epg.busy) { Epg.busy = true; runCatching { Epg.refresh(store, sources) }; Epg.busy = false }
+      if (sources.isNotEmpty() && s.all.isNotEmpty() && Epg.age(store) > 86_400_000L && !Epg.busy) {
+        Epg.busy = true
+        runCatching { Epg.refresh(store, sources, s.all) }
+        Epg.busy = false
+      }
     }
   }
   if (s.sports) { SportsPage(store, x, s, nav); return }
-  LaunchedEffect(Unit) {
-    if (s.categories.isEmpty()) runCatching { withContext(Dispatchers.IO) { x.categories() } }.onSuccess { list ->
-      s.categories = list
-      if (s.category == null) s.category = (listOf(FAVS) + list).find { it.id == store.str("xc_cat") } ?: ALL
-    }.onFailure { s.error = it.message; if (s.category == null) s.category = ALL }
-  }
-  LaunchedEffect(s.category) {
+  // A category is a filter on the saved channels: instant, and nothing left over from the last one.
+  LaunchedEffect(s.category, s.all, s.favs) {
     val c = s.category ?: return@LaunchedEffect
-    if (c == FAVS) { s.channels = s.favs.orEmpty(); s.error = null; return@LaunchedEffect } // kept on the TV: instant, and only favourites
-    if (s.channels.isNotEmpty() && s.channels.all { c == ALL || it.category == c.id }) return@LaunchedEffect // already showing it
-    s.loading = true
-    s.error = null
-    s.channels = emptyList() // never leave the last category's channels up while this one loads (or fails)
-    runCatching { withContext(Dispatchers.IO) { x.channels(c.id.ifEmpty { null }) } }
-      .onSuccess { s.channels = it }.onFailure { s.error = it.message }
-    s.loading = false
+    s.channels = when (c) {
+      FAVS -> s.favs.orEmpty()
+      ALL -> s.all
+      else -> s.all.filter { c.id in it.category.split(',') }
+    }.distinctBy { it.id } // the list's keys must be unique
   }
   RestoreFocus(s.focus, s.channels.isNotEmpty() && restore)
   var picking by remember { mutableStateOf(false) }
@@ -255,7 +299,7 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
         }
       }
       when {
-        s.channels.isEmpty() && s.loading -> Loading("Loading channels…")
+        s.channels.isEmpty() && s.loading -> Loading("Loading your channels (once a day)…")
         s.channels.isEmpty() -> Text(s.error ?: if (s.category == FAVS) "No favourites yet. In any category, hold OK on a channel's name to add it." else "No channels in ${s.category?.name ?: "this category"}.", Modifier.padding(start = Z.Pad, top = 24.dp), color = if (s.error != null) Z.Error else Z.Text2)
         else -> Guide(store, x, s, nav, windowStart, now)
       }

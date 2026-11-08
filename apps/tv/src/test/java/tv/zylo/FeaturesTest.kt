@@ -282,6 +282,14 @@ class GuideTest {
     }
   }
 
+  @Test fun keepsOnlyYourChannels() {
+    val chans = HashMap<String, GuideChannel>(); val progs = HashMap<String, MutableList<Programme>>()
+    val mine = listOf(Channel(1, 1, "UK | SKY SPORTS MAIN EVENT FHD", null, ""))
+    val keys = mine.map { channelKey(it.name) }.toSet()
+    Epg.read(xml.byteInputStream(), t - 86_400_000L, t + 2 * 86_400_000L, chans, progs) { g -> g.names.any { channelKey(it) in keys } }
+    assertEquals(setOf("Sky.Sports.Main.Event.HD.uk"), progs.keys) // BBC One isn't one of yours: not kept
+  }
+
   @Test fun matchesProviderChannels() {
     val g = guide(false)
     assertEquals("Sky.Sports.Main.Event.HD.uk", g.idFor(Channel(1, 1, "UK | SKY SPORTS MAIN EVENT FHD", null, "", epgId = null))) // by name

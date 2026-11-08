@@ -113,6 +113,7 @@ class MainActivity : ComponentActivity() {
     }
     Dom.app = applicationContext
     Epg.dir = filesDir
+    ChannelCache.dir = filesDir
     val ui = UiState(store)
     coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
     Trakt.io.launch {

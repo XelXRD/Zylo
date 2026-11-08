@@ -62,13 +62,13 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
       runCatching { withContext(Dispatchers.IO) { Sports.schedule() } }.onSuccess { s.events = it; s.loadedAt = System.currentTimeMillis(); s.error = null }
         .onFailure { s.error = it.message }
     }
-    if (s.all.isEmpty()) s.all = withContext(Dispatchers.IO) { runCatching { x.channels(null) }.getOrDefault(emptyList()) }
   }
+  LaunchedEffect(live.all) { s.all = live.all } // the channels saved on the TV (Live TV loads them once a day)
   // Where to watch the focused event: searched across every guide loaded, after a moment on it.
   LaunchedEffect(s.focused, s.all, s.links, Epg.changes) {
     val e = s.focused ?: return@LaunchedEffect
     s.options = null
-    delay(250)
+    delay(3_000) // rest on a match for 3 s before searching the guides (OK searches at once)
     s.options = withContext(Dispatchers.Default) { options(store, e, s.all, live) }
   }
   val now = remember { System.currentTimeMillis() }
@@ -95,7 +95,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
           LazyColumn(Modifier.weight(0.56f).fillMaxHeight(), contentPadding = PaddingValues(start = Z.Pad, end = 12.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             shown.groupBy { dayLabel(it.start, now) }.forEach { (day, list) ->
               item(key = "d$day") { Text(day, Modifier.padding(top = 10.dp, bottom = 2.dp), style = MaterialTheme.typography.titleSmall, color = Z.Text2) }
-              items(list, key = { it.id }) { e -> EventRow(e, s, Modifier.focusMemory(s.focus, "e${e.id}", default = e == shown.first())) { watchNow(ctx, s, live, nav) } }
+              items(list, key = { it.id }) { e -> EventRow(e, s, Modifier.focusMemory(s.focus, "e${e.id}", default = e == shown.first())) { watchNow(store, ctx, s, live, nav) } }
             }
           }
           WhereToWatch(store, s, live, nav, Modifier.weight(0.44f).fillMaxHeight().padding(end = Z.Pad))
@@ -107,8 +107,8 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
 }
 
 /** OK on a fixture: straight to the channel Zylo is sure shows it (else the best guess); otherwise say how to pick one. */
-private fun watchNow(ctx: android.content.Context, s: SportsState, live: LiveState, nav: Nav) {
-  val o = s.options
+private fun watchNow(store: Store, ctx: android.content.Context, s: SportsState, live: LiveState, nav: Nav) {
+  val o = s.options ?: s.focused?.let { e -> options(store, e, s.all, live) }?.also { s.options = it }
   val pick = o?.firstOrNull { it.channel != null && !it.guessed } ?: o?.firstOrNull { it.channel != null }
   when {
     pick != null -> play(pick.channel!!, live, nav)
@@ -175,7 +175,7 @@ private fun WhereToWatch(store: Store, s: SportsState, live: LiveState, nav: Nav
     }
     val o = s.options
     when {
-      o == null -> Text(if (Epg.busy) "Downloading TV guides…" else "Searching your TV guides…", color = Z.Text2)
+      o == null -> Text(if (Epg.busy) "Downloading TV guides…" else "Rest here a moment to find channels showing this, or press OK.", color = Z.Text2)
       o.isEmpty() -> Text(if (Epg.current.size == 0) "Turn on the better TV guide in Settings > Live TV so Zylo can find which channels show this."
         else "No channel in your TV guides lists this yet. Listings often appear a day or two before.", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
       else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {

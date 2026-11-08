@@ -93,7 +93,9 @@ object Epg {
    * Reads one XMLTV file (plain or gzipped) into [chans]/[progs], keeping programmes from [from] to [to].
    * Streams: a 200 MB guide never sits in memory, only what's kept.
    */
-  fun read(input: InputStream, from: Long, to: Long, chans: MutableMap<String, GuideChannel>, progs: MutableMap<String, MutableList<Programme>>) {
+  fun read(input: InputStream, from: Long, to: Long, chans: MutableMap<String, GuideChannel>, progs: MutableMap<String, MutableList<Programme>>,
+           keep: ((GuideChannel) -> Boolean)? = null) {
+    val kept = HashSet<String>() // with [keep]: only these channels' programmes are kept (guides list channels first)
     val pin = PushbackInputStream(input, 2)
     val head = ByteArray(2).also { val n = pin.read(it); if (n > 0) pin.unread(it, 0, n) }
     val stream = if (head[0] == 0x1f.toByte() && head[1] == 0x8b.toByte()) GZIPInputStream(pin, 1 shl 16) else pin
@@ -120,14 +122,18 @@ object Epg {
         XmlPullParser.TEXT -> when (field) {
           "name" -> names += p.text.trim()
           "title" -> prog?.set(3, p.text.trim())
-          "desc" -> prog?.set(4, p.text.trim().take(400))
+          "desc" -> prog?.set(4, p.text.trim().take(200))
         }
         XmlPullParser.END_TAG -> {
           field = null
           when (p.name) {
-            "channel" -> chan?.let { id -> chans[id] = GuideChannel(id, (chans[id]?.names.orEmpty() + names).distinct()) }.also { chan = null }
+            "channel" -> chan?.let { id ->
+              val g = GuideChannel(id, (chans[id]?.names.orEmpty() + names).distinct())
+              if (keep == null || keep(g)) { chans[id] = g; kept += id }
+            }.also { chan = null }
             "programme" -> prog?.let { g ->
               val id = g[0] as? String ?: return@let
+              if (keep != null && id !in kept) return@let
               progs.getOrPut(id) { mutableListOf() } += Programme(g[3] as? String ?: "", g[4] as? String ?: "", g[1] as Long, g[2] as Long)
             }.also { prog = null }
           }
@@ -175,14 +181,21 @@ object Epg {
    * Downloads every guide source and replaces the cached guide. [sources]: XMLTV links. Returns a summary line;
    * a source that fails is skipped (and named), the others still count.
    */
-  fun refresh(store: Store, sources: List<Pair<String, String>>, open: (String) -> InputStream = ::openStream): String {
+  fun refresh(store: Store, sources: List<Pair<String, String>>, channels: List<Channel>? = null, open: (String) -> InputStream = ::openStream): String {
     val now = System.currentTimeMillis()
-    val from = now - 86_400_000L
+    // Six hours back to two days ahead, and (given your channels) only guide channels you have: a provider's full guide
+    // covers thousands of channels for a week, more than a TV's memory holds.
+    val from = now - 6 * 3_600_000L
     val to = now + 2 * 86_400_000L
+    val ids = channels?.mapNotNull { it.epgId?.lowercase() }?.toHashSet()
+    val keys = channels?.map { channelKey(it.name) }?.toHashSet()
+    val keep: ((GuideChannel) -> Boolean)? = if (channels == null) null else { g ->
+      g.id.lowercase() in ids!! || (g.names + Guide.idName(g.id)).any { channelKey(it) in keys!! }
+    }
     val chans = HashMap<String, GuideChannel>()
     val progs = HashMap<String, MutableList<Programme>>()
     val failed = mutableListOf<String>()
-    for ((label, url) in sources) runCatching { open(url).use { read(it, from, to, chans, progs) } }.onFailure { failed += label }
+    for ((label, url) in sources) runCatching { open(url).use { read(it, from, to, chans, progs, keep) } }.onFailure { failed += label }
     val guide = Guide(chans, progs.mapValues { (_, v) -> v.distinctBy { it.start }.sortedBy { it.start } })
     if (guide.size > 0 || failed.isEmpty()) {
       current = guide
