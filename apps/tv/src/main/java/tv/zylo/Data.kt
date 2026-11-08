@@ -12,7 +12,7 @@ import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
 // Browser-style, because addon hosts behind Cloudflare (Torrentio, ElfHosted…) answer 403 to unknown clients.
-const val UA = "Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Zylo/0.14.1"
+const val UA = "Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Zylo/0.14.2"
 
 class HttpError(val code: Int, message: String) : Exception(message)
 

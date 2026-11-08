@@ -62,6 +62,18 @@ object Trakt {
 
   private fun arr(s: String) = if (s.isBlank()) JSONArray() else JSONArray(s)
 
+  /** Trakt pages its sync and list endpoints (100 a page unless asked), so walk every page — as Nuvio does. */
+  private fun paged(store: Store, path: String, limit: Int = 250): List<JSONObject> {
+    val all = mutableListOf<JSONObject>()
+    val sep = if ('?' in path) '&' else '?'
+    for (page in 1..1000) {
+      val got = arr(call(store, "$path${sep}page=$page&limit=$limit")).objects()
+      all += got
+      if (got.size < limit) break
+    }
+    return all
+  }
+
   // --- Sign-in --------------------------------------------------------------------
 
   class DeviceCode(val device: String, val user: String, val url: String, val interval: Long, val expiresIn: Long)
@@ -136,7 +148,7 @@ object Trakt {
     ids.optInt("tmdb").takeIf { it > 0 }?.let { Ref(kind, it) }
   }.distinct()
 
-  fun watchlist(store: Store) = refs(arr(call(store, "/sync/watchlist")))
+  fun watchlist(store: Store) = refs(JSONArray(paged(store, "/sync/watchlist")))
 
   fun recommendations(store: Store) =
     (refs(arr(call(store, "/recommendations/movies?limit=20&ignore_collected=true")), "movie") + refs(arr(call(store, "/recommendations/shows?limit=20&ignore_collected=true")), "show")).shuffled()
@@ -153,7 +165,7 @@ object Trakt {
     return (mine + liked).filter { it.id.isNotEmpty() }
   }
 
-  fun listItems(store: Store, l: TraktList) = refs(arr(call(store, "/users/${l.user}/lists/${l.id}/items/movie,show")))
+  fun listItems(store: Store, l: TraktList) = refs(JSONArray(paged(store, "/users/${l.user}/lists/${l.id}/items/movie,show")))
 
   /** Turn refs into cards via TMDB (cached), a few at a time. */
   fun items(t: Tmdb, refs: List<Ref>, max: Int = 60): List<Item> = runBlocking(Dispatchers.IO) {
@@ -167,9 +179,9 @@ object Trakt {
   fun sync(store: Store, force: Boolean = false) {
     if (!connected(store) || (!force && System.currentTimeMillis() - store.long("trakt_synced") < 15 * 60_000)) return
     val watched = mutableSetOf<String>()
-    val movies = arr(call(store, "/sync/watched/movies")).objects()
+    val movies = paged(store, "/sync/watched/movies")
     movies.forEach { o -> o.optJSONObject("movie")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 }?.let { watched += "movie:$it" } }
-    val shows = arr(call(store, "/sync/watched/shows")).objects()
+    val shows = paged(store, "/sync/watched/shows?extended=progress")
     val recent = JSONArray() // shows by when you last watched them, for Up Next
     shows.forEach { o ->
       val id = o.optJSONObject("show")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 } ?: return@forEach
