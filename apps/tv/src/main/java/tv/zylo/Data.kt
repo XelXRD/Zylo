@@ -28,11 +28,11 @@ class HttpError(val code: Int, message: String) : Exception(message)
 // built-in HttpURLConnection even when a browser on the same connection gets through. It also does PATCH natively.
 private val client = OkHttpClient.Builder().followRedirects(true).build()
 
-fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null, timeout: Int = 10_000): String {
+fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null, timeout: Int = 10_000, total: Long = 0): String {
   val req = Request.Builder().url(url).header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
   headers.forEach { (k, v) -> req.header(k, v) }
   val rb = body?.toRequestBody(type?.toMediaTypeOrNull()) ?: if (method == "GET" || method == "DELETE") null else ByteArray(0).toRequestBody(null)
-  val call = client.newBuilder().connectTimeout(timeout.toLong(), TimeUnit.MILLISECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+  val call = client.newBuilder().connectTimeout(timeout.toLong(), TimeUnit.MILLISECONDS).readTimeout(20, TimeUnit.SECONDS).callTimeout(total, TimeUnit.MILLISECONDS).build()
     .newCall(req.method(method, rb).build())
   call.execute().use { r ->
     val code = r.code
@@ -124,6 +124,11 @@ class Store(private val open: (String) -> SharedPreferences) {
   fun str(k: String) = layer(k).getString(k, "")!!
   fun long(k: String) = layer(k).getLong(k, 0)
   fun putLong(k: String, v: Long) = layer(k).edit().putLong(k, v).apply()
+
+  /** Installed Syncler Express packages (shared by every profile). */
+  var syncler: List<SynclerPackage>
+    get() = runCatching { JSONArray(g.getString("syncler", "[]")).objects().map { SynclerPackage(it.getString("url"), it.optString("name"), it.getJSONObject("providers")) } }.getOrDefault(emptyList())
+    set(v) = put("syncler", JSONArray(v.map { it.toJson() }).toString())
 
   // --- Profiles ---
   val profiles: List<Profile> get() = profilesIn(g)

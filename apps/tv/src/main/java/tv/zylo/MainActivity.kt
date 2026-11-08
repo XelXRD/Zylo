@@ -101,6 +101,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     val store = Store(this)
     Ratings.max = store.profile.kids
+    Dom.app = applicationContext
     val ui = UiState(store)
     coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
     Trakt.io.launch {

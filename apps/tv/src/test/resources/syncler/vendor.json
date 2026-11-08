@@ -1,0 +1,146 @@
+{
+    "name": "Lobstor V2",
+    "description": "List Of the Best Syncler V2 TORrents.  Full Lobstor Dinner installs by default but feel free to uninstall and just install any combination of individual side dishes to suit your tastes. Full Lobstor Dinner excludes Anime providers so if thats your thing just add then in!  *** Buy me a coffee and keep me awake www.buymeacoffee.com/synclerlobstor ***",
+    "tutorial": "https://www.reddit.com/r/lobstor",
+    "support": "https://www.buymeacoffee.com/lobstor",
+    "website": "https://www.reddit.com/r/lobstor",
+    "packages": [
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Full.json",
+            "description": "The full lobstor dinner!  Gorge yourself on our full provider file which includes the top 20 side dishes. Use this package on its own or add side dishes 21 and up to it."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Sushi.json",
+            "description": "Sushi! Craving Anime - we got you covered. A Full Lobstor Dinner with 5 popular Anime sources included as well."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Piratebay.json",
+            "description": "ADD PIRATEBAY: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-TorrentIO.json",
+            "description": "ADD TORRENTIO: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Torrentz2.json",
+            "description": "ADD TORRENTZ2: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Torrentquest.json",
+            "description": "ADD TORRENTQUEST: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Zooqle.json",
+            "description": "ADD ZOOQLE: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Eztv.json",
+            "description": "ADD EZTV: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Yts.json",
+            "description": "ADD YTS: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-1337.json",
+            "description": "ADD 1337: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-TorrentGalaxy.json",
+            "description": "ADD TORRENT GALAXY: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-LimeTorrents.json",
+            "description": "ADD LIME TORRENTS: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Kickass.json",
+            "description": "ADD KICKASS: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Torrentapi.json",
+            "description": "ADD TORRENTAPI: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Rarbg.json",
+            "description": "ADD RARBG: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        }, 
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-SolidTorrents.json",
+            "description": "ADD SOLID TORRENTS: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-TorrentDownload.json",
+            "description": "ADD TORRENT DOWNLOAD: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-PirateIRO.json",
+            "description": "ADD PIRATEIRO: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-YourBitTorrent.json",
+            "description": "ADD YOUR BITTORRENT: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-ExtraTorrents.json",
+            "description": "ADD EXTRATORRENTS: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-BitSearch.json",
+            "description": "ADD BITSEARCH: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-BitLord.json",
+            "description": "ADD BITLORD: Don't want the full dinner? Then delete it and mix and match your own side dishes to get just the feast you want."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Anirena.json",
+            "description": "ADD ANIRENA: Craving Anime?  Add this to either the Full Dinner Package or a side dish selection."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-TorLock.json",
+            "description": "ADD TORLOCK: Craving Anime?  Add this to either the Full Dinner Package or a side dish selection."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-AniDex.json",
+            "description": "ADD ANIDEX: Craving Anime?  Add this to either the Full Dinner Package or a side dish selection."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-AnimeTosho.json",
+            "description": "ADD ANIMETOSHO: Craving Anime?  Add this to either the Full Dinner Package or a side dish selection."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Nyaa.json",
+            "description": "ADD NYAA: Craving Anime?  Add this to either the Full Dinner Package or a side dish selection."
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-OxTorrent.json",
+            "description": "ADD OXTORRENT: Want something exotic? Add this foreign language speciality to the Full Dinner Package or a side dish selection"
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Torrent9.json",
+            "description": "ADD TORENT9: Want something exotic? Add this foreign language speciality to the Full Dinner Package or a side dish selection"
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Rutor.json",
+            "description": "ADD RUTOR: Want something exotic? Add this foreign language speciality to the Full Dinner Package or a side dish selection"
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Ilcorsaronero.json",
+            "description": "ADD ILCORSARONERO: Want something exotic? Add this foreign language speciality to the Full Dinner Package or a side dish selection"
+        },
+        {
+            "manifest": "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Zilean.json",
+            "description": "ADD ZILEAN: *TESTING ONLY* Add this to the Full Dinner Package or a side dish selection"
+        }
+    ],
+    "cacheServers": [
+        "cache.bouncy.cc"
+    ],
+    "defaults": {
+        "packages": [
+            "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Full.json"
+        ],
+        "cacheServer": "cache.bouncy.cc"
+    }
+}

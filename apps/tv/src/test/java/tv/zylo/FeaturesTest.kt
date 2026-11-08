@@ -157,3 +157,41 @@ class PhoneDropTest {
     } finally { d.stop() }
   }
 }
+
+class SynclerTest {
+  private fun res(n: String) = javaClass.getResource("/syncler/$n")!!.readText()
+  private val web = mapOf(
+    "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/LobstorV2.json" to res("vendor.json"),
+    "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Manifest-Full.json" to res("package.json"),
+    "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/Full-Lobstor-Dinner.json" to res("providers.json"),
+  )
+  private val noDom: suspend (String, org.json.JSONObject) -> List<org.json.JSONObject> = { _, _ -> emptyList() }
+
+  @Test fun installsLobstorFromItsVendorLink() {
+    val files = HashMap<String, Mem>()
+    val st = Store { files.getOrPut(it) { Mem() } }
+    val got = Syncler.install(st, "https://raw.githubusercontent.com/h53h54h55/Syncler2/main/LobstorV2.json") { web.getValue(it) }
+    assertEquals(1, got.size)
+    assertEquals(st.syncler.single().sites.size, got.single().sites.size)
+    assertEquals(true, got.single().sites.any { it.optString("name") == "TORRENTIO" })
+  }
+
+  @Test fun searchesJsonSites() = kotlinx.coroutines.runBlocking {
+    val sites = org.json.JSONObject(res("providers.json"))
+    val asked = mutableListOf<String>()
+    val torrentio = Syncler.search(sites.getJSONObject("torrentio"), Query("Dune", "2021", "tt1160419", null, null), { asked += it
+      """{"streams":[{"title":"Dune.2021.2160p.HDR.x265\n👤 50 💾 18.2 GB","infoHash":"ABCDEF0123456789ABCDEF0123456789ABCDEF01"}]}""" }, noDom)!!
+    assertEquals("https://torrentio.strem.fun/stream/movie/tt1160419.json", asked.single())
+    assertEquals("abcdef0123456789abcdef0123456789abcdef01", torrentio.single().infoHash)
+    assertEquals("4K", torrentio.single().quality)
+    // YTS: results in data.movies, one row per torrent, the title from the film.
+    val yts = Syncler.search(sites.getJSONObject("yts"), Query("Dune", "2021", "tt1160419", null, null), {
+      """{"data":{"movies":[{"title_long":"Dune (2021)","torrents":[{"hash":"1111111111111111111111111111111111111111","quality":"1080p","size":"2.1 GB"},{"hash":"2222222222222222222222222222222222222222","quality":"2160p","size":"5 GB"}]}]}}""" }, noDom)!!
+    assertEquals(listOf("1080p", "4K"), yts.map { it.quality })
+    // An episode fills S01E02 into text searches; a site that doesn't answer is null, not empty.
+    assertEquals("Show S01E02", Syncler.fill("{title} {episodeCode}", org.json.JSONObject(), Query("Show", "2020", null, 1, 2)))
+    assertEquals(null, Syncler.search(sites.getJSONObject("torrentio"), Query("Dune", "2021", "tt1160419", null, null), { throw java.io.IOException() }, noDom))
+  }
+
+  @Test fun base32Hashes() = assertEquals("0123456789abcdef0123456789abcdef01234567", Syncler.hex("AERUKZ4JVPG66AJDIVTYTK6N54ASGRLH"))
+}

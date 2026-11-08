@@ -496,19 +496,26 @@ private fun Addons(store: Store) {
   val scope = rememberCoroutineScope()
   var addons by remember { mutableStateOf(store.addons) }
   /** Blocking (call off the main thread). One link per line; returns what happened, for a toast or the phone. */
+  var packs by remember { mutableStateOf(store.syncler) }
+  fun stremio(url: String) = Addon.load(url).let { a -> store.addons = store.addons.filter { it.url != a.url } + a; addons = store.addons; "Added ${a.name}." }
+  fun syncler(url: String) = Syncler.install(store, url).let { p -> packs = store.syncler; "Added " + p.joinToString { "${it.name} (${it.sites.size} sites)" } + "." }
+  /** Blocking (call off the main thread). One link per line, Stremio addon or Syncler vendor/package; returns what happened. */
   fun install(text: String): String = text.split(Regex("\\s+")).filter { it.isNotBlank() }.joinToString("\n") { url ->
-    runCatching { Addon.load(url) }.fold({ a -> store.addons = store.addons.filter { it.url != a.url } + a; addons = store.addons; "Added ${a.name}." }, { it.message ?: "Couldn't add that addon." })
+    // A Stremio link ends in manifest.json; try the likelier kind first, then the other.
+    val tries = if (url.substringBefore('?').endsWith("manifest.json", ignoreCase = true)) listOf(::stremio, ::syncler) else listOf(::syncler, ::stremio)
+    val first = runCatching { tries[0](url) }
+    first.getOrNull() ?: runCatching { tries[1](url) }.getOrNull() ?: (first.exceptionOrNull()?.message ?: "Couldn't add that.")
   }.ifEmpty { "Paste a link first." }
   var phone by remember { mutableStateOf<PhoneDrop?>(null) }
   DisposableEffect(Unit) { onDispose { phone?.stop() } }
   Column {
-    Header("Addons", "Stremio addons find streams for Zylo. Add one by pasting its manifest link — easiest from your phone.")
+    Header("Addons", "Stremio addons and Syncler Express packages find streams for Zylo. Add one by pasting its link (a Stremio manifest, or a Syncler vendor or package) — easiest from your phone.")
     Row(horizontalArrangement = Arrangement.spacedBy(10.dp)) {
       ZButton(if (phone == null) "Add from Phone" else "Close Phone Link", {
         phone = phone?.let { it.stop(); null } ?: runCatching { PhoneDrop { t -> install(t).also { msg -> scope.launch { toast(ctx, msg) } } } }.getOrNull()
       }, primary = true, icon = Icons.Filled.Add)
       ZButton("Type a Link", {
-        ask(ctx, "Addon manifest link", "") { url -> scope.launch { toast(ctx, withContext(Dispatchers.IO) { install(url) }) } }
+        ask(ctx, "Addon or Syncler link", "") { url -> scope.launch { toast(ctx, withContext(Dispatchers.IO) { install(url) }) } }
       })
     }
     phone?.let { p ->
@@ -523,7 +530,20 @@ private fun Addons(store: Store) {
         }
       }
     }
-    if (addons.isEmpty()) Text("No addons yet.", Modifier.padding(top = 16.dp), color = Z.Text2)
+    packs.forEach { p ->
+      Row(Modifier.padding(top = 16.dp).fillMaxWidth().background(Z.Card, Z.Medium).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+        Tile("S", 44.dp)
+        Spacer(Modifier.width(16.dp))
+        Column(Modifier.weight(1f)) {
+          Text(p.name, style = MaterialTheme.typography.titleMedium)
+          Text("Syncler Express package · ${p.sites.size} sites: " + p.sites.joinToString { it.optString("name") }, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+          MetaLine(listOf("Torrents play through your debrid service"), color = Z.Muted)
+        }
+        Spacer(Modifier.width(16.dp))
+        ZButton("Remove", { store.syncler = store.syncler.filter { it.url != p.url }; packs = store.syncler })
+      }
+    }
+    if (addons.isEmpty() && packs.isEmpty()) Text("No addons yet.", Modifier.padding(top = 16.dp), color = Z.Text2)
     LazyColumn(Modifier.padding(top = 16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
       items(addons, key = { it.url }) { a ->
         Row(Modifier.fillMaxWidth().background(Z.Card, Z.Medium).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {

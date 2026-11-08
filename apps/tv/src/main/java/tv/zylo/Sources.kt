@@ -107,6 +107,8 @@ fun source(raw: JSONObject, addon: String): Source? {
   return null // YouTube, websites, usenet, archives: nothing this player opens
 }
 
+fun qualityOf(text: String) = QUALITY.firstOrNull { it.first.containsMatchIn(text) }?.second
+
 val QUALITY_STEPS = QUALITIES.take(3) // the choices for Settings > Playback > Maximum quality
 
 private fun qualityIndex(q: String?) = QUALITIES.indexOf(q).let { if (it < 0) 9 else it }
@@ -144,7 +146,11 @@ suspend fun findSources(store: Store, item: Item, season: Int?, episode: Int?, v
   val servers = Library.connected(store).map { server ->
     async(Dispatchers.IO) { runCatching { server.find(item, season, episode) }.fold({ it to null }, { emptyList<Source>() to "${server.name}: ${it.message}" }) }
   }
-  val results = (servers + addons).awaitAll()
+  // Syncler Express packages: torrent-site searches, played through the debrid services.
+  val syncler = async(Dispatchers.IO) {
+    Syncler.sources(store, Query(item.title, item.year, videoId.substringBefore(':').takeIf { it.startsWith("tt") }, season, episode))
+  }
+  val results = (servers + addons + syncler).awaitAll()
   val all = withDebrid(store, results.flatMap { it.first })
   Found(rank(all, store.maxQuality, store.sourcePref(item)), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null })
 }

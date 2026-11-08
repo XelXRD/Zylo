@@ -47,7 +47,7 @@ class PhoneDrop(private val onText: (String) -> String) {
 <style>body{background:#101114;color:#F5F5F5;font:16px system-ui,sans-serif;margin:0;padding:24px}h1{font-size:22px;margin:0 0 6px}
 p{color:#A4A5AB;margin:0 0 18px}textarea{width:100%;box-sizing:border-box;height:160px;background:#191A1E;color:#F5F5F5;border:1px solid #34353D;border-radius:10px;padding:12px;font:14px monospace}
 button{margin-top:14px;width:100%;padding:14px;border:0;border-radius:10px;background:#BD1422;color:#fff;font-size:16px;font-weight:600}#r{margin-top:16px;color:#A4A5AB}</style></head>
-<body><h1><span style="color:#BD1422">Z</span> Zylo</h1><p>Paste an addon's manifest link. It goes straight to the TV.</p>
+<body><h1><span style="color:#BD1422">Z</span> Zylo</h1><p>Paste a Stremio addon link or a Syncler vendor/package link. It goes straight to the TV.</p>
 <textarea id="t" placeholder="https://…/manifest.json"></textarea><button onclick="send()">Send to TV</button><div id="r"></div>
 <script>async function send(){const r=document.getElementById('r');r.textContent='Sending…';
 try{const x=await fetch(location.pathname+location.search,{method:'POST',body:encodeURIComponent(document.getElementById('t').value)});r.textContent=await x.text();
