@@ -8,6 +8,7 @@ import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.coroutineScope
 import org.json.JSONArray
 import org.json.JSONException
+import java.net.URL
 import org.json.JSONObject
 import kotlin.math.roundToInt
 
@@ -34,9 +35,13 @@ class Addon(val url: String, val manifest: JSONObject) {
 
   companion object {
     fun load(input: String): Addon {
-      val url = input.trim().replace(Regex("^stremio://", I), "https://")
+      var url = input.trim().replace(Regex("^stremio://", I), "https://")
       if (!Regex("^https?://", I).containsMatchIn(url)) throw Exception("That isn't a web address.")
-      val m = try { getJson(url) } catch (e: JSONException) { throw Exception("That address didn't return an addon manifest.") }
+      // People often paste the addon's home or /configure page rather than its manifest link.
+      if (!url.substringBefore('?').endsWith("manifest.json")) url = url.substringBefore('?').removeSuffix("/").removeSuffix("/configure") + "/manifest.json"
+      val m = try { getJson(url) } catch (e: JSONException) { throw Exception("That address didn't return an addon manifest.") } catch (e: HttpError) {
+        throw Exception(if (e.code == 403) "${URL(url).host} refused Zylo (403). Some addons block VPNs and some hosts need you to configure the addon first: set it up on its website, then paste the manifest link it gives you." else e.message)
+      }
       if (m.str("id") == null || m.str("name") == null || m.str("version") == null || (m.optJSONArray("resources")?.length() ?: 0) == 0 || m.optJSONArray("types") == null)
         throw Exception("That link works, but it isn't a Stremio addon manifest.")
       return Addon(url, m)

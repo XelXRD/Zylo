@@ -415,7 +415,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   var controls by remember { mutableStateOf(false) }
   var view by remember { mutableStateOf<PlayerView?>(null) }
   val player = remember {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.14.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
+    val http = DefaultHttpDataSource.Factory().setUserAgent(UA).setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(http)).build().apply {
       // Addon subtitles ride along as extra text tracks; subtitles inside the file are found automatically.
       setMediaItem(MediaItem.Builder().setUri(s.url).setSubtitleConfigurations(s.subs.map { sub ->

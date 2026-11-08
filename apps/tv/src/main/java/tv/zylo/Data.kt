@@ -11,6 +11,9 @@ import java.net.URL
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
+// Browser-style, because addon hosts behind Cloudflare (Torrentio, ElfHosted…) answer 403 to unknown clients.
+const val UA = "Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Zylo/0.14.1"
+
 class HttpError(val code: Int, message: String) : Exception(message)
 
 fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null, timeout: Int = 10_000): String {
@@ -23,7 +26,8 @@ fun http(url: String, method: String = "GET", headers: Map<String, String> = emp
     }
     c.connectTimeout = timeout
     c.readTimeout = 20_000
-    c.setRequestProperty("User-Agent", "Zylo/0.14.0")
+    c.setRequestProperty("User-Agent", UA)
+    c.setRequestProperty("Accept", "application/json, text/plain, */*")
     headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
     if (body != null) {
       c.doOutput = true
@@ -33,7 +37,8 @@ fun http(url: String, method: String = "GET", headers: Map<String, String> = emp
     val code = c.responseCode
     // ponytail: reads the whole body; add a size cap if an addon ever sends something huge
     val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
-    if (code == 401 || code == 403) throw HttpError(code, "${c.url.host} didn't accept the key ($code).")
+    if (code == 401) throw HttpError(code, "${c.url.host} didn't accept the key (401).")
+    if (code == 403) throw HttpError(code, "${c.url.host} refused the request (403).")
     if (code >= 400) throw HttpError(code, "${c.url.host} answered $code.")
     return text
   } finally {
