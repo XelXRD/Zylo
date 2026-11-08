@@ -1,5 +1,5 @@
 {
-  "version": "0.20.1",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.20.1.apk",
-  "notes": "What's new in 0.20.1\n\n• Sports: fixtures for every sport now load (football, NFL, NBA, NHL and more), a week ahead."
+  "version": "0.20.2",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.20.2.apk",
+  "notes": "What's new in 0.20.2\n\n• Sports: where to watch now finds your channels by name, even when your provider names them differently. A best guess shows straight away (hold OK to change it), and Link lists the closest channels first.\n• Sports: fixtures for every sport load, a week ahead."
 }
