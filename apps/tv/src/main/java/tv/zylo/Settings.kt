@@ -355,7 +355,13 @@ private fun LiveTvSettings(store: Store) {
       else ZButton("Disconnect", { Xtream.disconnect(store); message = null; tick++ })
     }
     Text("Live TV appears in the top bar. It isn't shown on kids profiles.", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
-    if (x != null) BetterGuide(store)
+    if (x != null) {
+      var preview by remember { mutableStateOf(store.str("live_preview") != "off") }
+      Toggle("Preview channels in the guide", "The channel you rest on plays, muted, above the guide. Uses one of your provider's connections.", preview) {
+        preview = !preview; store.put("live_preview", if (preview) "" else "off")
+      }
+      BetterGuide(store)
+    }
   }
 }
 

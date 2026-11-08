@@ -410,3 +410,26 @@ class RemindersTest {
     assertEquals(0, Reminders.all(st).size)
   }
 }
+
+class AnimeQuizAndSavedResultsTest {
+  @Test fun animeQuiz() {
+    val q = quiz("anime")
+    assertEquals(5, q.size)
+    assertEquals("Big battles", q[0].answers[0].label)
+    val path = quizPath("anime", listOf(q[0].answers[0]))
+    assertEquals(true, path.startsWith("/discover/tv?") && "with_genres=16,10759" in path && "with_original_language=ja" in path)
+    assertEquals(true, "with_genres=16" in quizPath("anime", listOf(q[0].answers.last()))) // "Surprise me" is still anime
+  }
+
+  @Test fun keepsChannelsForAMatchUntilItsOver() {
+    val files = HashMap<String, Mem>()
+    val st = Store { files.getOrPut(it) { Mem() } }
+    val now = System.currentTimeMillis()
+    val e = SportEvent("77", "Football", "Premier League", "Arsenal v Chelsea", now + 3_600_000, "pre", "", emptyList(), emptyList(), emptyList())
+    val c = Channel(10, 401, "Sky Sports Main Event", null, "1")
+    SeenOn.put(st, e, listOf(WatchOption("Sky Sports Main Event HD", Programme("Live: Arsenal v Chelsea", "", e.start, e.start + 7_200_000), c, "TV guide")))
+    assertEquals(c, SeenOn.get(st, e)?.single()?.channel)
+    assertEquals(null, SeenOn.get(st, e.copy(id = "78")))
+    assertEquals(null, SeenOn.get(st, e.copy(start = now - 5 * 3_600_000))) // kept until 4 h after the start
+  }
+}

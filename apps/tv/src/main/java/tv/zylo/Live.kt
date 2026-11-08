@@ -16,6 +16,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusDirection
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.platform.LocalFocusManager
@@ -259,6 +260,38 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
     }
   }
   if (s.sports) { SportsPage(store, x, s, nav); return }
+  // 4. Preview: one muted player for the guide, showing the channel you rest on (Settings > Live TV can turn it off).
+  val ctx = LocalContext.current
+  val preview = remember {
+    if (store.str("live_preview") == "off") null
+    else ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(DefaultHttpDataSource.Factory().setUserAgent(UA).setAllowCrossProtocolRedirects(true))).build()
+      .apply { volume = 0f; playWhenReady = true }
+  }
+  DisposableEffect(Unit) { onDispose { preview?.release() } }
+  var previewing by remember { mutableStateOf<Int?>(null) }
+  LaunchedEffect(s.focused?.first?.id) {
+    val c = s.focused?.first ?: return@LaunchedEffect
+    if (previewing == c.id || preview == null) return@LaunchedEffect
+    previewing = null
+    preview.stop()
+    delay(1_500)
+    preview.setMediaItem(MediaItem.fromUri(x.streamUrl(c)))
+    preview.prepare()
+    previewing = c.id
+  }
+  // 2. Channel numbers typed on the remote in the guide: jump to that channel after a moment.
+  var typed by remember { mutableStateOf("") }
+  LaunchedEffect(typed) {
+    if (typed.isEmpty()) return@LaunchedEffect
+    delay(1_500)
+    val n = typed.toIntOrNull()
+    typed = ""
+    val c = s.channels.firstOrNull { it.num == n } ?: s.all.firstOrNull { it.num == n }
+    if (c == null) { toast(ctx, "No channel $n"); return@LaunchedEffect }
+    s.playing = s.channels.indexOfFirst { it.id == c.id }.takeIf { it >= 0 } ?: run { s.channels = listOf(c) + s.channels; 0 }
+    s.catchup = null
+    nav.push(Screen.LivePlay)
+  }
   // A category is a filter on the saved channels: instant, and nothing left over from the last one.
   LaunchedEffect(s.category, s.all, s.favs) {
     val c = s.category ?: return@LaunchedEffect
@@ -271,9 +304,14 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
   RestoreFocus(s.focus, s.channels.isNotEmpty() && restore)
   var picking by remember { mutableStateOf(false) }
 
-  Box(Modifier.fillMaxSize()) {
+  Box(Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+    if (e.type != KeyEventType.KeyDown || picking) return@onPreviewKeyEvent false
+    digit(e.key)?.let { typed = (typed + it).takeLast(4); true } ?: false
+  }) {
+    if (typed.isNotEmpty()) Text(typed, Modifier.align(Alignment.TopEnd).padding(top = 90.dp, end = Z.Pad).background(Z.Elevated, Z.Medium).padding(horizontal = 22.dp, vertical = 10.dp),
+      style = MaterialTheme.typography.displaySmall)
     Column(Modifier.fillMaxSize().padding(top = 84.dp)) {
-      Details(s, x)
+      Details(s, x, preview, previewing)
       // Category dropdown and the time ruler.
       val now = remember { System.currentTimeMillis() }
       val windowStart = now - now % (30 * 60_000) + s.shift * 3_600_000L // the current half hour, moved by any paging
@@ -318,12 +356,14 @@ private const val WINDOW_MIN = 180 // the guide shows three hours
 
 /** What's focused: the programme's title, time, a progress bar if it's on now, and its description. */
 @Composable
-private fun Details(s: LiveState, x: Xtream) {
+private fun Details(s: LiveState, x: Xtream, preview: ExoPlayer?, previewing: Int?) {
   val (c, p) = s.focused ?: return Spacer(Modifier.height(150.dp))
   Row(Modifier.height(150.dp).padding(horizontal = Z.Pad), verticalAlignment = Alignment.CenterVertically) {
-    Box(Modifier.size(96.dp).background(Z.Card, Z.Medium), contentAlignment = Alignment.Center) {
-      if (c.logo != null) AsyncImage(c.logo, null, Modifier.fillMaxSize().padding(12.dp), contentScale = ContentScale.Fit)
+    // 4. The focused channel playing, muted, once you've rested on it; its logo until then.
+    Box(Modifier.size(if (preview != null) 216.dp else 96.dp, 122.dp).clip(Z.Medium).background(Z.Card), contentAlignment = Alignment.Center) {
+      if (c.logo != null) AsyncImage(c.logo, null, Modifier.size(96.dp).padding(12.dp), contentScale = ContentScale.Fit)
       else Text(c.name.take(2).uppercase(), style = MaterialTheme.typography.titleLarge, color = Z.Text2)
+      if (preview != null && previewing == c.id) AndroidView({ PlayerView(it).apply { useController = false; player = preview } }, Modifier.fillMaxSize())
     }
     Spacer(Modifier.width(24.dp))
     Column(Modifier.weight(1f)) {
@@ -510,17 +550,36 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
   LaunchedEffect(index, banner) { showBanner = true; delay(5_000); showBanner = false }
   val focus = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(60); runCatching { focus.requestFocus() } }
-  fun zap(step: Int) { past = null; if (s.channels.isNotEmpty()) index = (index + step + s.channels.size) % s.channels.size }
+  // 1. Last channel: Left on live flips back to the channel you were on before.
+  var last by remember { mutableStateOf<Int?>(null) }
+  fun go(to: Int) { if (to != index && to in s.channels.indices) { last = index; past = null; index = to } }
+  fun zap(step: Int) { if (s.channels.isNotEmpty()) go((index + step + s.channels.size) % s.channels.size) }
+  // 2. Channel numbers typed on the remote: jump after a moment.
+  var typed by remember { mutableStateOf("") }
+  LaunchedEffect(typed) {
+    if (typed.isEmpty()) return@LaunchedEffect
+    delay(1_500)
+    val n = typed.toIntOrNull()
+    typed = ""
+    val i = s.channels.indexOfFirst { it.num == n }.takeIf { it >= 0 }
+      ?: s.all.firstOrNull { it.num == n }?.let { c -> s.channels = listOf(c) + s.channels; index += 1; 0 }
+    if (i != null) go(i) else toast(ctx, "No channel $n")
+  }
+  // 3. Mini guide: OK on live opens a channel list over the picture (now and next); OK there switches.
+  var mini by remember { mutableStateOf(false) }
+  BackHandler(mini) { mini = false }
+  LaunchedEffect(mini) { if (!mini) { delay(60); runCatching { focus.requestFocus() } } }
   Box(Modifier.fillMaxSize().background(Color.Black).focusRequester(focus).onPreviewKeyEvent { e ->
-    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+    if (e.type != KeyEventType.KeyDown || mini) return@onPreviewKeyEvent false
+    digit(e.key)?.let { typed = (typed + it).takeLast(4); return@onPreviewKeyEvent true }
     when (e.key) {
       Key.DirectionUp, Key.ChannelUp -> { zap(-1); true }
       Key.DirectionDown, Key.ChannelDown -> { zap(1); true }
-      // Catch-up can be paused and skipped through; live just shows the banner.
-      Key.DirectionLeft -> { if (past != null) player.seekTo((player.currentPosition - 30_000).coerceAtLeast(0)); banner++; true }
+      // Catch-up can be paused and skipped through; on live, Left is the last channel.
+      Key.DirectionLeft -> { if (past != null) player.seekTo((player.currentPosition - 30_000).coerceAtLeast(0)) else last?.let(::go); banner++; true }
       Key.DirectionRight -> { if (past != null) player.seekTo(player.currentPosition + 30_000); banner++; true }
-      Key.DirectionCenter, Key.Enter, Key.MediaPlayPause -> { if (past != null) player.playWhenReady = !player.playWhenReady; banner++; true }
-      Key.Info -> { banner++; true }
+      Key.DirectionCenter, Key.Enter, Key.MediaPlayPause -> { if (past != null) player.playWhenReady = !player.playWhenReady else mini = true; banner++; true }
+      Key.Info, Key.Guide -> { if (past == null) mini = true; banner++; true }
       else -> false
     }
   }) {
@@ -545,7 +604,48 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
           else if (on != null) ProgressBar((now - on.start).toFloat() / (on.end - on.start), Modifier.padding(top = 8.dp).width(320.dp))
           if (past == null) next?.let { Text("Next  ${hm(it.start)}  ${it.title}", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 1) }
         }
-        Text(if (past != null) "◀ ▶  30 s  ·  OK  Pause  ·  ▲ ▼  Back to live" else "▲ ▼  Change channel", style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+        Text(if (past != null) "◀ ▶  30 s  ·  OK  Pause  ·  ▲ ▼  Back to live" else "▲ ▼  Channel  ·  ◀  Last channel  ·  OK  Guide", style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+      }
+    }
+    if (typed.isNotEmpty()) Text(typed, Modifier.align(Alignment.TopEnd).padding(36.dp).background(Z.Bg.copy(alpha = 0.85f), Z.Medium).padding(horizontal = 22.dp, vertical = 10.dp),
+      style = MaterialTheme.typography.displaySmall)
+    if (mini) MiniGuide(s, index) { i -> mini = false; go(i) }
+  }
+}
+
+/** A digit key (remote number keys or a keyboard's), or null. */
+fun digit(k: Key): Int? = when (k) {
+  Key.Zero, Key.NumPad0 -> 0; Key.One, Key.NumPad1 -> 1; Key.Two, Key.NumPad2 -> 2; Key.Three, Key.NumPad3 -> 3; Key.Four, Key.NumPad4 -> 4
+  Key.Five, Key.NumPad5 -> 5; Key.Six, Key.NumPad6 -> 6; Key.Seven, Key.NumPad7 -> 7; Key.Eight, Key.NumPad8 -> 8; Key.Nine, Key.NumPad9 -> 9
+  else -> null
+}
+
+/** The channel list over the picture: what's on now and next on each; OK switches, Back closes. */
+@Composable
+private fun MiniGuide(s: LiveState, current: Int, pick: (Int) -> Unit) {
+  val list = rememberLazyListState(initialFirstVisibleItemIndex = (current - 2).coerceAtLeast(0))
+  val here = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(80); runCatching { here.requestFocus() } }
+  val now = System.currentTimeMillis()
+  Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.92f), 0.55f to Z.Bg.copy(alpha = 0.6f), 1f to Color.Transparent))) {
+    Column(Modifier.padding(start = Z.Pad, top = 36.dp, bottom = 24.dp).width(520.dp).fillMaxHeight()) {
+      Text("CHANNELS", style = MaterialTheme.typography.labelLarge, color = Z.Red)
+      LazyColumn(Modifier.padding(top = 10.dp).focusGroup().focusProperties { onExit = { cancelFocusChange() } }, state = list, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        itemsIndexed(s.channels, key = { _, c -> c.id }) { i, c ->
+          val shows = s.guide[c.id].orEmpty()
+          val on = shows.find { now in it.start until it.end }
+          val next = shows.firstOrNull { it.start >= (on?.end ?: now) }
+          ZSurface({ pick(i) }, (if (i == current) Modifier.focusRequester(here) else Modifier).fillMaxWidth(), selected = i == current, container = Z.Card.copy(alpha = 0.7f)) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+              Text(if (c.num > 0) "${c.num}" else "", Modifier.width(44.dp), style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+              Column(Modifier.weight(1f)) {
+                Text(c.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(on?.let { "Now ${it.title}" }, next?.let { "${hm(it.start)} ${it.title}" }).joinToString("  ·  ").ifEmpty { " " },
+                  style = MaterialTheme.typography.labelSmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              }
+            }
+          }
+        }
       }
     }
   }

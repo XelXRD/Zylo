@@ -69,6 +69,10 @@ import java.util.Locale
 
 class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb) -> List<Item>)? = null) {
   var heroItems by mutableStateOf<List<Item>>(emptyList())
+  private var heroPool = emptyList<Item>() // all the hero could show; a fresh 8 each launch and every 4 hours
+
+  /** A new set of hero titles from the pool. */
+  fun reshuffle() { if (heroPool.isNotEmpty()) { heroItems = heroPool.shuffled().take(8); heroIndex = 0 } }
   var heroIndex by mutableIntStateOf(0)
   var heroFocused by mutableStateOf(false)
   var heroPlaying by mutableStateOf(false)
@@ -95,8 +99,9 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
     }.awaitAll()
     val full = got.filter { it.second.isNotEmpty() } // only rows that have something in them
     // The hero is set before the rows: added afterwards, the list kept the rows in place and pushed the hero off the top.
-    heroItems = hero?.let { h -> runCatching { h(t) }.getOrDefault(emptyList()).filter { it.backdrop != null }.take(8) }.orEmpty()
-      .ifEmpty { if (hero != null) full.firstOrNull()?.second?.filter { it.backdrop != null }?.take(8).orEmpty() else emptyList() }
+    heroPool = hero?.let { h -> runCatching { h(t) }.getOrDefault(emptyList()).filter { it.backdrop != null } }.orEmpty()
+      .ifEmpty { if (hero != null) full.firstOrNull()?.second?.filter { it.backdrop != null }.orEmpty() else emptyList() }
+    heroItems = heroPool.shuffled().take(8)
     rows = full
     if (rows.isEmpty() && error == null) error = "Couldn't reach TMDB. Check the internet connection."
   }
@@ -107,6 +112,8 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
 fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boolean = false, title: String? = null) {
   val key = store.tmdb
   LaunchedEffect(key) { if (s.loadedFor != key) s.load(Tmdb(key), key) }
+  // The app stays open for days on a TV: new hero titles every 4 hours.
+  if (hero) LaunchedEffect(Unit) { while (true) { delay(4 * 3_600_000L); s.reshuffle() } }
   // Preview timer: restarts on every focus move, so scrolling quickly through a row never starts a trailer.
   LaunchedEffect(s.focused) {
     s.expanded = null
@@ -259,7 +266,8 @@ fun latestReleases(t: Tmdb): List<Item> {
   val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.UK)
   val now = Date()
   val from = Date(now.time - 90L * 86_400_000)
-  return t.list("/discover/movie?region=GB&with_release_type=4%7C5&release_date.gte=${fmt.format(from)}&release_date.lte=${fmt.format(now)}&sort_by=popularity.desc&vote_count.gte=20", "movie")
+  val path = "/discover/movie?region=GB&with_release_type=4%7C5&release_date.gte=${fmt.format(from)}&release_date.lte=${fmt.format(now)}&sort_by=popularity.desc&vote_count.gte=20"
+  return (t.list(path, "movie") + runCatching { t.list("$path&page=2", "movie") }.getOrDefault(emptyList())).distinctBy { it.key } // ~40 to choose from
 }
 
 @Composable
@@ -437,8 +445,8 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
     Text(title, Modifier.padding(horizontal = Z.Pad), style = MaterialTheme.typography.displaySmall)
     LazyRow(Modifier.focusRequester(b.chips).focusRestorer(), contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
       // Can't decide? A few questions, then a pick (Quiz.kt).
-      if (!b.anime) item { Chip("✦ Pick for Me", false) { nav.push(Screen.Quiz(b.type)) } }
-      if (!b.anime) item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
+      item { Chip("✦ Pick for Me", false) { nav.push(Screen.Quiz(if (b.anime) "anime" else b.type)) } }
+      item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
       itemsIndexed(listOf("Popular", "Top Rated", "New Releases")) { i, label -> Chip(label, b.sort == i) { pick(i, b.genre) } }
       item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
       item { Chip("All Genres", b.genre == null) { pick(b.sort, null) } }

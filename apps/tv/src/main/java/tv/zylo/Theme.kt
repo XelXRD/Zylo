@@ -5,6 +5,8 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.ui.input.key.*
+import androidx.compose.ui.composed
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.ui.layout.layout
@@ -46,6 +48,7 @@ object Z {
   val Surface = Color(0xFF191A1E)
   val Card = Color(0xFF222329)
   val Elevated = Color(0xFF292A31)
+  val Focus = Color(0xFF3A3B45) // a focused panel: lighter than Elevated, with a white outline
   val Text = Color(0xFFF5F5F5)
   val Text2 = Color(0xFFA4A5AB)
   val Muted = Color(0xFF73747D)
@@ -226,17 +229,43 @@ fun ZCard(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composab
 /** Clickable row/tab surface: transparent, white with dark text when focused. */
 @Composable
 fun ZSurface(onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boolean = false, container: Color = Color.Transparent, onLongClick: (() -> Unit)? = null, content: @Composable BoxScope.() -> Unit) = Surface(
-  onClick, modifier, onLongClick = onLongClick,
+  onClick, if (onLongClick != null) modifier.okKeys(onClick, onLongClick) else modifier,
   shape = ClickableSurfaceDefaults.shape(Z.Small),
+  // Focus: a lighter panel and a white outline, not a white fill — text inside keeps its own colours, so a white fill
+  // made white text vanish.
   colors = ClickableSurfaceDefaults.colors(
     containerColor = if (selected) Z.Red.copy(alpha = 0.18f) else container,
     contentColor = if (selected) Z.Text else Z.Text2,
-    focusedContainerColor = Z.Text,
-    focusedContentColor = Z.Bg,
+    focusedContainerColor = Z.Focus,
+    focusedContentColor = Z.Text,
   ),
+  border = ClickableSurfaceDefaults.border(focusedBorder = Border(BorderStroke(2.dp, Z.Text), shape = Z.Small)),
   scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = Z.Press),
   content = content,
 )
+
+/**
+ * OK pressed and released: [click]. OK held (the centre button on a remote, about half a second): [hold], and the
+ * release doesn't click. Handled here because remotes send a held OK as repeated key presses, which the TV
+ * library's own long-click didn't pick up.
+ */
+fun Modifier.okKeys(click: () -> Unit, hold: () -> Unit): Modifier = composed {
+  var held by remember { mutableStateOf(false) }
+  var down by remember { mutableStateOf(false) }
+  onPreviewKeyEvent { e ->
+    val ok = e.key == Key.DirectionCenter || e.key == Key.Enter || e.key == Key.NumPadEnter
+    if (!ok) return@onPreviewKeyEvent false
+    when (e.type) {
+      KeyEventType.KeyDown -> {
+        if (e.nativeKeyEvent.repeatCount == 0) { down = true; held = false }
+        else if (!held && down) { held = true; hold() }
+        true
+      }
+      KeyEventType.KeyUp -> { if (down && !held) click(); down = false; held = false; true }
+      else -> false
+    }
+  }
+}
 
 /** A still placeholder in the shape of what's coming (no shimmer: it's quieter, and loads are short). */
 @Composable

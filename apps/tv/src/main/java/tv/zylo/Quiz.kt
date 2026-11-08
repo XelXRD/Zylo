@@ -40,8 +40,19 @@ data class Question(val ask: String, val answers: List<Answer>)
 fun quiz(type: String): List<Question> {
   val year = Calendar.getInstance().get(Calendar.YEAR)
   val date = if (type == "movie") "primary_release_date" else "first_air_date"
-  val tv = type == "tv"
-  return listOf(
+  val tv = type != "movie"
+  // Anime: TMDB's animation genre (16) AND the mood's genre (a comma means both), Japanese titles only (quizPath).
+  val mood = if (type == "anime") Question("What are you in the mood for?", listOf(
+    Answer("Big battles", "Action, adventure", "&with_genres=16,10759"),
+    Answer("A laugh", "Comedy", "&with_genres=16,35"),
+    Answer("Another world", "Fantasy, isekai, sci-fi", "&with_genres=16,10765"),
+    Answer("All the feels", "Drama, romance", "&with_genres=16,18"),
+    Answer("A mystery", "Mystery, thriller", "&with_genres=16,9648"),
+    Answer("Something dark", "Crime, horror", "&with_genres=16,80"),
+    Answer("For everyone", "Family, kids", "&with_genres=16,10751"),
+    Answer("Surprise me", "Any anime"),
+  )) else null
+  return (listOfNotNull(mood) + listOf(
     Question("What are you in the mood for?", listOf(
       Answer("A laugh", "Comedy", "&with_genres=35"),
       Answer("Edge of my seat", if (tv) "Action, crime" else "Action, thriller", if (tv) "&with_genres=10759|80" else "&with_genres=28|53"),
@@ -80,13 +91,17 @@ fun quiz(type: String): List<Question> {
       Answer("Hidden gems", "Great, less known", "&vote_average.gte=7&vote_count.gte=80&vote_count.lte=900"),
       Answer("Anything goes", "Just pick"),
     )),
-  )
+  )).let { qs -> if (mood != null) qs.filterIndexed { i, _ -> i != 1 } else qs } // anime: its own moods instead
 }
 
 /** The discover search for a set of answers. */
 fun quizPath(type: String, answers: List<Answer>, page: Int = 1) =
-  "/discover/$type?sort_by=popularity.desc&include_adult=false&page=$page" + answers.joinToString("") { it.params } +
-    (if (answers.none { "vote_count" in it.params }) "&vote_count.gte=50" else "")
+  "/discover/${media(type)}?sort_by=popularity.desc&include_adult=false&page=$page" + answers.joinToString("") { it.params } +
+    (if (answers.none { "vote_count" in it.params }) "&vote_count.gte=50" else "") +
+    (if (type == "anime") "&with_original_language=ja" + (if (answers.none { "with_genres" in it.params }) "&with_genres=16" else "") else "")
+
+/** What TMDB calls it: anime is series. */
+fun media(type: String) = if (type == "anime") "tv" else type
 
 /** Whether this title's been watched, here or on Trakt (for a series: any episode). */
 fun seenBefore(store: Store, item: Item) =
@@ -96,8 +111,8 @@ fun seenBefore(store: Store, item: Item) =
 fun quizDeck(store: Store, t: Tmdb, type: String, answers: List<Answer>, rnd: Random = Random): List<Item> {
   val first = t.get(quizPath(type, answers))
   val pages = first.optInt("total_pages", 1).coerceIn(1, 15)
-  val more = (2..pages).shuffled(rnd).take(2).flatMap { p -> runCatching { t.list(quizPath(type, answers, p), type) }.getOrDefault(emptyList()) }
-  val all = (t.safe(first.optJSONArray("results")?.objects()?.mapNotNull { Tmdb.item(it, type) }.orEmpty()) + more).distinctBy { it.key }.filter { it.backdrop != null }
+  val more = (2..pages).shuffled(rnd).take(2).flatMap { p -> runCatching { t.list(quizPath(type, answers, p), media(type)) }.getOrDefault(emptyList()) }
+  val all = (t.safe(first.optJSONArray("results")?.objects()?.mapNotNull { Tmdb.item(it, media(type)) }.orEmpty()) + more).distinctBy { it.key }.filter { it.backdrop != null }
   val seen = answers.firstNotNullOfOrNull { it.seen }
   return all.filter { seen == null || seenBefore(store, it) == seen }.shuffled(rnd)
 }
@@ -124,7 +139,7 @@ private fun QuestionStep(type: String, questions: List<Question>, step: Int, ans
   val out = ms(120)
   Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad, vertical = 44.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Text(if (type == "movie") "PICK A FILM FOR ME" else "PICK A SERIES FOR ME", style = MaterialTheme.typography.labelLarge, color = Z.Red)
+      Text(when (type) { "movie" -> "PICK A FILM FOR ME"; "anime" -> "PICK AN ANIME FOR ME"; else -> "PICK A SERIES FOR ME" }, style = MaterialTheme.typography.labelLarge, color = Z.Red)
       Spacer(Modifier.weight(1f))
       // Progress: one pip per question.
       questions.indices.forEach { i ->

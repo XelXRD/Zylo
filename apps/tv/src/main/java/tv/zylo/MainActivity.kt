@@ -62,7 +62,7 @@ enum class Section(val label: String) { Home("Home"), Movies("Movies"), Series("
 /** State that outlives a screen, so rows, scroll and focus are where you left them when you come back. */
 class UiState(store: Store) {
   var section by mutableStateOf(Section.Home)
-  var stayInNav by mutableStateOf(false) // just switched section from the top bar: leave focus there
+  var stayInNav by mutableStateOf(true) // just opened, or switched section from the top bar: leave focus there
   val home = RowsState({ homeRows(store) }, ::latestReleases)
   val discover = RowsState({ DISCOVER_ROWS })
   val browse = mapOf(Section.Movies to BrowseState("movie"), Section.Series to BrowseState("tv"), Section.Anime to BrowseState("tv", anime = true))
@@ -182,6 +182,8 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
 @Composable
 fun TopNav(ui: UiState, nav: Nav) {
   val active = remember { FocusRequester() }
+  // Opening the app: focus starts (and stays) on the current section in the top bar, not on the hero's Play.
+  LaunchedEffect(Unit) { if (ui.stayInNav) { delay(120); runCatching { active.requestFocus() } } }
   fun go(s: Section) {
     ui.stayInNav = true
     ui.section = s

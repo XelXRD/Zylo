@@ -30,6 +30,39 @@ import java.text.SimpleDateFormat
 import java.util.Date
 import java.util.Locale
 
+/**
+ * Where-to-watch results kept per fixture until it's over (start + 4 hours; tournaments: end of the day), so a match
+ * is searched once, not every time it's focused. Saved on the TV (global key "sports_found").
+ */
+object SeenOn {
+  private var memo: org.json.JSONObject? = null
+  private fun all(store: Store) = memo ?: runCatching { org.json.JSONObject(store.str("sports_found")) }.getOrElse { org.json.JSONObject() }.also { memo = it }
+  private fun until(e: SportEvent) = if (e.allDay) e.start - e.start % 86_400_000L + 2 * 86_400_000L else e.start + 4 * 3_600_000L
+
+  fun get(store: Store, e: SportEvent): List<WatchOption>? {
+    val o = all(store).optJSONObject(e.id) ?: return null
+    if (minOf(o.optLong("until"), until(e)) < System.currentTimeMillis()) return null // over (or moved)
+    return o.optJSONArray("options")?.objects()?.map { w ->
+      WatchOption(w.optString("label"), w.optJSONObject("p")?.let { Programme(it.optString("title"), "", it.optLong("start"), it.optLong("end")) },
+        w.optJSONObject("channel")?.let(Xtream::channelOf), w.optString("from"), w.optBoolean("guessed"))
+    }
+  }
+
+  fun put(store: Store, e: SportEvent, list: List<WatchOption>) {
+    val now = System.currentTimeMillis()
+    val o = all(store)
+    o.keys().asSequence().toList().forEach { if (o.optJSONObject(it)?.optLong("until") ?: 0 < now) o.remove(it) } // lapsed
+    o.put(e.id, org.json.JSONObject().put("until", until(e)).put("options", org.json.JSONArray(list.map { w ->
+      org.json.JSONObject().put("label", w.label).put("from", w.from).put("guessed", w.guessed)
+        .put("p", w.programme?.let { org.json.JSONObject().put("title", it.title).put("start", it.start).put("end", it.end) })
+        .put("channel", w.channel?.let(Xtream::channelJson))
+    })))
+    store.put("sports_found", o.toString())
+  }
+
+  fun forget(store: Store, e: SportEvent) { all(store).remove(e.id); store.put("sports_found", all(store).toString()) }
+}
+
 class SportsState {
   var events by mutableStateOf<List<SportEvent>?>(null)
   var loadedAt = 0L
@@ -73,11 +106,14 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
   // Where to watch the focused event: searched across every guide loaded, after a moment on it.
   LaunchedEffect(s.focused, s.index, s.links, Epg.changes) {
     val e = s.focused ?: return@LaunchedEffect
+    // Found before (and the match isn't over): show it at once, no search. An empty result is looked for again.
+    SeenOn.get(store, e)?.takeIf { it.isNotEmpty() }?.let { s.options = it; return@LaunchedEffect }
     val idx = s.index ?: return@LaunchedEffect
     s.options = null
     delay(3_000) // rest on a match for 3 s before searching the guides (OK searches at once)
     val rows = live.guide.toMap() // a copy: the guide keeps loading rows while this runs
     s.options = withContext(Dispatchers.Default) { runCatching { options(store, e, idx, Epg.current, rows) }.getOrDefault(emptyList()) }
+      .also { SeenOn.put(store, e, it) }
   }
   val now = remember { System.currentTimeMillis() }
   val shown = s.events.orEmpty().filter { (s.sport == "All" || it.sport == s.sport) && (it.start > now - 4 * 3_600_000L || it.live) }
@@ -118,9 +154,11 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
 private suspend fun watchNow(store: Store, ctx: android.content.Context, s: SportsState, live: LiveState, nav: Nav) {
   val idx = s.index
   val e = s.focused
+  if (s.options == null && e != null) s.options = SeenOn.get(store, e)
   if (s.options == null && idx != null && e != null) {
     val rows = live.guide.toMap()
     s.options = withContext(Dispatchers.Default) { runCatching { options(store, e, idx, Epg.current, rows) }.getOrDefault(emptyList()) }
+      .also { SeenOn.put(store, e, it) }
   }
   val o = s.options
   val pick = o?.firstOrNull { it.channel != null && !it.guessed } ?: o?.firstOrNull { it.channel != null }
@@ -245,13 +283,13 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
       Text("Which of your channels is it? Closest names first; Zylo remembers your choice for every event on it.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
       Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ZButton("Search by Name", { ask(ctx, "Channel name", query) { if (it.isNotBlank()) query = it } }, Modifier.focusRequester(first))
-        if (w.channel != null) ZButton("Unlink", { Sports.link(store, w.label, null); s.linking = null; s.links++ })
+        if (w.channel != null) ZButton("Unlink", { Sports.link(store, w.label, null); s.focused?.let { SeenOn.forget(store, it) }; s.linking = null; s.links++ })
       }
       if (s.index == null) Text("Loading your channels…", color = Z.Text2)
       else if (ranked.isEmpty()) Text("No channel names look like \"$query\". Search by another name.", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
       LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items(ranked, key = { it.id }) { c ->
-          ZSurface({ Sports.link(store, w.label, c); s.linking = null; s.links++ }, Modifier.fillMaxWidth()) {
+          ZSurface({ Sports.link(store, w.label, c); s.focused?.let { SeenOn.forget(store, it) }; s.linking = null; s.links++ }, Modifier.fillMaxWidth()) {
             Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
               Box(Modifier.size(34.dp, 24.dp)) { c.logo?.let { AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) } }
               Spacer(Modifier.width(10.dp))
