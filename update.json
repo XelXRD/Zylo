@@ -1,5 +1,5 @@
 {
-  "version": "0.23.2",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.23.2.apk",
-  "notes": "What's new in 0.23.2\n\n• Settings > Playback > Pick a source for me: Play chooses a source once 1, 3, 5, 10 or 20 are found, or turn it Off to always choose from the list yourself. With fewer than your number, the list opens for you to pick.\n• The player's controls and timeline come up every time you press OK.\n• Back while watching goes to Choose Source, so you can try another source.\n• Settings > Playback > Audio language: plays your language's audio whenever the file has it."
+  "version": "0.24.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.24.0.apk",
+  "notes": "What's new in 0.24.0\n\n• Home: the row you move to sits in the middle of the screen, never cut off at the bottom. Each row ends with Show More, which opens the whole list.\n• Back on Home, Movies, Series, Anime, Live TV, Discover or My List goes up to the top bar. Everywhere else it goes back one step.\n• Pick for Me: Back on your pick goes straight back to Movies, Series or Anime.\n• Settings > Playback > Anime audio: prefer dubs (dubbed and dual-audio sources first) or the original Japanese with subtitles.\n• Live TV: OK shows the info bar (press OK again for the channel list), and Up/Down change channel.\n• My List: with Trakt connected, choose where to save it — My List, your Trakt watchlist or any of your Trakt lists.\n• Settings: moving left from a page goes back to that page's own entry instead of jumping to another section.\n• The Zylo logo in the top bar can't be selected any more.\n• Subtitles set to Off now stay off, even when the file marks a foreign track as its default."
 }
