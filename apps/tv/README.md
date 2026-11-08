@@ -2,22 +2,60 @@
 
 A standalone native app for Android TV / NVIDIA Shield. No server: it talks to TMDB, your Stremio addons and your debrid service straight from the TV. Visual direction: *Zylo – Design System & Android TV UI Guidelines* and the concept image.
 
-- **Top navigation** (no global sidebar): Zylo logo, Home, Movies, Series, Anime, Discover, My List, Search, Settings.
-- **Home:** featured hero (Play / More Info / My List), Continue Watching, My List, Trending Movies, Popular Series, Popular Anime, Because You Watched…, In Cinemas, New Episodes, Top Rated. Rows only show when they have something in them.
-- **Previews:** rest on a poster for 0.8 s (`Z.PreviewDelay`) and it widens into a 16:9 card with the backdrop, title logo and details; then a YouTube trailer (official IFrame Player API) fills the whole card and the text fades away. Muted unless Settings > Playback > Trailer sound is on; previews can be turned off there too. Rows keep the focused card at the left edge, Netflix-style.
-- **Movies / Series / Anime:** poster grids with Popular / Top Rated / New Releases and genre filters.
-- **Detail page:** poster, age rating, runtime or seasons, rating, Play / Resume, Choose Source, My List, Trailer (opens YouTube), Mark as Watched; tabs for Episodes, Overview (cast, crew, genres) and More Like This.
-- **Choose Source:** every addon and debrid source, with only the status Zylo actually knows (Available, Ready, Not checked, Unavailable). Play picks the best and falls back to the next one, saying why.
-- **Player:** Media3 ExoPlayer with subtitle/audio track choice, red progress bar, title and source overlay, resume.
-- **Settings** (its own sidebar): Playback, Integrations, Addons, Debrid Services, About. A service only shows as Connected after a real test.
-- **Trakt:** sign in with a code at trakt.tv/activate (your own Trakt API app's Client ID). Home gets Your Trakt Watchlist, Recommended For You and Popular on Trakt; My Lists shows your watchlist plus lists you made or liked. Watch history and titles paused on other devices sync in (every 15 minutes or Sync Now), playback scrobbles (80%+ counts as watched), Mark as Watched and My List go back up to Trakt.
-- **AniList / MyAnimeList:** sign in by scanning a QR code on your phone and pasting the result back (the Google TV phone app's keyboard can paste). Finishing an anime episode moves your progress forward, matched with Kometa's anime ID list (handles split cours). Watching / Plan to Watch lists appear in My Lists.
-- **Up Next:** in the last 30 seconds of an episode, the next one (rolling into the next season, never one that hasn't aired) is offered with a 10-second countdown; it then starts from the same kind of source.
-- **Sources:** Play remembers what last played well for each film or series and prefers it (or one like it for the next episode). Settings > Playback > Maximum quality keeps Play below 4K / 1080p / 720p; higher sources stay in Choose Source.
-- **Subtitles:** from every addon that offers them (the Stremio subtitles resource), plus those inside the file. Settings > Playback > Subtitles turns your language on automatically.
-- **Plex and Jellyfin** (Settings > Media Servers): Plex signs in with a code at plex.tv/link and finds your server; Jellyfin uses its address, username and password. Titles are matched by TMDB id and listed first in Choose Source as Personal Library.
-- **Profiles:** Who's watching? at launch when there's more than one; each profile keeps its own Continue Watching, My List, Trakt / AniList / MyAnimeList sign-ins, remembered sources and subtitle language. Keys, addons and servers are shared. Avatar at the right of the top bar; manage in Settings > Profiles.
-- **fanart.tv** (optional key): title logos, clean backgrounds and landscape thumbs on Home, cards and detail pages. Without it, TMDB's logos are used where they exist.
+## Features
+
+### Watching
+- **Home** with a featured hero (trailer plays after a moment, a new set of titles every 4 hours), Continue Watching (where you stopped plus the next episode of every series you're watching), Starting Soon and On Live TV Now, My List, your Trakt watchlist and recommendations, Because You Watched / Because You Liked, Comfort Rewatch, Under 90 Minutes, Hidden Gems, Something Different, trending and top rated rows.
+- **Previews:** rest on a poster and it widens into a card with artwork, then a muted trailer.
+- **Rows** keep the focused title at the left; the row you're on sits in the middle of the screen; Up and Down keep your position; every row ends in **Show More**.
+- **Movies, Series and Anime** grids with Popular / Top Rated / New and genre filters. Anime series live only in the Anime section.
+- **Title pages:** Play / Resume, Choose Source, My List, Trailer, Mark as Watched; Episodes, Overview, Cast & Crew and More Like This tabs; thumbs up or down.
+- **Cast & crew pages:** everything a person has been in, with what you've seen ticked.
+- **One search** for films, series, anime, your live channels, the TV guide and today's fixtures.
+
+### Playing
+- **Sources** from Stremio addons, Syncler Express packages, Plex and Jellyfin, played through TorBox, Real-Debrid or Premiumize. Choose Source shows only what Zylo actually knows about each one.
+- **Pick a source for me:** Play picks the best once 1, 3, 5, 10 or 20 sources are found, or never (you always choose). Remembers what played well and prefers the same kind next time. Quality cap (4K / 1080p / 720p).
+- **Player:** Media3, controls on OK, Back returns to Choose Source to try another.
+- **Skip Intro, Skip Recap and Skip Credits** from IntroDB (and AniSkip for anime).
+- **Up Next** with a countdown; the next episode's sources are found during the last few minutes so it starts at once.
+- **Pause screen:** paused for a few seconds, the picture dims and shows what you're watching.
+- **Subtitles** from addons and the file; size, background and position; move them 0.5 s at a time when they're out of step (press Up); your language turns on automatically. Off means off.
+- **Audio language** per profile; **anime audio**: dubs first, or the original Japanese with subtitles.
+- **After a film:** a quick thumbs up or down, sent to Trakt as a rating.
+
+### Discover
+- **Movie Night Match:** everyone scans a QR code and swipes on their phone; the first film or series you all say yes to wins.
+- **Rabbit Hole:** an entertainment web. Jump from a film to its director, cast, composer, genres, franchise and themes, and on from each of those. Back retraces the trail.
+- **Deep Cuts:** case files of things almost nobody has seen: acclaimed but overlooked, tiny but brilliant, world cinema, forgotten classics, cancelled series.
+- **Franchise Journeys:** Marvel, Star Wars, Alien, Predator, DC, Middle-earth, Wizarding World, Jurassic, Bond, Mission: Impossible, Fast & Furious, Dragon Ball, Attack on Titan, Gundam or any franchise you search for, in recommended, story or release order, with spin-off series and what's coming.
+- **Double Feature:** two films that belong together (same director, original and remake, two sides of a subject, light then dark), with a name and the reason.
+- **Moodboard:** pick a feeling (Rainy Sunday, Late-Night Paranoia, Nostalgic Childhood, Dystopian Future, Psychological Mind Games, Summer Adventure, Existential Sci-Fi and more), not a genre.
+- **Help Me Choose:** *Pick for Me* (a five-question quiz with a slot-machine reveal, trailer and re-roll) or *This or That* (two at a time; it learns what you're drawn to until one is left).
+- **Watch Challenges:** curated lists such as the 10 greatest sci-fi films, 7 days of horror, Nolan, Kubrick, Tarantino, Ghibli and Pixar, ticked off automatically from your history (Trakt included).
+- **Time Machine:** any year from 1950: its biggest films, TV, anime, faces, music and news, and hidden gems.
+- **Blind Date:** a film picked for you with only clues. Commit, then it's revealed.
+- **Calendar:** new episodes and films over the next four weeks, with reminders on the day.
+- **Zylo Wrapped:** your year from Trakt: hours watched, films, episodes, biggest binge, top genres, busiest month.
+
+### Live TV
+- **Xtream Codes** provider with categories, a programme guide, favourites (hold OK), reminders and catch-up.
+- **Better guide** from your provider plus free epgshare01 guides, refreshed daily.
+- **Player:** Up/Down change channel, Left for the last channel, number keys, OK for the info bar then the channel list.
+- **Sports:** fixtures from ESPN with where to watch, matched to your channels from the guide; tap Watch to go straight there.
+- Hidden on kids profiles.
+
+### Your accounts
+- **Trakt:** watch history, progress and paused titles sync in; playback scrobbles; watchlist, your lists, ratings and Mark as Watched go back up. **My List** can save to Zylo, your Trakt watchlist or any of your Trakt lists.
+- **AniList and MyAnimeList:** anime progress moves forward as you watch; their lists appear in My Lists.
+- **Profiles** with their own history, lists, sign-ins and languages; **kids profiles** filtered by rating (U, PG, 12, 15); **4-digit PINs** on grown-up profiles and on Settings from a kids profile.
+
+### Everything else
+- **Guided setup** on first launch: TMDB, accounts, debrid, addons, Live TV.
+- **Add addons from your phone:** scan a QR code and paste the link (long links break when typed on a TV).
+- **Updates** checked when Zylo opens, downloaded and installed from this repository.
+- **Background activity** shown in the top bar (channels, guide, Trakt, update).
+- **Back** goes up to the top bar on the main pages, and one step back everywhere else.
 
 Design tokens (colours, type scale, radii, timings) are in `Theme.kt` (`object Z`). Font: Inter. The Z mark is a vector redraw of the concept logo; swap in the original artwork when available.
 
@@ -31,4 +69,4 @@ Signed with `debug.keystore` (same key as earlier builds), so it installs over t
 
 ## Not yet
 
-Emby (Jellyfin's API is close, but untested), notifications, rating and sharing, Trakt ratings and custom-list editing, profile PINs.
+Emby (Jellyfin's API is close, but untested), notifications, sharing, Xtream films and series.
