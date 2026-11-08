@@ -13,8 +13,8 @@ android {
     applicationId = "tv.zylo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 2
-    versionName = "0.8.0"
+    versionCode = 3
+    versionName = "0.9.0"
   }
   // Same key as the old WebView build, so this installs over it.
   signingConfigs { getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "zylo"; keyPassword = "android" } }
@@ -29,6 +29,8 @@ dependencies {
   implementation(platform("androidx.compose:compose-bom:2025.10.01"))
   implementation("androidx.compose.ui:ui")
   implementation("androidx.compose.foundation:foundation")
+  implementation("androidx.compose.material:material-icons-core")
+  implementation("androidx.lifecycle:lifecycle-runtime-compose:2.9.4")
   implementation("androidx.activity:activity-compose:1.11.0")
   implementation("androidx.tv:tv-material:1.0.1")
   implementation("androidx.media3:media3-exoplayer:1.8.0")
