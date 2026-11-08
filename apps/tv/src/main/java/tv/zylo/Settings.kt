@@ -171,6 +171,20 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     lang = SUB_LANGS[(SUB_LANGS.indexOf(lang) + 1) % SUB_LANGS.size]
     store.subLang = lang
   }
+  var audio by remember { mutableStateOf(store.str("audiolang")) }
+  Choice("Audio language", "Played in this language whenever the file has it (each profile has its own).", when (audio) {
+    "" -> "As the TV (${languageName(java.util.Locale.getDefault().language.ifEmpty { "en" })})"; "file" -> "The file's default"; else -> languageName(audio)
+  }) {
+    val all = listOf("") + SUB_LANGS.drop(1) + "file"
+    audio = all[(all.indexOf(audio) + 1) % all.size]
+    store.put("audiolang", audio)
+  }
+  var autoNext by remember { mutableStateOf(Autoplay.label(store)) }
+  Choice("Play next episode", "Plays the next episode on its own, up to a few in a row, then waits. Off: choose it from the list.", autoNext) {
+    val i = Autoplay.CHOICES.indexOfFirst { it.second == autoNext }
+    store.put("autonext", Autoplay.CHOICES[(i + 1) % Autoplay.CHOICES.size].first.toString())
+    autoNext = Autoplay.label(store)
+  }
   var size by remember { mutableStateOf(SubStyle.size(store).first) }
   Choice("Subtitle size", "How big subtitles are in the player.", size) {
     size = SubStyle.SIZES[(SubStyle.SIZES.indexOfFirst { it.first == size } + 1) % SubStyle.SIZES.size].first

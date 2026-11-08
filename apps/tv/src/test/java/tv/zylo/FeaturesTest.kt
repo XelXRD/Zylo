@@ -471,6 +471,18 @@ class ExtrasTest {
     assertEquals("1234", Pins.of(st, "main"))
   }
 
+  @Test fun autoplayLimitAndAudio() {
+    val st = store()
+    assertEquals(5, Autoplay.limit(st)) // default: five in a row
+    Autoplay.pending = false; Autoplay.started(); assertEquals(0, Autoplay.streak) // you pressed Play: count starts again
+    repeat(5) { Autoplay.streak++; Autoplay.pending = true; Autoplay.started() }
+    assertTrue(Autoplay.streak >= Autoplay.limit(st)) // the sixth waits for you
+    st.put("autonext", "0"); assertEquals(0, Autoplay.limit(st))
+    st.put("autonext", "-1"); assertEquals(Int.MAX_VALUE, Autoplay.limit(st))
+    st.put("audiolang", "fr"); assertEquals("fr", st.audioLang)
+    st.put("audiolang", "file"); assertNull(st.audioLang)
+  }
+
   @Test fun startingSoonAndBusy() {
     val st = store()
     val c = Channel(1, 1, "BBC One", null, "1")
