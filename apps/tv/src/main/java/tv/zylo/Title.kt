@@ -24,6 +24,7 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
@@ -103,11 +104,11 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val selectedTab = remember { FocusRequester() }
   Box(Modifier.fillMaxSize()) {
     AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg, 0.5f to Z.Bg.copy(alpha = 0.85f), 1f to Z.Bg.copy(alpha = 0.35f))))
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 0.8f to Z.Bg)))
+    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.95f), 0.45f to Z.Bg.copy(alpha = 0.72f), 1f to Z.Bg.copy(alpha = 0.12f))))
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.4f to Color.Transparent, 0.85f to Z.Bg)))
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = Z.Pad, end = Z.Pad, top = 36.dp, bottom = 40.dp)) {
       Row {
-        Artwork(img(item.poster, "w342"), item.title, Modifier.width(168.dp).aspectRatio(2f / 3f).clip(Z.Medium))
+        Artwork(img(item.poster, "w342"), item.title, Modifier.width(168.dp).aspectRatio(2f / 3f).shadow(24.dp, Z.Medium).clip(Z.Medium))
         Spacer(Modifier.width(32.dp))
         Column(Modifier.weight(1f)) {
           TitleLogo(look, item.title, MaterialTheme.typography.displayMedium, 380.dp, 100.dp)
@@ -378,7 +379,7 @@ fun PlayerPage(store: Store, s: Screen.Play) {
   var controls by remember { mutableStateOf(false) }
   var view by remember { mutableStateOf<PlayerView?>(null) }
   val player = remember {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.11.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
+    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.12.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(http)).build().apply {
       setMediaItem(MediaItem.fromUri(s.url))
       store.watch(key)?.takeIf { it.started && !it.percent }?.let { seekTo(it.pos) }

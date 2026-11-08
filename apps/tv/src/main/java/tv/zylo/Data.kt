@@ -22,7 +22,7 @@ fun http(url: String, method: String = "GET", headers: Map<String, String> = emp
     }
     c.connectTimeout = 10_000
     c.readTimeout = 20_000
-    c.setRequestProperty("User-Agent", "Zylo/0.11.0")
+    c.setRequestProperty("User-Agent", "Zylo/0.12.0")
     headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
     if (body != null) {
       c.doOutput = true

@@ -4,7 +4,13 @@ package tv.zylo
 import android.graphics.drawable.GradientDrawable
 import android.view.inputmethod.EditorInfo
 import android.widget.EditText
+import androidx.compose.animation.AnimatedContent
 import androidx.compose.animation.Crossfade
+import androidx.compose.animation.SizeTransform
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInVertically
+import androidx.compose.animation.togetherWith
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
@@ -62,6 +68,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
   var heroItems by mutableStateOf<List<Item>>(emptyList())
   var heroIndex by mutableIntStateOf(0)
   var heroFocused by mutableStateOf(false)
+  var heroPlaying by mutableStateOf(false)
   var rows by mutableStateOf<List<Pair<String, List<Item>>>>(emptyList())
   var error by mutableStateOf<String?>(null)
   var loadedFor = ""
@@ -101,84 +108,120 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
     s.expanded = k
   }
   RestoreFocus(s.focus, s.rows.isNotEmpty() && restore)
-  if (s.rows.isEmpty()) return Loading(s.error)
+  if (s.rows.isEmpty()) return if (s.error != null) Loading(s.error) else RowsSkeleton(top = if (hero) 440.dp else 120.dp)
 
   val watching = remember { if (hero) store.continueWatching() else emptyList() }
   val mine = remember { if (hero) store.myList else emptyList() }
   val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows
+  val featured = if (hero) s.heroItems.getOrNull(s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))) else null
   // Focus in the hero keeps the page at the very top, so the hero is never cut off.
   LaunchedEffect(s.heroFocused) { if (s.heroFocused) s.list.animateScrollToItem(0) }
-  LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 76.dp, bottom = 56.dp)) {
-    if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 4.dp), style = MaterialTheme.typography.displaySmall) }
-    if (hero && s.heroItems.isNotEmpty()) item("hero") { HomeHero(store, s, nav) }
-    if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
-    items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = !hero && name == rows.first().first) }
+  val density = LocalDensity.current
+  // The hero's artwork sits behind the whole page and fades away as the rows scroll up over it.
+  val artAlpha by remember {
+    derivedStateOf {
+      if (s.list.firstVisibleItemIndex > 0) 0f
+      else 1f - (s.list.firstVisibleItemScrollOffset / with(density) { 300.dp.toPx() }).coerceIn(0f, 1f)
+    }
+  }
+  Box(Modifier.fillMaxSize()) {
+    if (featured != null) HeroBackdrop(store, s, featured, Modifier.fillMaxSize().alpha(artAlpha))
+    LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 84.dp, bottom = 56.dp)) {
+      if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 14.dp), style = MaterialTheme.typography.displaySmall) }
+      if (featured != null) item("hero") { HeroInfo(store, s, featured, nav) }
+      if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
+      items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = !hero && name == rows.first().first) }
+    }
+  }
+}
+
+/** Placeholder rows in the shape of what's loading. */
+@Composable
+fun RowsSkeleton(top: androidx.compose.ui.unit.Dp) = Column(Modifier.fillMaxSize().padding(start = Z.Pad, top = top), verticalArrangement = Arrangement.spacedBy(16.dp)) {
+  repeat(2) {
+    Skeleton(Modifier.width(160.dp).height(16.dp))
+    Row(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) { repeat(8) { Skeleton(Modifier.width(124.dp).height(186.dp)) } }
+  }
+}
+
+private fun RowsState.moveHero(step: Int) {
+  if (heroItems.isNotEmpty()) heroIndex = (heroIndex.coerceIn(0, heroItems.lastIndex) + step + heroItems.size) % heroItems.size
+}
+
+/**
+ * The featured title's artwork, full-bleed behind the page (and the top bar). While the hero has focus, its trailer
+ * starts after Z.HeroTrailerDelay and the next title follows when it ends; with no trailer it moves on after a while.
+ */
+@Composable
+private fun HeroBackdrop(store: Store, s: RowsState, item: Item, modifier: Modifier) {
+  val look = rememberLook(store, item)
+  val trailer = Tmdb.trailer(look?.details)
+  var trailerOn by remember(item) { mutableStateOf(false) }
+  LaunchedEffect(item, s.heroFocused, trailer) {
+    trailerOn = false
+    s.heroPlaying = false
+    if (!s.heroFocused) return@LaunchedEffect
+    delay(Z.HeroTrailerDelay)
+    if (trailer != null && store.previews) trailerOn = true
+    else { delay(8_000); s.moveHero(1) }
+  }
+  Box(modifier) {
+    Crossfade(look?.background ?: img(item.backdrop, "w1280"), animationSpec = tween(ms(500), easing = Z.EaseInOut), label = "heroArt") { url ->
+      AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    }
+    if (trailerOn) key(trailer) {
+      Trailer(trailer!!, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { s.heroPlaying = it }, onEnded = { s.moveHero(1) }, onFailed = { s.moveHero(1) })
+    }
+    // Readability without a panel: a vignette from the left where the text sits, and a long fade into the rows below.
+    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.92f), 0.42f to Z.Bg.copy(alpha = 0.55f), 0.75f to Color.Transparent)))
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.42f to Color.Transparent, 0.82f to Z.Bg.copy(alpha = 0.92f), 1f to Z.Bg)))
   }
 }
 
 /**
- * Featured latest releases. Left on Play / Right on My List (or the dots) moves between titles. While the hero has
- * focus, the title's trailer starts after Z.HeroTrailerDelay and the next title follows when it ends; with no
- * trailer (or previews off) it moves on after a few seconds.
+ * The hero's text and buttons. Left on Play / Right on My List moves between titles. On a change, the title block
+ * makes one short rise-and-fade; the buttons stay exactly where they are, so focus never jumps.
  */
 @Composable
-fun HomeHero(store: Store, s: RowsState, nav: Nav) {
-  val items = s.heroItems
-  val index = s.heroIndex.coerceIn(0, items.lastIndex)
-  val item = items[index]
-  val look = rememberLook(store, item)
-  val d = look?.details
+private fun HeroInfo(store: Store, s: RowsState, item: Item, nav: Nav) {
   var inList by remember(item) { mutableStateOf(store.inMyList(item)) }
-  var trailerOn by remember(item) { mutableStateOf(false) }
-  var playing by remember(item) { mutableStateOf(false) }
-  val trailer = Tmdb.trailer(d)
-  fun move(step: Int) { s.heroIndex = (index + step + items.size) % items.size }
-  LaunchedEffect(item, s.heroFocused, trailer) {
-    trailerOn = false
-    if (!s.heroFocused) return@LaunchedEffect
-    delay(Z.HeroTrailerDelay)
-    if (trailer != null && store.previews) trailerOn = true
-    else { delay(8_000); move(1) }
-  }
-  val fade by animateFloatAsState(if (playing) 0f else 1f, tween(ms(400)), label = "hero")
   fun Modifier.edge(key: Key, step: Int) = onPreviewKeyEvent { e ->
-    if (e.type == KeyEventType.KeyDown && e.key == key) { move(step); true } else false
+    if (e.type == KeyEventType.KeyDown && e.key == key) { s.moveHero(step); true } else false
   }
-  Box(Modifier.fillMaxWidth().height(380.dp)) {
-    Crossfade(look?.background ?: img(item.backdrop, "w1280"), animationSpec = tween(ms(400)), label = "heroArt") { url ->
-      AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    }
-    if (trailerOn) key(trailer) {
-      Trailer(trailer!!, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { playing = it }, onEnded = { move(1) }, onFailed = { move(1) })
-    }
-    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg, 0.38f to Z.Bg.copy(alpha = 0.7f), 0.72f to Color.Transparent)))
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Z.Bg)))
-    Column(Modifier.align(Alignment.BottomStart).padding(start = Z.Pad, bottom = 14.dp).fillMaxWidth(0.46f)) {
-      Text("LATEST RELEASES", style = MaterialTheme.typography.labelMedium, color = Z.Red)
-      Spacer(Modifier.height(8.dp))
-      TitleLogo(look, item.title, MaterialTheme.typography.displayLarge, 340.dp, 96.dp)
-      MetaLine(Tmdb.meta(item, d), Modifier.padding(top = 10.dp))
-      Rating(item.rating, Modifier.padding(top = 6.dp))
-      // The synopsis steps aside once the trailer is playing.
-      Text(item.overview, Modifier.padding(top = 10.dp).alpha(fade), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
-      Row(Modifier.padding(top = 16.dp).onFocusChanged { s.heroFocused = it.hasFocus }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        ZButton("Play", { nav.play(item) }, Modifier.focusMemory(s.focus, "hero/play", default = true).edge(Key.DirectionLeft, -1), primary = true, icon = Icons.Filled.PlayArrow)
-        ZButton("More Info", { nav.push(Screen.Title(item)) }, Modifier.focusMemory(s.focus, "hero/info"), icon = Icons.Filled.Info)
-        ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(s.focus, "hero/list").edge(Key.DirectionRight, 1), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
-      }
-      Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
-        items.indices.forEach { i -> Box(Modifier.width(if (i == index) 18.dp else 6.dp).height(4.dp).background(if (i == index) Z.Text else Z.Muted, Z.Small)) }
+  val fade by animateFloatAsState(if (s.heroPlaying) 0f else 1f, tween(ms(400), easing = Z.EaseOut), label = "synopsis")
+  val enter = ms(300)
+  Column(Modifier.fillMaxWidth().height(440.dp).padding(start = Z.Pad, bottom = 22.dp), verticalArrangement = Arrangement.Bottom) {
+    Box(Modifier.fillMaxWidth(0.48f).height(206.dp), contentAlignment = Alignment.BottomStart) {
+      AnimatedContent(item, transitionSpec = {
+        (fadeIn(tween(enter, delayMillis = enter / 6, easing = Z.EaseOut)) + slideInVertically(tween(enter, easing = Z.EaseOut)) { it / 14 }) togetherWith
+          fadeOut(tween(enter / 3)) using SizeTransform(clip = false)
+      }, contentAlignment = Alignment.BottomStart, label = "heroText") { shown ->
+        val look = rememberLook(store, shown)
+        Column {
+          TitleLogo(look, shown.title, MaterialTheme.typography.displayLarge, 360.dp, 100.dp)
+          Row(Modifier.padding(top = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+            MetaLine(Tmdb.meta(shown, look?.details), color = Z.Text.copy(alpha = 0.8f))
+            Spacer(Modifier.width(14.dp))
+            Rating(shown.rating)
+          }
+          // The synopsis steps aside once the trailer is playing.
+          Text(shown.overview, Modifier.padding(top = 10.dp).alpha(fade), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        }
       }
     }
+    Row(Modifier.padding(top = 18.dp).onFocusChanged { s.heroFocused = it.hasFocus }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+      ZButton("Play", { nav.play(item) }, Modifier.focusMemory(s.focus, "hero/play", default = true).edge(Key.DirectionLeft, -1), primary = true, icon = Icons.Filled.PlayArrow)
+      ZButton("More Info", { nav.push(Screen.Title(item)) }, Modifier.focusMemory(s.focus, "hero/info"), icon = Icons.Filled.Info)
+      ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(s.focus, "hero/list").edge(Key.DirectionRight, 1), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+    }
+    Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+      val index = s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))
+      s.heroItems.indices.forEach { i ->
+        val w by animateDpAsState(if (i == index) 20.dp else 6.dp, tween(ms(240), easing = Z.EaseOut), label = "dot")
+        Box(Modifier.width(w).height(4.dp).background(if (i == index) Z.Text else Z.Text.copy(alpha = 0.3f), Z.Small))
+      }
+    }
   }
-}
-
-/** Films released for home viewing (digital or physical) in the last three months, most popular first. */
-fun latestReleases(t: Tmdb): List<Item> {
-  val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.UK)
-  val now = Date()
-  val from = Date(now.time - 90L * 86_400_000)
-  return t.list("/discover/movie?region=GB&with_release_type=4%7C5&release_date.gte=${fmt.format(from)}&release_date.lte=${fmt.format(now)}&sort_by=popularity.desc&vote_count.gte=20", "movie")
 }
 
 /** My List, mirrored to the Trakt watchlist when Trakt is connected. Returns true if it's now on the list. */
@@ -188,12 +231,20 @@ fun toggleList(store: Store, item: Item) = store.toggleMyList(item).also { Trakt
 fun Rating(rating: Double, modifier: Modifier = Modifier) {
   if (rating <= 0) return
   Row(modifier, verticalAlignment = Alignment.CenterVertically) {
-    Glyph(Icons.Filled.Star, 15.dp, Z.Red)
+    Glyph(Icons.Filled.Star, 14.dp, Z.Red)
     Spacer(Modifier.width(5.dp))
-    Text("%.1f/10".format(rating), style = MaterialTheme.typography.labelLarge)
-    Spacer(Modifier.width(6.dp))
+    Text("%.1f".format(rating), style = MaterialTheme.typography.labelLarge, color = Z.Text)
+    Spacer(Modifier.width(5.dp))
     Text("TMDB", style = MaterialTheme.typography.labelSmall, color = Z.Muted)
   }
+}
+
+/** Films released for home viewing (digital or physical) in the last three months, most popular first. */
+fun latestReleases(t: Tmdb): List<Item> {
+  val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.UK)
+  val now = Date()
+  val from = Date(now.time - 90L * 86_400_000)
+  return t.list("/discover/movie?region=GB&with_release_type=4%7C5&release_date.gte=${fmt.format(from)}&release_date.lte=${fmt.format(now)}&sort_by=popularity.desc&vote_count.gte=20", "movie")
 }
 
 @Composable
@@ -232,7 +283,7 @@ fun PivotRow(content: @Composable () -> Unit) {
 @Composable
 fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
   // Grows smoothly, shrinks at once: an animated shrink drags the next card sideways while the row scrolls.
-  val width by animateDpAsState(if (expanded) 330.dp else 124.dp, if (expanded) tween(ms(300), easing = FastOutSlowInEasing) else snap(), label = "card")
+  val width by animateDpAsState(if (expanded) 330.dp else 124.dp, if (expanded) tween(ms(280), easing = Z.EaseInOut) else snap(), label = "card")
   val look = rememberLook(store, item, enabled = expanded)
   val d = look?.details
   var grown by remember { mutableStateOf(false) } // the trailer only starts once the card is full size
@@ -242,9 +293,9 @@ fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier,
     if (expanded) { delay(growMs); grown = true }
   }
   var playing by remember { mutableStateOf(false) }
-  val overlay by animateFloatAsState(if (playing) 0f else 1f, tween(ms(250)), label = "overlay")
+  val overlay by animateFloatAsState(if (playing) 0f else 1f, tween(ms(220), easing = Z.EaseOut), label = "overlay")
   ZCard(onClick, modifier.width(width).height(186.dp).onFocusChanged { onFocus(it.isFocused) }) {
-    Crossfade(expanded, animationSpec = tween(ms(250)), label = "preview") { open ->
+    Crossfade(expanded, animationSpec = tween(ms(220), easing = Z.EaseOut), label = "preview") { open ->
       Box(Modifier.fillMaxSize()) {
         if (!open) {
           Artwork(img(item.poster, "w342"), item.title)
@@ -365,7 +416,10 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
       item { Chip("All Genres", b.genre == null) { pick(b.sort, null) } }
       items(b.genres) { (id, name) -> Chip(name, b.genre == id) { pick(b.sort, id) } }
     }
-    if (b.items.isEmpty()) Text(b.error ?: "Loading…", Modifier.padding(Z.Pad), color = Z.Text2)
+    if (b.items.isEmpty()) {
+      if (b.error != null) Text(b.error!!, Modifier.padding(Z.Pad), color = Z.Text2)
+      else Row(Modifier.padding(start = Z.Pad, top = 8.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) { repeat(6) { Skeleton(Modifier.width(128.dp).aspectRatio(2f / 3f)) } }
+    }
     PosterGrid(store, b.items, b.focus, nav, b.grid) { scope.launch { b.more(t) } }
   }
 }
@@ -374,11 +428,13 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
 fun Chip(label: String, selected: Boolean, onClick: () -> Unit) = Surface(
   onClick,
   shape = ClickableSurfaceDefaults.shape(Z.Small),
+  // Selected is a quiet red outline, not a red fill: red marks the one key action, not every chosen filter.
   colors = ClickableSurfaceDefaults.colors(
-    containerColor = if (selected) Z.Red else Z.Card, contentColor = if (selected) Color.White else Z.Text2,
+    containerColor = if (selected) Color.White.copy(alpha = 0.08f) else Z.Card, contentColor = if (selected) Z.Text else Z.Text2,
     focusedContainerColor = Z.Text, focusedContentColor = Z.Bg,
   ),
-  scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+  border = ClickableSurfaceDefaults.border(border = if (selected) Border(androidx.compose.foundation.BorderStroke(1.5.dp, Z.Red), shape = Z.Small) else Border.None),
+  scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = Z.Press),
 ) { Text(label, Modifier.padding(horizontal = 14.dp, vertical = 7.dp), style = MaterialTheme.typography.labelLarge) }
 
 @Composable

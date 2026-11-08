@@ -89,6 +89,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     val store = Store(this)
     val ui = UiState(store)
+    coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
     Trakt.io.launch { runCatching { Trakt.sync(store) } } // history and paused-elsewhere titles, at most every 15 minutes
     setContent {
       ZTheme(store.reduceMotion) {
@@ -146,7 +147,8 @@ fun TopNav(ui: UiState, nav: Nav) {
   val down = Modifier.focusProperties { this.down = ui.content }
   Row(
     Modifier.fillMaxWidth()
-      .background(Brush.verticalGradient(listOf(Z.Bg.copy(alpha = 0.95f), Z.Bg.copy(alpha = 0.55f), Color.Transparent)))
+      // A soft scroll-edge fade, not a bar: artwork stays visible behind the navigation.
+      .background(Brush.verticalGradient(listOf(Z.Bg.copy(alpha = 0.8f), Z.Bg.copy(alpha = 0.35f), Color.Transparent)))
       .padding(start = Z.Pad - 10.dp, end = Z.Pad - 10.dp, top = 14.dp, bottom = 22.dp)
       .focusProperties { @Suppress("DEPRECATION") enter = { active } } // coming up from content lands on the current section
       .focusGroup(),

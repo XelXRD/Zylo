@@ -10,6 +10,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
+import androidx.compose.animation.core.CubicBezierEasing
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
@@ -57,7 +58,16 @@ object Z {
   const val Normal = 240
   const val PreviewDelay = 800L // focus rest before a card expands and its trailer starts
   const val HeroTrailerDelay = 3_000L // on a Home hero title before its trailer starts
+
+  // Motion: strong custom curves (the stock ones are too soft to read as intentional). Keep UI motion under 300 ms;
+  // focus moves on a remote are repeated hundreds of times, so they get the shortest, simplest motion of all.
+  val EaseOut = CubicBezierEasing(0.23f, 1f, 0.32f, 1f) // things arriving or answering a press
+  val EaseInOut = CubicBezierEasing(0.77f, 0f, 0.175f, 1f) // things changing shape on screen
+  const val Press = 0.96f // OK pressed: a small, instant squeeze says the remote was heard
 }
+
+/** Inter's display cut: drawn for large sizes (tighter spacing, finer details), so titles don't look like big body text. */
+val InterDisplay = FontFamily(Font(R.font.inter_display_semibold, FontWeight.SemiBold), Font(R.font.inter_display_bold, FontWeight.Bold))
 
 val Inter = FontFamily(
   Font(R.font.inter_regular, FontWeight.Normal),
@@ -67,22 +77,25 @@ val Inter = FontFamily(
 )
 
 // The guideline sizes are for a 1080p canvas; TV dp is half that, so 64px ≈ 32sp.
-private fun style(size: Float, weight: FontWeight, line: Float = 1.25f) = TextStyle(fontFamily = Inter, fontWeight = weight, fontSize = size.sp, lineHeight = (size * line).sp)
+// Tracking follows size: large type tightens (letters drift apart as they grow), small labels open up slightly.
+// Leading runs the other way: tight on titles, generous on body copy.
+private fun style(size: Float, weight: FontWeight, line: Float, tracking: Float, family: FontFamily = Inter) =
+  TextStyle(fontFamily = family, fontWeight = weight, fontSize = size.sp, lineHeight = (size * line).sp, letterSpacing = (size * tracking).sp)
 
 private val ZType = Typography(
-  displayLarge = style(32f, FontWeight.Bold), // featured title
-  displayMedium = style(28f, FontWeight.Bold), // detail title
-  displaySmall = style(24f, FontWeight.SemiBold), // page heading
-  headlineSmall = style(20f, FontWeight.SemiBold),
-  titleLarge = style(17f, FontWeight.SemiBold), // section heading
-  titleMedium = style(15f, FontWeight.SemiBold),
-  titleSmall = style(14f, FontWeight.Medium), // card title
-  bodyLarge = style(15f, FontWeight.Normal, 1.45f),
-  bodyMedium = style(14f, FontWeight.Normal, 1.45f),
-  bodySmall = style(12.5f, FontWeight.Normal, 1.4f), // metadata
-  labelLarge = style(13.5f, FontWeight.Medium),
-  labelMedium = style(12f, FontWeight.Medium),
-  labelSmall = style(11f, FontWeight.Medium),
+  displayLarge = style(38f, FontWeight.Bold, 1.05f, -0.025f, InterDisplay), // featured title
+  displayMedium = style(32f, FontWeight.Bold, 1.08f, -0.022f, InterDisplay), // detail title
+  displaySmall = style(26f, FontWeight.SemiBold, 1.12f, -0.018f, InterDisplay), // page heading
+  headlineSmall = style(20f, FontWeight.SemiBold, 1.2f, -0.012f, InterDisplay),
+  titleLarge = style(17f, FontWeight.SemiBold, 1.25f, -0.006f), // section heading
+  titleMedium = style(15f, FontWeight.SemiBold, 1.3f, -0.003f),
+  titleSmall = style(14f, FontWeight.Medium, 1.3f, 0f), // card title
+  bodyLarge = style(15f, FontWeight.Normal, 1.5f, 0f),
+  bodyMedium = style(14f, FontWeight.Normal, 1.5f, 0f),
+  bodySmall = style(12.5f, FontWeight.Normal, 1.45f, 0.004f), // metadata
+  labelLarge = style(13.5f, FontWeight.Medium, 1.25f, 0.006f),
+  labelMedium = style(12f, FontWeight.Medium, 1.25f, 0.01f),
+  labelSmall = style(11f, FontWeight.Medium, 1.25f, 0.015f),
 )
 
 val LocalReduceMotion = staticCompositionLocalOf { false }
@@ -145,7 +158,7 @@ fun Glyph(icon: ImageVector, size: Dp = 18.dp, tint: Color = LocalContentColor.c
 fun ZButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = false, icon: ImageVector? = null) {
   Button(
     onClick, modifier,
-    scale = ButtonDefaults.scale(focusedScale = if (LocalReduceMotion.current) 1f else 1.05f),
+    scale = ButtonDefaults.scale(focusedScale = if (LocalReduceMotion.current) 1f else 1.05f, pressedScale = Z.Press),
     shape = ButtonDefaults.shape(Z.Small),
     colors = if (primary) ButtonDefaults.colors(containerColor = Z.Red, contentColor = Color.White, focusedContainerColor = Z.RedFocus, focusedContentColor = Color.White)
     else ButtonDefaults.colors(containerColor = Color.White.copy(alpha = 0.12f), contentColor = Z.Text, focusedContainerColor = Z.Text, focusedContentColor = Z.Bg),
@@ -165,9 +178,10 @@ fun ZCard(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composab
   onClick, modifier,
   shape = CardDefaults.shape(Z.Medium),
   colors = CardDefaults.colors(containerColor = Z.Card),
-  scale = CardDefaults.scale(focusedScale = if (LocalReduceMotion.current) 1f else 1.06f),
-  border = CardDefaults.border(focusedBorder = Border(BorderStroke(2.dp, Z.Text), shape = Z.Medium)),
-  glow = CardDefaults.glow(focusedGlow = Glow(Color.Black, 14.dp)),
+  scale = CardDefaults.scale(focusedScale = if (LocalReduceMotion.current) 1f else 1.08f, pressedScale = Z.Press),
+  // A clean light edge on focus (inset so it sits on the artwork, not around it) plus a deep soft shadow for lift.
+  border = CardDefaults.border(focusedBorder = Border(BorderStroke(2.dp, Color.White.copy(alpha = 0.92f)), inset = 0.dp, shape = Z.Medium)),
+  glow = CardDefaults.glow(focusedGlow = Glow(Color.Black.copy(alpha = 0.9f), 18.dp)),
 ) { content() }
 
 /** Clickable row/tab surface: transparent, white with dark text when focused. */
@@ -181,9 +195,13 @@ fun ZSurface(onClick: () -> Unit, modifier: Modifier = Modifier, selected: Boole
     focusedContainerColor = Z.Text,
     focusedContentColor = Z.Bg,
   ),
-  scale = ClickableSurfaceDefaults.scale(focusedScale = 1f),
+  scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = Z.Press),
   content = content,
 )
+
+/** A still placeholder in the shape of what's coming (no shimmer: it's quieter, and loads are short). */
+@Composable
+fun Skeleton(modifier: Modifier) = Box(modifier.background(Z.Card.copy(alpha = 0.7f), Z.Medium))
 
 @Composable
 fun ProgressBar(fraction: Float, modifier: Modifier = Modifier) =
