@@ -28,6 +28,13 @@ class HttpError(val code: Int, message: String) : Exception(message)
 // built-in HttpURLConnection even when a browser on the same connection gets through. It also does PATCH natively.
 private val client = OkHttpClient.Builder().followRedirects(true).build()
 
+/** A download as it arrives (for big files read while downloading, like TV guides and app updates). */
+fun openStream(url: String): java.io.InputStream {
+  val r = client.newBuilder().readTimeout(60, TimeUnit.SECONDS).build().newCall(Request.Builder().url(url).header("User-Agent", UA).build()).execute()
+  if (!r.isSuccessful) { r.close(); throw HttpError(r.code, "${r.request.url.host} answered ${r.code}.") }
+  return r.body!!.byteStream()
+}
+
 fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null, timeout: Int = 10_000, total: Long = 0): String {
   val req = Request.Builder().url(url).header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
   headers.forEach { (k, v) -> req.header(k, v) }

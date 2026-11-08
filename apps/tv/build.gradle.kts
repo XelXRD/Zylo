@@ -13,8 +13,10 @@ android {
     applicationId = "tv.zylo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 21
-    versionName = "0.18.1"
+    versionCode = 22
+    versionName = "0.19.0"
+    // Where Zylo looks for updates: a public GitHub repo's releases ("owner/repo") or a JSON file link. Empty: no checks.
+    buildConfigField("String", "UPDATE_FEED", "\"${project.findProperty("zylo.updates") ?: ""}\"")
   }
   // Same key as the old WebView build, so this installs over it.
   signingConfigs { getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "zylo"; keyPassword = "android" } }
@@ -41,4 +43,5 @@ dependencies {
   implementation("com.google.zxing:core:3.5.3") // QR codes for signing in from a phone
   testImplementation("junit:junit:4.13.2")
   testImplementation("org.json:json:20250517") // android.jar's org.json is stubbed in unit tests
+  testImplementation("net.sf.kxml:kxml2:2.3.0") // the XML parser Android has built in
 }

@@ -48,7 +48,7 @@ import java.util.Date
 import java.util.Locale
 
 /** [archive]: days of catch-up the provider keeps for this channel (0 = none). */
-data class Channel(val id: Int, val num: Int, val name: String, val logo: String?, val category: String, val archive: Int = 0)
+data class Channel(val id: Int, val num: Int, val name: String, val logo: String?, val category: String, val archive: Int = 0, val epgId: String? = null)
 data class Category(val id: String, val name: String)
 /** A programme in the guide. Times in epoch milliseconds; [startText] is the provider's own clock ("2026-11-08 20:00:00"), which catch-up links use. */
 data class Programme(val title: String, val description: String, val start: Long, val end: Long, val archive: Boolean = false, val startText: String = "")
@@ -75,7 +75,7 @@ class Xtream(val server: String, val user: String, val pass: String, val formats
     JSONArray(fetch(api("get_live_streams", category?.let { "&category_id=${enc(it)}" } ?: ""))).objects().mapNotNull {
       val id = it.optInt("stream_id").takeIf { n -> n > 0 } ?: return@mapNotNull null
       Channel(id, it.optInt("num"), it.optString("name").trim(), it.str("stream_icon")?.takeIf { u -> u.startsWith("http") }, it.optString("category_id"),
-        if (it.optString("tv_archive") == "1") it.optString("tv_archive_duration").toIntOrNull() ?: 1 else 0)
+        if (it.optString("tv_archive") == "1") it.optString("tv_archive_duration").toIntOrNull() ?: 1 else 0, it.str("epg_channel_id"))
     }
 
   /**
@@ -102,6 +102,9 @@ class Xtream(val server: String, val user: String, val pass: String, val formats
   /** Whether a programme can be watched again: it's over, and the provider keeps it. */
   fun canCatchUp(c: Channel, p: Programme, now: Long = System.currentTimeMillis()) =
     c.archive > 0 && p.end <= now && p.start >= now - c.archive * 86_400_000L && p.startText.isNotEmpty() && (p.archive || c.archive > 0)
+
+  /** The provider's whole guide in one XMLTV file. */
+  fun xmltvUrl() = "$server/xmltv.php?username=${enc(user)}&password=${enc(pass)}"
 
   /** HLS when the provider allows it (steadier on TV), else MPEG-TS. */
   fun streamUrl(c: Channel) = "$server/live/${enc(user)}/${enc(pass)}/${c.id}." + if (formats.isEmpty() || "m3u8" in formats) "m3u8" else "ts"
@@ -156,8 +159,18 @@ class LiveState {
   var shift by mutableIntStateOf(0) // hours the guide is moved from now (negative: earlier, for catch-up)
   var shiftFocus by mutableIntStateOf(0) // bumps after a shift so focus lands on the right programme
   var favs by mutableStateOf<Set<Int>?>(null)
+  var sports by mutableStateOf(false) // the sports schedule instead of the guide
+  val sched = SportsState()
   val focus = FocusMemory()
   internal val gate = Semaphore(4) // guide requests at once
+}
+
+/** The provider's guide for a channel, or the better guide's when the provider has nothing from now on. */
+fun bestGuide(x: Xtream, c: Channel): List<Programme> {
+  val now = System.currentTimeMillis()
+  val own = runCatching { x.guide(c.id) }.getOrDefault(emptyList())
+  if (own.any { it.end > now }) return own
+  return Epg.current.forChannel(c)?.let { extra -> (own.filter { it.archive } + extra.filter { e -> own.none { it.start == e.start } }).sortedBy { it.start } } ?: own
 }
 
 private val ALL = Category("", "All Channels")
@@ -177,6 +190,15 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
     return
   }
   if (s.favs == null) s.favs = Xtream.favourites(store)
+  // The better guide: last download from disk, and a fresh one in the background twice a day.
+  LaunchedEffect(Unit) {
+    withContext(Dispatchers.IO) {
+      Epg.load()
+      val sources = Epg.sources(store)
+      if (sources.isNotEmpty() && Epg.age(store) > 12 * 3_600_000L && !Epg.busy) { Epg.busy = true; runCatching { Epg.refresh(store, sources) }; Epg.busy = false }
+    }
+  }
+  if (s.sports) { SportsPage(store, x, s, nav); return }
   LaunchedEffect(Unit) {
     if (s.categories.isEmpty()) runCatching { withContext(Dispatchers.IO) { x.categories() } }.onSuccess { list ->
       s.categories = list
@@ -202,13 +224,16 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
       val now = remember { System.currentTimeMillis() }
       val windowStart = now - now % (30 * 60_000) + s.shift * 3_600_000L // the current half hour, moved by any paging
       Row(Modifier.padding(start = Z.Pad, end = Z.Pad, top = 8.dp, bottom = 6.dp), verticalAlignment = Alignment.CenterVertically) {
-        Box(Modifier.width(CHANNEL_W)) {
+        Row(Modifier.width(CHANNEL_W), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
           ZSurface({ picking = true }, Modifier.focusMemory(s.focus, "category"), container = Z.Card) {
-            Row(Modifier.padding(horizontal = 14.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-              Text(s.category?.name ?: "Categories", Modifier.widthIn(max = 180.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-              Spacer(Modifier.width(6.dp))
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+              Text(s.category?.name ?: "Categories", Modifier.widthIn(max = 118.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              Spacer(Modifier.width(4.dp))
               Glyph(Icons.Filled.KeyboardArrowDown, 18.dp)
             }
+          }
+          ZSurface({ s.sports = true }, container = Z.Card) {
+            Text("Sports", Modifier.padding(horizontal = 12.dp, vertical = 8.dp), style = MaterialTheme.typography.labelLarge)
           }
         }
         BoxWithConstraints(Modifier.weight(1f)) {
@@ -304,7 +329,7 @@ private fun Guide(store: Store, x: Xtream, s: LiveState, nav: Nav, windowStart: 
       itemsIndexed(s.channels, key = { _, c -> c.id }) { i, c ->
         // Each row loads its own guide when it scrolls into view, a few at a time.
         LaunchedEffect(c.id) {
-          if (c.id !in s.guide) s.guide[c.id] = s.gate.withPermit { withContext(Dispatchers.IO) { runCatching { x.guide(c.id) }.getOrDefault(emptyList()) } }
+          if (c.id !in s.guide) s.guide[c.id] = s.gate.withPermit { withContext(Dispatchers.IO) { bestGuide(x, c) } }
         }
         val shows = s.guide[c.id].orEmpty().filter { it.end > windowStart && it.start < windowEnd }
         val fav = c.id in s.favs.orEmpty()
@@ -409,7 +434,7 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
     player.setMediaItem(MediaItem.fromUri(past?.let { (c, p) -> x.catchupUrl(c, p) } ?: x.streamUrl(channel)))
     player.prepare()
     s.playing = index
-    if (channel.id !in s.guide) s.guide[channel.id] = withContext(Dispatchers.IO) { runCatching { x.guide(channel.id) }.getOrDefault(emptyList()) }
+    if (channel.id !in s.guide) s.guide[channel.id] = withContext(Dispatchers.IO) { bestGuide(x, channel) }
   }
   LaunchedEffect(index, banner) { showBanner = true; delay(5_000); showBanner = false }
   val focus = remember { FocusRequester() }

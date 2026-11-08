@@ -1,0 +1,215 @@
+// Live TV > Sports: today's and the next two days' fixtures, filtered by sport, with where to watch each one.
+package tv.zylo
+
+import androidx.activity.compose.BackHandler
+import androidx.compose.foundation.background
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.lazy.LazyColumn
+import androidx.compose.foundation.lazy.LazyRow
+import androidx.compose.foundation.lazy.items
+import androidx.compose.runtime.*
+import androidx.compose.ui.Alignment
+import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
+import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.dp
+import androidx.tv.material3.*
+import coil.compose.AsyncImage
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.withContext
+import java.text.SimpleDateFormat
+import java.util.Date
+import java.util.Locale
+
+class SportsState {
+  var events by mutableStateOf<List<SportEvent>?>(null)
+  var loadedAt = 0L
+  var error by mutableStateOf<String?>(null)
+  var sport by mutableStateOf("All")
+  var focused by mutableStateOf<SportEvent?>(null)
+  var all by mutableStateOf<List<Channel>>(emptyList()) // every channel the provider has
+  var options by mutableStateOf<List<WatchOption>?>(null)
+  var linking by mutableStateOf<WatchOption?>(null)
+  var links by mutableIntStateOf(0) // bumps when a channel is linked, to search again
+  val focus = FocusMemory()
+}
+
+private fun hm(t: Long) = SimpleDateFormat("HH:mm", Locale.UK).format(Date(t))
+private fun dayLabel(t: Long, now: Long): String {
+  val f = SimpleDateFormat("yyyyMMdd", Locale.UK)
+  return when (f.format(Date(t))) {
+    f.format(Date(now)) -> "Today"
+    f.format(Date(now + 86_400_000L)) -> "Tomorrow"
+    else -> SimpleDateFormat("EEEE d MMMM", Locale.UK).format(Date(t))
+  }
+}
+
+@Composable
+fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
+  val s = live.sched
+  BackHandler { live.sports = false }
+  LaunchedEffect(Unit) {
+    if (s.events == null || System.currentTimeMillis() - s.loadedAt > 10 * 60_000L) {
+      runCatching { withContext(Dispatchers.IO) { Sports.schedule() } }.onSuccess { s.events = it; s.loadedAt = System.currentTimeMillis(); s.error = null }
+        .onFailure { s.error = it.message }
+    }
+    if (s.all.isEmpty()) s.all = withContext(Dispatchers.IO) { runCatching { x.channels(null) }.getOrDefault(emptyList()) }
+  }
+  // Where to watch the focused event: searched across every guide loaded, after a moment on it.
+  LaunchedEffect(s.focused, s.all, s.links) {
+    val e = s.focused ?: return@LaunchedEffect
+    s.options = null
+    delay(250)
+    s.options = withContext(Dispatchers.Default) { options(store, e, s.all, live) }
+  }
+  val now = remember { System.currentTimeMillis() }
+  val shown = s.events.orEmpty().filter { (s.sport == "All" || it.sport == s.sport) && (it.start > now - 4 * 3_600_000L || it.live) }
+  RestoreFocus(s.focus, shown.isNotEmpty())
+
+  Box(Modifier.fillMaxSize()) {
+    Column(Modifier.fillMaxSize().padding(top = 84.dp)) {
+      Row(Modifier.padding(horizontal = Z.Pad), verticalAlignment = Alignment.CenterVertically) {
+        Text("Sports", style = MaterialTheme.typography.headlineSmall)
+        Spacer(Modifier.width(16.dp))
+        Text("Fixtures from ESPN · where to watch from your TV guides", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
+        Spacer(Modifier.weight(1f))
+        ZButton("TV Guide", { live.sports = false })
+      }
+      LazyRow(contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        items(Sports.SPORTS) { sp -> Chip(sp, s.sport == sp) { s.sport = sp } }
+      }
+      when {
+        s.events == null && s.error == null -> Loading("Loading fixtures…")
+        shown.isEmpty() -> Text(s.error ?: "No ${if (s.sport == "All") "" else s.sport.lowercase() + " "}fixtures in the next few days.", Modifier.padding(start = Z.Pad, top = 16.dp), color = Z.Text2)
+        else -> Row(Modifier.fillMaxSize()) {
+          // Fixtures, by day.
+          LazyColumn(Modifier.weight(0.56f).fillMaxHeight(), contentPadding = PaddingValues(start = Z.Pad, end = 12.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
+            shown.groupBy { dayLabel(it.start, now) }.forEach { (day, list) ->
+              item(key = "d$day") { Text(day, Modifier.padding(top = 10.dp, bottom = 2.dp), style = MaterialTheme.typography.titleSmall, color = Z.Text2) }
+              items(list, key = { it.id }) { e -> EventRow(e, s, Modifier.focusMemory(s.focus, "e${e.id}", default = e == shown.first())) }
+            }
+          }
+          WhereToWatch(store, s, live, nav, Modifier.weight(0.44f).fillMaxHeight().padding(end = Z.Pad))
+        }
+      }
+    }
+    s.linking?.let { o -> ChannelPicker(store, o, s) }
+  }
+}
+
+@Composable
+private fun EventRow(e: SportEvent, s: SportsState, modifier: Modifier) =
+  ZSurface({ }, modifier.fillMaxWidth().onFocusChanged { if (it.isFocused) s.focused = e }, container = Z.Card) {
+    Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+      Column(Modifier.width(64.dp)) {
+        Text(when { e.live -> "LIVE"; e.over -> "FT"; e.allDay && e.start < System.currentTimeMillis() -> "Today"; else -> hm(e.start) }, style = MaterialTheme.typography.titleSmall, color = if (e.live) Z.Red else Z.Text)
+        if (e.live) Text(e.detail, style = MaterialTheme.typography.labelSmall, color = Z.Text2, maxLines = 1)
+      }
+      Column(Modifier.weight(1f)) {
+        Text(e.league, style = MaterialTheme.typography.labelSmall, color = Z.Muted, maxLines = 1)
+        if (e.teams.size == 2) e.teams.forEach { t ->
+          Row(verticalAlignment = Alignment.CenterVertically) {
+            Box(Modifier.size(18.dp)) { t.logo?.let { AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) } }
+            Spacer(Modifier.width(8.dp))
+            Text(t.name, Modifier.weight(1f), style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            if (e.live || e.over) Text(t.score ?: "", style = MaterialTheme.typography.titleSmall)
+          }
+        } else Text(e.name, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+      }
+    }
+  }
+
+/** Guide listings across every loaded guide (provider + epgshare), labelled with your channel when there is one. */
+private fun options(store: Store, e: SportEvent, all: List<Channel>, live: LiveState): List<WatchOption> {
+  val g = Epg.current
+  val mine = HashMap<String, Channel>()
+  all.forEach { c -> g.idFor(c)?.let { id -> mine.putIfAbsent(id, c) } }
+  val guides = g.programmes.map { (id, list) -> Triple(g.channels[id]?.names?.firstOrNull() ?: Guide.idName(id), mine[id], list) } +
+    live.guide.mapNotNull { (cid, list) -> all.find { it.id == cid }?.let { c -> Triple(c.name, c, list) } }
+  return Sports.whereToWatch(e, all, guides, Sports.links(store))
+}
+
+@Composable
+private fun WhereToWatch(store: Store, s: SportsState, live: LiveState, nav: Nav, modifier: Modifier) {
+  val ctx = LocalContext.current
+  val e = s.focused ?: return Spacer(modifier)
+  Column(modifier.padding(top = 4.dp).background(Z.Surface, Z.Large).padding(18.dp)) {
+    Text(e.league.uppercase(), style = MaterialTheme.typography.labelMedium, color = Z.Red)
+    Text(e.name, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    Text("${dayLabel(e.start, System.currentTimeMillis())} · ${hm(e.start)}" + if (e.live) " · Live ${e.detail}" else if (e.over) " · Full time" else "",
+      Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+    Text("WHERE TO WATCH", Modifier.padding(top = 16.dp, bottom = 6.dp), style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+    val o = s.options
+    when {
+      o == null -> Text("Searching your TV guides…", color = Z.Text2)
+      o.isEmpty() -> Text(if (Epg.current.size == 0) "Turn on the better TV guide in Settings > Live TV so Zylo can find which channels show this."
+        else "No channel in your TV guides lists this yet. Listings often appear a day or two before.", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+      else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
+        items(o, key = { (it.channel?.id?.toString() ?: "") + it.label + it.from }) { w ->
+          ZSurface({
+            val c = w.channel
+            if (c == null) s.linking = w
+            else { live.playing = live.channels.indexOf(c).takeIf { it >= 0 } ?: run { live.channels = listOf(c) + live.channels; 0 }; nav.push(Screen.LivePlay) }
+          }, Modifier.fillMaxWidth(), container = Z.Card, onLongClick = { s.linking = w }) {
+            Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
+              Column(Modifier.weight(1f)) {
+                Text(w.channel?.name ?: w.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(listOfNotNull(w.programme?.let { "${hm(it.start)} ${it.title}" }, if (w.channel == null) w.from + " · not linked to one of your channels" else if (w.label != w.channel.name) "listed as ${w.label}" else w.from)
+                  .joinToString("  ·  "), style = MaterialTheme.typography.labelSmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              }
+              Text(if (w.channel != null) "Watch" else "Link", style = MaterialTheme.typography.labelLarge, color = if (w.channel != null) Z.Text else Z.Info)
+            }
+          }
+        }
+        item { Text("Hold OK on a channel to link a different one.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Z.Muted) }
+      }
+    }
+  }
+}
+
+/** Pick which of your channels is this broadcaster or guide channel; remembered for next time. */
+@Composable
+private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
+  val ctx = LocalContext.current
+  BackHandler { s.linking = null }
+  var query by remember { mutableStateOf(w.label) }
+  val ranked = remember(query, s.all) { rankChannels(query, s.all).take(80) }
+  val first = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
+  Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.75f)), contentAlignment = Alignment.CenterEnd) {
+    Column(Modifier.padding(top = 84.dp, end = Z.Pad, bottom = 24.dp).width(440.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(18.dp)) {
+      Text("Link ${w.label}", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Text("Which of your channels is it? Zylo remembers this for every event on it.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
+      Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        ZButton("Search by Name", { ask(ctx, "Channel name", query) { if (it.isNotBlank()) query = it } }, Modifier.focusRequester(first))
+        if (w.channel != null) ZButton("Unlink", { Sports.link(store, w.label, null); s.linking = null; s.links++ })
+      }
+      LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items(ranked, key = { it.id }) { c ->
+          ZSurface({ Sports.link(store, w.label, c); s.linking = null; s.links++ }, Modifier.fillMaxWidth()) {
+            Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+              Box(Modifier.size(34.dp, 24.dp)) { c.logo?.let { AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) } }
+              Spacer(Modifier.width(10.dp))
+              Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+/** Channels most like a name first (shared letter pairs), so "Sky Sports Main Event" finds "UK | SKY SPORTS MAIN EVENT FHD". */
+fun rankChannels(name: String, all: List<Channel>): List<Channel> {
+  fun pairs(s: String) = channelKey(s).windowed(2).toSet()
+  val want = pairs(name)
+  if (want.isEmpty()) return all
+  return all.map { c -> c to pairs(c.name).let { have -> 2.0 * (have intersect want).size / (have.size + want.size).coerceAtLeast(1) } }
+    .filter { it.second > 0.2 }.sortedByDescending { it.second }.map { it.first }
+}

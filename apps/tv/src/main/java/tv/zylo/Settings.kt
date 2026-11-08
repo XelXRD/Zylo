@@ -355,7 +355,48 @@ private fun LiveTvSettings(store: Store) {
       else ZButton("Disconnect", { Xtream.disconnect(store); message = null; tick++ })
     }
     Text("Live TV appears in the top bar. It isn't shown on kids profiles.", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
+    if (x != null) BetterGuide(store)
   }
+}
+
+/** Settings > Live TV > Better TV guide: the provider's full guide plus free per-country guides from epgshare01. */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+private fun BetterGuide(store: Store) {
+  val scope = rememberCoroutineScope()
+  var provider by remember { mutableStateOf(store.str("epg_provider") != "off") }
+  var picked by remember { mutableStateOf(store.str("epg_share").split(',').filter { it.isNotBlank() }.toSet()) }
+  var status by remember { mutableStateOf(store.str("epg_status")) }
+  var busy by remember { mutableStateOf(false) }
+  Text("Better TV guide", Modifier.padding(top = 18.dp), style = MaterialTheme.typography.titleLarge)
+  Text("Fills gaps in your provider's guide and lets Sports find which channels show a match. Guides download twice a day.",
+    style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+  Toggle("Your provider's full guide", "Every channel's listings in one download (xmltv.php)", provider) {
+    provider = !provider; store.put("epg_provider", if (provider) "" else "off")
+  }
+  Text("Extra guides by country — free from epgshare01.online", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.titleSmall)
+  FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
+    Epg.SHARE.forEach { (code, name) ->
+      Chip(name, code in picked) {
+        picked = if (code in picked) picked - code else picked + code
+        store.put("epg_share", Epg.SHARE.map { it.first }.filter { it in picked }.joinToString(","))
+      }
+    }
+  }
+  Row(Modifier.padding(top = 6.dp), verticalAlignment = Alignment.CenterVertically) {
+    ZButton(if (busy) "Downloading…" else "Update Guide Now", {
+      if (busy || Epg.busy) return@ZButton
+      busy = true; Epg.busy = true
+      scope.launch {
+        status = withContext(Dispatchers.IO) { runCatching { Epg.refresh(store, Epg.sources(store)) }.getOrElse { "Couldn't update: ${it.message}" } }
+        Epg.busy = false; busy = false
+      }
+    }, primary = true)
+    Spacer(Modifier.width(16.dp))
+    Text(if (status.isEmpty()) "Not downloaded yet." else (store.str("epg_at").toLongOrNull()?.let { "Updated ${ago(it)}: " } ?: "") + status,
+      style = MaterialTheme.typography.bodySmall, color = Z.Text2)
+  }
+  Text("epgshare01 is run by volunteers; if it helps you, they take donations at ko-fi.com/W7W0YGC4T.", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
 }
 
 /** Plex link code: entered at plex.tv/link on any phone or computer. */
@@ -618,6 +659,7 @@ private fun About(store: Store) = Column(Modifier.verticalScroll(rememberScrollS
     "Film and TV information and artwork come from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",
     Modifier.padding(top = 8.dp).fillMaxWidth(0.8f), style = MaterialTheme.typography.bodySmall, color = Z.Muted,
   )
+  if (Updates.feed.isNotBlank()) ZButton("Check for Updates", { Updates.asked++ }, Modifier.padding(top = 16.dp))
   // The last crash, so it can be photographed and sent for fixing.
   var crash by remember { mutableStateOf(store.str("last_crash")) }
   if (crash.isNotEmpty()) {

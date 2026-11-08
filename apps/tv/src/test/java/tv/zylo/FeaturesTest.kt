@@ -252,3 +252,85 @@ class QuizTest {
     assertEquals(5, quiz("tv").size)
   }
 }
+
+class GuideTest {
+  private val xml = """<?xml version="1.0" encoding="UTF-8"?>
+<tv>
+  <channel id="Sky.Sports.Main.Event.HD.uk"><display-name lang="en">Sky Sports Main Event HD</display-name></channel>
+  <channel id="BBC.One.Lon.HD.uk"><display-name lang="en">BBC One London HD</display-name></channel>
+  <programme channel="Sky.Sports.Main.Event.HD.uk" start="20261108153000 +0000" stop="20261108180000 +0000">
+    <title lang="en">Live: Arsenal v Chelsea</title><desc lang="en">Premier League coverage &amp; build-up.</desc>
+  </programme>
+  <programme channel="Sky.Sports.Main.Event.HD.uk" start="20261101153000 +0000" stop="20261101180000 +0000"><title>Old</title></programme>
+  <programme channel="BBC.One.Lon.HD.uk" start="20261108180000 +0000" stop="20261108190000 +0000"><title>News</title></programme>
+</tv>"""
+  private val t = 1794153600000L // 16:00 UTC, 8 Nov 2026
+
+  private fun guide(gz: Boolean): Guide {
+    val bytes = if (gz) java.io.ByteArrayOutputStream().also { o -> java.util.zip.GZIPOutputStream(o).use { it.write(xml.toByteArray()) } }.toByteArray() else xml.toByteArray()
+    val chans = HashMap<String, GuideChannel>(); val progs = HashMap<String, MutableList<Programme>>()
+    Epg.read(bytes.inputStream(), t - 86_400_000L, t + 2 * 86_400_000L, chans, progs)
+    return Guide(chans, progs)
+  }
+
+  @Test fun readsXmltvPlainOrGzipped() {
+    for (gz in listOf(false, true)) {
+      val g = guide(gz)
+      assertEquals(2, g.size)
+      assertEquals(listOf("Live: Arsenal v Chelsea"), g.programmes["Sky.Sports.Main.Event.HD.uk"]!!.map { it.title }) // last week's dropped
+      assertEquals("Premier League coverage & build-up.", g.programmes["Sky.Sports.Main.Event.HD.uk"]!![0].description)
+    }
+  }
+
+  @Test fun matchesProviderChannels() {
+    val g = guide(false)
+    assertEquals("Sky.Sports.Main.Event.HD.uk", g.idFor(Channel(1, 1, "UK | SKY SPORTS MAIN EVENT FHD", null, "", epgId = null))) // by name
+    assertEquals("Sky.Sports.Main.Event.HD.uk", g.idFor(Channel(2, 2, "Something else", null, "", epgId = "sky.sports.main.event.hd.uk"))) // by id
+    assertEquals(null, g.idFor(Channel(3, 3, "Sky Sports Main Event +1", null, "")))
+    assertEquals("skysportsmainevent", channelKey("[UK] Sky Sports Main Event HD"))
+  }
+}
+
+class SportsTest {
+  private val l = Sports.LEAGUES.first { it.name == "Premier League" }
+  private val body = """{"events":[{"id":"1","date":"2026-11-08T16:30Z","name":"Chelsea at Arsenal","competitions":[{
+    "competitors":[{"homeAway":"away","team":{"displayName":"Chelsea","shortDisplayName":"Chelsea","logo":"c.png"}},{"homeAway":"home","team":{"displayName":"Arsenal","shortDisplayName":"Arsenal","logo":"a.png"},"score":"1"}],
+    "status":{"type":{"state":"pre","shortDetail":"16:30"}},"broadcasts":[{"names":["USA Net","Peacock"]}]}]}]}"""
+
+  @Test fun readsEspnAndFindsChannels() {
+    val e = Sports.parse(l, body).single()
+    assertEquals("Arsenal v Chelsea", e.name) // home side first
+    assertEquals(1794155400000L, e.start) // 16:30 UTC, 8 Nov 2026
+    assertEquals(listOf("USA Net", "Peacock"), e.broadcasters)
+    val show = Programme("Live: Arsenal v Chelsea", "", e.start - 3_600_000, e.start + 7_200_000)
+    assertEquals(true, Sports.matches(e, show))
+    assertEquals(false, Sports.matches(e, show.copy(title = "Arsenal: The Movie"))) // one side only
+    assertEquals(false, Sports.matches(e, show.copy(start = e.start + 86_400_000, end = e.start + 90_000_000))) // the replay tomorrow
+    val sky = Channel(10, 401, "UK | Sky Sports Main Event", null, "")
+    val usa = Channel(11, 900, "US | USA Network HD", null, "")
+    val got = Sports.whereToWatch(e, listOf(sky, usa), listOf(Triple("Sky Sports Main Event HD", sky, listOf(show)), Triple("Canal+ Sport", null, listOf(show))),
+      mapOf(channelKey("USA Net") to 11))
+    assertEquals(listOf("Sky Sports Main Event HD" to sky, "Canal+ Sport" to null, "USA Net" to usa, "Peacock" to null), got.map { it.label to it.channel })
+  }
+
+  @Test fun ranksChannelsForLinking() =
+    assertEquals(listOf(10, 12), rankChannels("Sky Sports Main Event", listOf(Channel(11, 0, "BBC One", null, ""), Channel(12, 0, "Sky Sports Arena", null, ""), Channel(10, 0, "UK: SKY SPORTS MAIN EVENT FHD", null, ""))).map { it.id })
+}
+
+class UpdateTest {
+  @Test fun versions() {
+    assertEquals(true, Updates.newer("0.19.0", "0.18.1"))
+    assertEquals(true, Updates.newer("0.18.10", "0.18.2"))
+    assertEquals(false, Updates.newer("0.18.1", "0.18.1"))
+    assertEquals(false, Updates.newer("v0.17.0", "0.18.1"))
+  }
+
+  @Test fun readsGithubReleases() {
+    val r = Updates.latest("alex/zylo-releases") { url ->
+      assertEquals("https://api.github.com/repos/alex/zylo-releases/releases/latest", url)
+      """{"tag_name":"v0.19.0","body":"Sports schedule","assets":[{"name":"notes.txt","browser_download_url":"x"},{"name":"zylo-tv-0.19.0.apk","browser_download_url":"https://github.com/a.apk"}]}"""
+    }
+    assertEquals(Release("0.19.0", "https://github.com/a.apk", "Sports schedule"), r)
+    assertEquals(Release("0.20.0", "https://x/z.apk", ""), Updates.latest("https://x/update.json") { """{"version":"0.20.0","apk":"https://x/z.apk"}""" })
+  }
+}

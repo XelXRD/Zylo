@@ -111,6 +111,7 @@ class MainActivity : ComponentActivity() {
       previous?.uncaughtException(t, e)
     }
     Dom.app = applicationContext
+    Epg.dir = filesDir
     val ui = UiState(store)
     coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
     Trakt.io.launch {
@@ -145,6 +146,8 @@ class MainActivity : ComponentActivity() {
             is Screen.Quiz -> QuizPage(store, s.type, nav)
           }
         }
+        // A newer version on the update server: offered once per version (Settings > About can check again).
+        if (s !is Screen.Play && s != Screen.LivePlay) UpdatePrompt(store, Updates.asked)
       }
     }
   }
