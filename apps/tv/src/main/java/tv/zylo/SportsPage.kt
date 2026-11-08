@@ -3,6 +3,8 @@ package tv.zylo
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -212,7 +214,8 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
   val first = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
   Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.75f)), contentAlignment = Alignment.CenterEnd) {
-    Column(Modifier.padding(top = 84.dp, end = Z.Pad, bottom = 24.dp).width(440.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(18.dp)) {
+    Column(Modifier.padding(top = 84.dp, end = Z.Pad, bottom = 24.dp).width(440.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(18.dp)
+      .focusGroup().focusProperties { onExit = { cancelFocusChange() } }) { // pick a channel or press Back
       Text("Link ${w.label}", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
       Text("Which of your channels is it? Closest names first; Zylo remembers your choice for every event on it.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
       Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {

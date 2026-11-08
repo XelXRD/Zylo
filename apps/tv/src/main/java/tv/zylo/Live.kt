@@ -4,6 +4,8 @@ package tv.zylo
 
 import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -135,8 +137,13 @@ class Xtream(val server: String, val user: String, val pass: String, val formats
 
     fun disconnect(store: Store) = listOf("xc_server", "xc_user", "xc_pass", "xc_formats", "xc_info", "xc_cat", "xc_favs").forEach { store.put(it, "") }
 
-    fun favourites(store: Store) = store.str("xc_favs").split(',').mapNotNull { it.toIntOrNull() }.toSet()
-    fun setFavourites(store: Store, ids: Set<Int>) = store.put("xc_favs", ids.joinToString(","))
+    /** Favourite channels, kept whole so the Favourites list needs no download (and never shows anything else). */
+    fun favourites(store: Store): List<Channel> = runCatching { JSONArray(store.str("xc_favs")).objects().map(::channelOf) }.getOrDefault(emptyList())
+    fun setFavourites(store: Store, list: List<Channel>) = store.put("xc_favs", JSONArray(list.map(::channelJson)).toString())
+
+    fun channelJson(c: Channel): JSONObject = JSONObject().put("id", c.id).put("num", c.num).put("name", c.name).put("logo", c.logo ?: "")
+      .put("category", c.category).put("archive", c.archive).put("epg", c.epgId ?: "")
+    fun channelOf(o: JSONObject) = Channel(o.getInt("id"), o.optInt("num"), o.optString("name"), o.str("logo"), o.optString("category"), o.optInt("archive"), o.str("epg"))
 
     private fun b64(s: String): String = runCatching {
       val bytes = try { java.util.Base64.getDecoder().decode(s.trim()) } catch (e: NoClassDefFoundError) { android.util.Base64.decode(s, 0) }
@@ -158,7 +165,8 @@ class LiveState {
   var catchup by mutableStateOf<Pair<Channel, Programme>?>(null) // set: the player shows this past programme instead
   var shift by mutableIntStateOf(0) // hours the guide is moved from now (negative: earlier, for catch-up)
   var shiftFocus by mutableIntStateOf(0) // bumps after a shift so focus lands on the right programme
-  var favs by mutableStateOf<Set<Int>?>(null)
+  var favs by mutableStateOf<List<Channel>?>(null) // favourite channels, in the order added
+  var reminders by mutableStateOf<List<Reminder>>(emptyList())
   var sports by mutableStateOf(false) // the sports schedule instead of the guide
   val sched = SportsState()
   val focus = FocusMemory()
@@ -189,7 +197,7 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
     }
     return
   }
-  if (s.favs == null) s.favs = Xtream.favourites(store)
+  if (s.favs == null) { s.favs = Xtream.favourites(store); s.reminders = Reminders.all(store) }
   // The better guide: last download from disk, and a fresh one in the background twice a day.
   LaunchedEffect(Unit) {
     withContext(Dispatchers.IO) {
@@ -207,10 +215,12 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
   }
   LaunchedEffect(s.category) {
     val c = s.category ?: return@LaunchedEffect
-    if (s.channels.isNotEmpty() && c != FAVS && s.channels.all { c == ALL || it.category == c.id }) return@LaunchedEffect // already showing it
+    if (c == FAVS) { s.channels = s.favs.orEmpty(); s.error = null; return@LaunchedEffect } // kept on the TV: instant, and only favourites
+    if (s.channels.isNotEmpty() && s.channels.all { c == ALL || it.category == c.id }) return@LaunchedEffect // already showing it
     s.loading = true
     s.error = null
-    runCatching { withContext(Dispatchers.IO) { if (c == FAVS) x.channels(null).filter { it.id in s.favs.orEmpty() } else x.channels(c.id.ifEmpty { null }) } }
+    s.channels = emptyList() // never leave the last category's channels up while this one loads (or fails)
+    runCatching { withContext(Dispatchers.IO) { x.channels(c.id.ifEmpty { null }) } }
       .onSuccess { s.channels = it }.onFailure { s.error = it.message }
     s.loading = false
   }
@@ -246,7 +256,7 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
       }
       when {
         s.channels.isEmpty() && s.loading -> Loading("Loading channels…")
-        s.channels.isEmpty() -> Text(s.error ?: if (s.category == FAVS) "No favourites yet. Hold OK on a channel in the guide to add it." else "No channels in ${s.category?.name ?: "this category"}.", Modifier.padding(start = Z.Pad, top = 24.dp), color = if (s.error != null) Z.Error else Z.Text2)
+        s.channels.isEmpty() -> Text(s.error ?: if (s.category == FAVS) "No favourites yet. In any category, hold OK on a channel's name to add it." else "No channels in ${s.category?.name ?: "this category"}.", Modifier.padding(start = Z.Pad, top = 24.dp), color = if (s.error != null) Z.Error else Z.Text2)
         else -> Guide(store, x, s, nav, windowStart, now)
       }
     }
@@ -275,7 +285,7 @@ private fun Details(s: LiveState, x: Xtream) {
     Column(Modifier.weight(1f)) {
       Row {
         Text(c.name, Modifier.weight(1f), style = MaterialTheme.typography.labelLarge, color = Z.Text2, maxLines = 1)
-        Text("Hold OK: favourite  ·  ◀ ▶ past the edge: earlier / later", style = MaterialTheme.typography.labelSmall, color = Z.Muted)
+        Text("Hold OK on a channel: favourite  ·  OK on a later show: reminder  ·  ◀ ▶ past the edge: earlier / later", style = MaterialTheme.typography.labelSmall, color = Z.Muted)
       }
       Text(p?.title ?: "No guide information", Modifier.padding(top = 2.dp), style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
       if (p != null) {
@@ -312,7 +322,7 @@ private fun Guide(store: Store, x: Xtream, s: LiveState, nav: Nav, windowStart: 
     val from = windowStart + (next - s.shift) * 3_600_000L
     val shows = s.guide[c.id].orEmpty().filter { it.end > from && it.start < from + WINDOW_MIN * 60_000L }
     val target = if (by > 0) shows.firstOrNull() else shows.lastOrNull()
-    s.focus.key = target?.let { "row/${c.id}/${it.start}" } ?: "row/${c.id}/none"
+    if (s.focus.key?.startsWith("ch/") != true) s.focus.key = target?.let { "row/${c.id}/${it.start}" } ?: "row/${c.id}/none"
     s.shift = next
     s.shiftFocus++
   }
@@ -332,29 +342,42 @@ private fun Guide(store: Store, x: Xtream, s: LiveState, nav: Nav, windowStart: 
           if (c.id !in s.guide) s.guide[c.id] = s.gate.withPermit { withContext(Dispatchers.IO) { bestGuide(x, c) } }
         }
         val shows = s.guide[c.id].orEmpty().filter { it.end > windowStart && it.start < windowEnd }
-        val fav = c.id in s.favs.orEmpty()
+        val fav = s.favs.orEmpty().any { it.id == c.id }
         fun open(p: Programme?) {
+          // Not on yet: OK sets (or clears) a reminder instead of playing.
+          if (p != null && p.start > System.currentTimeMillis()) {
+            val on = Reminders.toggle(store, c, p)
+            s.reminders = Reminders.all(store)
+            toast(ctx, if (on) "Reminder set: ${p.title}, ${hm(p.start)} on ${c.name}" else "Reminder removed")
+            return
+          }
           s.playing = i
           s.catchup = p?.takeIf { x.canCatchUp(c, it) }?.let { c to it }
-          if (p != null && p.start > now) toast(ctx, "${p.title} starts at ${hm(p.start)}. Playing ${c.name} live.")
           nav.push(Screen.LivePlay)
         }
         fun favourite() {
-          val set = if (fav) s.favs.orEmpty() - c.id else s.favs.orEmpty() + c.id
-          s.favs = set
-          Xtream.setFavourites(store, set)
+          val list = if (fav) s.favs.orEmpty().filter { it.id != c.id } else s.favs.orEmpty() + c
+          s.favs = list
+          Xtream.setFavourites(store, list)
+          if (s.category == FAVS) s.channels = list
           toast(ctx, if (fav) "Removed ${c.name} from Favourites" else "Added ${c.name} to Favourites")
         }
         Row(Modifier.padding(start = Z.Pad, end = Z.Pad).height(64.dp).padding(vertical = 3.dp), verticalAlignment = Alignment.CenterVertically) {
-          // Channel: number, logo, name (★ for a favourite).
-          Row(Modifier.width(CHANNEL_W).fillMaxHeight().padding(end = 6.dp).background(Z.Surface, Z.Small).padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text(if (c.num > 0) "${c.num}" else "", Modifier.width(38.dp), style = MaterialTheme.typography.labelMedium, color = Z.Muted)
-            Box(Modifier.size(40.dp, 30.dp), contentAlignment = Alignment.Center) {
-              if (c.logo != null) AsyncImage(c.logo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+          // Channel: number, logo, name (★ for a favourite). Up/Down moves down the channels here; Right goes into the
+          // programmes. OK plays the channel; holding OK adds it to or removes it from Favourites.
+          ZSurface({ open(null) }, Modifier.width(CHANNEL_W).fillMaxHeight().padding(end = 6.dp)
+            .focusMemory(s.focus, "ch/${c.id}", default = s.focus.key == null && i == 0)
+            .onFocusChanged { if (it.isFocused) s.focused = c to s.guide[c.id].orEmpty().find { p -> now in p.start until p.end } },
+            container = Z.Surface, onLongClick = ::favourite) {
+            Row(Modifier.fillMaxSize().padding(horizontal = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+              Text(if (c.num > 0) "${c.num}" else "", Modifier.width(38.dp), style = MaterialTheme.typography.labelMedium, color = Z.Muted)
+              Box(Modifier.size(40.dp, 30.dp), contentAlignment = Alignment.Center) {
+                if (c.logo != null) AsyncImage(c.logo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
+              }
+              Spacer(Modifier.width(10.dp))
+              if (fav) Text("★ ", style = MaterialTheme.typography.titleSmall, color = Z.Warning)
+              Text(c.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
-            Spacer(Modifier.width(10.dp))
-            if (fav) Text("★ ", style = MaterialTheme.typography.titleSmall, color = Z.Warning)
-            Text(c.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
           }
           Box(Modifier.weight(1f).fillMaxHeight()) {
             if (shows.isEmpty()) {
@@ -363,7 +386,8 @@ private fun Guide(store: Store, x: Xtream, s: LiveState, nav: Nav, windowStart: 
               val from = maxOf(p.start, windowStart)
               val to = minOf(p.end, windowEnd)
               val back = x.canCatchUp(c, p, now)
-              Cell((if (back) "↺  " else "") + p.title, Modifier.offset(x = perMin * ((from - windowStart) / 60_000f)).width((perMin * ((to - from) / 60_000f) - 4.dp).coerceAtLeast(6.dp)).fillMaxHeight(),
+              val reminded = s.reminders.any { it.channel.id == c.id && it.start == p.start }
+              Cell((if (back) "↺  " else if (reminded) "🔔  " else "") + p.title, Modifier.offset(x = perMin * ((from - windowStart) / 60_000f)).width((perMin * ((to - from) / 60_000f) - 4.dp).coerceAtLeast(6.dp)).fillMaxHeight(),
                 now in p.start until p.end, p.end <= now && !back, s, c, p, "row/${c.id}/${p.start}", { open(p) }, ::favourite)
             }
           }
@@ -380,7 +404,7 @@ private fun Guide(store: Store, x: Xtream, s: LiveState, nav: Nav, windowStart: 
 
 @Composable
 private fun Cell(text: String, modifier: Modifier, live: Boolean, past: Boolean, s: LiveState, c: Channel, p: Programme?, key: String, play: () -> Unit, favourite: () -> Unit) =
-  ZSurface(play, modifier.focusMemory(s.focus, key, default = s.focus.key == null && live && s.channels.firstOrNull() == c)
+  ZSurface(play, modifier.focusMemory(s.focus, key)
     .onFocusChanged { if (it.isFocused) s.focused = c to p }, container = if (live) Z.Elevated else if (past) Z.Surface else Z.Card, onLongClick = favourite) {
     Text(text, Modifier.align(Alignment.CenterStart).padding(horizontal = 12.dp), style = MaterialTheme.typography.labelLarge,
       color = when { live -> Z.Text; past -> Z.Muted; else -> Z.Text2 }, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -393,7 +417,9 @@ private fun CategoryPicker(categories: List<Category>, current: Category?, close
   val first = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
   Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.7f))) {
-    Column(Modifier.padding(start = Z.Pad, top = 84.dp).width(360.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(vertical = 14.dp)) {
+    // Focus can't leave the menu while it's open: pick a category or press Back.
+    Column(Modifier.padding(start = Z.Pad, top = 84.dp).width(360.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(vertical = 14.dp)
+      .focusGroup().focusProperties { onExit = { cancelFocusChange() } }) {
       Text("Categories", Modifier.padding(start = 20.dp, bottom = 8.dp), style = MaterialTheme.typography.titleLarge)
       LazyColumn(contentPadding = PaddingValues(horizontal = 10.dp)) {
         itemsIndexed(listOf(FAVS, ALL) + categories) { _, c ->
@@ -419,6 +445,7 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
   // A past programme from the archive, until you change channel (which goes back to live).
   var past by remember { mutableStateOf(s.catchup?.takeIf { it.first.id == channel.id }) }
   DisposableEffect(Unit) { onDispose { s.catchup = null } }
+  LaunchedEffect(s.playing) { if (s.playing != index && s.playing in s.channels.indices) { past = null; index = s.playing } } // switched from outside (a reminder)
   var showBanner by remember { mutableStateOf(true) }
   val player = remember {
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(DefaultHttpDataSource.Factory().setUserAgent(UA).setAllowCrossProtocolRedirects(true))).build()

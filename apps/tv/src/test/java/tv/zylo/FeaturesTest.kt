@@ -364,3 +364,21 @@ class ScheduleTest {
     assertEquals("all down", runCatching { Sports.schedule(0, { throw java.io.IOException("all down") }, now) }.exceptionOrNull()?.message)
   }
 }
+
+class RemindersTest {
+  @Test fun favouritesAndReminders() {
+    val files = HashMap<String, Mem>()
+    val st = Store { files.getOrPut(it) { Mem() } }
+    val c = Channel(55, 101, "Sky Sports", "http://l/1.png", "3", archive = 7, epgId = "Sky.Sports.uk")
+    Xtream.setFavourites(st, listOf(c))
+    assertEquals(listOf(c), Xtream.favourites(st)) // kept whole: the Favourites list needs no download
+    val p = Programme("Match of the Day", "", 1_000_000L, 4_600_000L)
+    assertEquals(true, Reminders.toggle(st, c, p))
+    assertEquals(null, Reminders.due(st, now = 0L)) // not yet
+    assertEquals("Match of the Day", Reminders.due(st, now = 960_000L)?.title) // a minute before
+    assertEquals(false, Reminders.toggle(st, c, p)) // OK again clears it
+    Reminders.toggle(st, c, p)
+    assertEquals(null, Reminders.due(st, now = 5_000_000L)) // over: dropped
+    assertEquals(0, Reminders.all(st).size)
+  }
+}

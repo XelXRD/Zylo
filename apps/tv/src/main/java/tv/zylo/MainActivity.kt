@@ -76,6 +76,7 @@ class UiState(store: Store) {
 }
 
 class Nav(private val stack: SnapshotStateList<Screen>, private val store: Store, val ui: UiState) {
+  val top get() = stack.lastOrNull()
   fun push(s: Screen) {
     ui.stayInNav = false
     stack.add(s)
@@ -148,6 +149,8 @@ class MainActivity : ComponentActivity() {
         }
         // A newer version on the update server: offered once per version (Settings > About can check again).
         if (s !is Screen.Play && s != Screen.LivePlay) UpdatePrompt(store, Updates.asked)
+        // Live TV reminders, over anything (switching from a film or another channel is the point).
+        if (Xtream.from(store) != null && ui.profile.kids == null) ReminderAlert(store, ui, nav)
       }
     }
   }
