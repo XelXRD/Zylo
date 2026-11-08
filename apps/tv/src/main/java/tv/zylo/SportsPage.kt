@@ -132,7 +132,10 @@ private fun options(store: Store, e: SportEvent, all: List<Channel>, live: LiveS
   all.forEach { c -> g.idFor(c)?.let { id -> mine.putIfAbsent(id, c) } }
   val guides = g.programmes.map { (id, list) -> Triple(g.channels[id]?.names?.firstOrNull() ?: Guide.idName(id), mine[id], list) } +
     live.guide.mapNotNull { (cid, list) -> all.find { it.id == cid }?.let { c -> Triple(c.name, c, list) } }
-  return Sports.whereToWatch(e, all, guides, Sports.links(store))
+  // Not linked and not in your guide: the closest of your channels by name, when it's a clear match (changeable).
+  return Sports.whereToWatch(e, all, guides, Sports.links(store)).map { w ->
+    if (w.channel != null) w else bestChannel(w.label, all)?.let { w.copy(channel = it, guessed = true) } ?: w
+  }.distinctBy { it.channel?.id?.toString() ?: "b:${it.label}" }
 }
 
 @Composable
@@ -160,14 +163,18 @@ private fun WhereToWatch(store: Store, s: SportsState, live: LiveState, nav: Nav
             Row(Modifier.padding(horizontal = 12.dp, vertical = 9.dp), verticalAlignment = Alignment.CenterVertically) {
               Column(Modifier.weight(1f)) {
                 Text(w.channel?.name ?: w.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(listOfNotNull(w.programme?.let { "${hm(it.start)} ${it.title}" }, if (w.channel == null) w.from + " · not linked to one of your channels" else if (w.label != w.channel.name) "listed as ${w.label}" else w.from)
+                Text(listOfNotNull(w.programme?.let { "${hm(it.start)} ${it.title}" }, when {
+                  w.channel == null -> w.from + " · pick which of your channels it is"
+                  w.guessed -> "best match for ${w.label} · hold OK to change"
+                  w.label != w.channel.name -> "listed as ${w.label}"
+                  else -> w.from })
                   .joinToString("  ·  "), style = MaterialTheme.typography.labelSmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
               Text(if (w.channel != null) "Watch" else "Link", style = MaterialTheme.typography.labelLarge, color = if (w.channel != null) Z.Text else Z.Info)
             }
           }
         }
-        item { Text("Hold OK on a channel to link a different one.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Z.Muted) }
+        item { Text("Hold OK on any of these to choose a different channel.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelSmall, color = Z.Muted) }
       }
     }
   }
@@ -179,17 +186,19 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
   val ctx = LocalContext.current
   BackHandler { s.linking = null }
   var query by remember { mutableStateOf(w.label) }
-  val ranked = remember(query, s.all) { rankChannels(query, s.all).take(80) }
+  val ranked = remember(query, s.all) { rankChannels(query, s.all).take(60).map { it.first } }
   val first = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
   Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.75f)), contentAlignment = Alignment.CenterEnd) {
     Column(Modifier.padding(top = 84.dp, end = Z.Pad, bottom = 24.dp).width(440.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(18.dp)) {
       Text("Link ${w.label}", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
-      Text("Which of your channels is it? Zylo remembers this for every event on it.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
+      Text("Which of your channels is it? Closest names first; Zylo remembers your choice for every event on it.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
       Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
         ZButton("Search by Name", { ask(ctx, "Channel name", query) { if (it.isNotBlank()) query = it } }, Modifier.focusRequester(first))
         if (w.channel != null) ZButton("Unlink", { Sports.link(store, w.label, null); s.linking = null; s.links++ })
       }
+      if (s.all.isEmpty()) Text("Loading your channels…", color = Z.Text2)
+      else if (ranked.isEmpty()) Text("No channel names look like \"$query\". Search by another name.", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
       LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items(ranked, key = { it.id }) { c ->
           ZSurface({ Sports.link(store, w.label, c); s.linking = null; s.links++ }, Modifier.fillMaxWidth()) {
@@ -205,11 +214,13 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
   }
 }
 
-/** Channels most like a name first (shared letter pairs), so "Sky Sports Main Event" finds "UK | SKY SPORTS MAIN EVENT FHD". */
-fun rankChannels(name: String, all: List<Channel>): List<Channel> {
-  fun pairs(s: String) = channelKey(s).windowed(2).toSet()
-  val want = pairs(name)
-  if (want.isEmpty()) return all
-  return all.map { c -> c to pairs(c.name).let { have -> 2.0 * (have intersect want).size / (have.size + want.size).coerceAtLeast(1) } }
-    .filter { it.second > 0.2 }.sortedByDescending { it.second }.map { it.first }
+/** Channels most like a name first: "Sky Sports Main Event HD" puts "UK | SKY SPORTS MAIN EVENT ᶠᴴᴰ" at the top. */
+fun rankChannels(name: String, all: List<Channel>, min: Double = 0.3): List<Pair<Channel, Double>> =
+  all.map { it to channelLikeness(name, it.name) }.filter { it.second >= min }.sortedByDescending { it.second }
+
+/** Sure enough to use without asking (it can still be changed): the top match, clearly ahead of the next. */
+fun bestChannel(name: String, all: List<Channel>): Channel? {
+  val r = rankChannels(name, all, 0.75).take(2)
+  val top = r.firstOrNull() ?: return null
+  return top.first.takeIf { r.size < 2 || top.second - r[1].second >= 0.05 || channelKey(top.first.name) == channelKey(name) }
 }

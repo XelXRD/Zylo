@@ -27,7 +27,8 @@ data class SportEvent(
 }
 
 /** Where to watch: a label (a channel or broadcaster), what the guide calls the programme, and the channel to play. */
-data class WatchOption(val label: String, val programme: Programme?, val channel: Channel?, val from: String)
+/** [guessed]: the channel was picked by its name looking alike, not linked or matched by the guide. */
+data class WatchOption(val label: String, val programme: Programme?, val channel: Channel?, val from: String, val guessed: Boolean = false)
 
 object Sports {
   /** Sport, ESPN path, league name; "kw" is what a TV listing for an event without two teams would mention. */

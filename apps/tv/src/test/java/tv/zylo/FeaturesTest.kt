@@ -313,8 +313,16 @@ class SportsTest {
     assertEquals(listOf("Sky Sports Main Event HD" to sky, "Canal+ Sport" to null, "USA Net" to usa, "Peacock" to null), got.map { it.label to it.channel })
   }
 
-  @Test fun ranksChannelsForLinking() =
-    assertEquals(listOf(10, 12), rankChannels("Sky Sports Main Event", listOf(Channel(11, 0, "BBC One", null, ""), Channel(12, 0, "Sky Sports Arena", null, ""), Channel(10, 0, "UK: SKY SPORTS MAIN EVENT FHD", null, ""))).map { it.id })
+  @Test fun ranksChannelsForLinking() {
+    val all = listOf(Channel(11, 0, "BBC One", null, ""), Channel(12, 0, "UK | Sky Sports Arena", null, ""), Channel(10, 0, "UK: SKY SPORTS MAIN EVENT ᶠᴴᴰ", null, ""),
+      Channel(13, 0, "UK | TNT Sports 1 HD", null, ""), Channel(14, 0, "UK | TNT Sports 2 HD", null, ""), Channel(15, 0, "US: USA Network", null, ""))
+    assertEquals(10, rankChannels("Sky Sports Main Event HD", all).first().first.id)
+    assertEquals(10, bestChannel("Sky Sports Main Event HD", all)?.id) // ᶠᴴᴰ and "UK:" don't get in the way
+    assertEquals(14, bestChannel("TNT Sports 2", all)?.id) // the number decides
+    assertEquals(null, bestChannel("Sky Sports Football", all)) // not sure enough: ask
+    assertEquals(15, rankChannels("USA Net", all).first().first.id)
+    assertEquals(setOf("sky", "sports", "main", "event"), channelWords("UK | SKY SPORTS MAIN EVENT ᶠᴴᴰ"))
+  }
 }
 
 class UpdateTest {

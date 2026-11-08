@@ -41,12 +41,36 @@ class Guide(val channels: Map<String, GuideChannel>, val programmes: Map<String,
  * become "skysportsmainevent". Country tags and quality labels go; "+1" stays (it's a different channel).
  */
 fun channelKey(name: String): String {
-  var n = name.lowercase()
+  // ᴴᴰ, ＦＨＤ, accents and the like → plain letters first; emoji and symbols go.
+  var n = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFKD).replace(Regex("[^\\p{ASCII}]"), "").lowercase()
     .replace(Regex("^\\s*[\\[(|]?\\s*[a-z]{2,3}\\s*[\\])|:]\\s*"), "") // "UK |", "[UK]", "UK:"
     .replace(Regex("\\b(uhd|fhd|hd|sd|4k|8k|hevc|h265|raw|backup|vip|50fps|60fps|1080p|720p)\\b"), " ")
     .replace("+1", " plus1 ").replace("&", " and ")
   n = n.replace(Regex("[^a-z0-9]"), "")
   return n
+}
+
+private val NOISE = setOf("uk", "us", "gb", "ie", "hd", "fhd", "uhd", "sd", "4k", "tv", "the", "channel", "live", "vip", "raw", "hevc", "backup")
+
+/** A channel name's meaningful words: "UK | SKY SPORTS MAIN EVENT ᶠᴴᴰ" → sky, sports, main, event. */
+fun channelWords(name: String) = java.text.Normalizer.normalize(name, java.text.Normalizer.Form.NFKD).replace(Regex("[^\\p{ASCII}]"), "").lowercase()
+  .replace("+1", " plus1 ").replace("&", " and ").split(Regex("[^a-z0-9]+")).filter { it.isNotEmpty() && it !in NOISE }.toSet()
+
+/**
+ * How alike two channel names are, 0…1: shared words (all of the shorter name's words found scores high) blended with
+ * shared letter pairs (catches "SkySp Main Evt"-style spellings). Numbers must agree: "Sky Sports 1" isn't "Sky Sports 2".
+ */
+fun channelLikeness(a: String, b: String): Double {
+  val (wa, wb) = channelWords(a) to channelWords(b)
+  if (wa.isEmpty() || wb.isEmpty()) return 0.0
+  val numbers = { w: Set<String> -> w.filter { it.all(Char::isDigit) || it == "plus1" }.toSet() }
+  if (numbers(wa) != numbers(wb)) return 0.0
+  // A word matches the same word or its longer form ("net" → "network", "utd" won't, "sport" → "sports").
+  val (short, long) = if (wa.size <= wb.size) wa to wb else wb to wa
+  val words = short.count { w -> w in long || (w.length >= 3 && long.any { it.startsWith(w) || (it.length >= 3 && w.startsWith(it)) }) }.toDouble() / short.size
+  val pa = channelKey(a).windowed(2).toSet(); val pb = channelKey(b).windowed(2).toSet()
+  val pairs = if (pa.isEmpty() || pb.isEmpty()) 0.0 else 2.0 * (pa intersect pb).size / (pa.size + pb.size)
+  return 0.6 * words + 0.4 * pairs
 }
 
 object Epg {
