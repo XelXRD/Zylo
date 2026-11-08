@@ -15,10 +15,14 @@ class HttpError(val code: Int, message: String) : Exception(message)
 fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null): String {
   val c = URL(url).openConnection() as HttpURLConnection
   try {
-    c.requestMethod = method
+    try {
+      c.requestMethod = method
+    } catch (e: java.net.ProtocolException) { // PATCH (MyAnimeList) on stacks that only list the classic methods
+      HttpURLConnection::class.java.getDeclaredField("method").apply { isAccessible = true }.set(c, method)
+    }
     c.connectTimeout = 10_000
     c.readTimeout = 20_000
-    c.setRequestProperty("User-Agent", "Zylo/0.9.0")
+    c.setRequestProperty("User-Agent", "Zylo/0.10.0")
     headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
     if (body != null) {
       c.doOutput = true
@@ -59,11 +63,12 @@ data class Item(val type: String, val id: Int, val title: String, val poster: St
 fun img(path: String?, size: String) = path?.let { "https://image.tmdb.org/t/p/$size$it" }
 
 /** One saved playback position. 90% counts as watched. */
-class Watch(val key: String, val item: Item, val season: Int?, val episode: Int?, val pos: Long, val dur: Long, val at: Long) {
+/** One saved playback position. 90% counts as watched. `percent`: imported from Trakt, which only knows a percentage. */
+class Watch(val key: String, val item: Item, val season: Int?, val episode: Int?, val pos: Long, val dur: Long, val at: Long, val percent: Boolean = false) {
   val fraction get() = if (dur > 0) pos.toFloat() / dur else 0f
   val finished get() = dur > 0 && pos >= dur * 0.9
-  val started get() = pos > 60_000 && !finished
-  val minutesLeft get() = ((dur - pos) / 60_000).coerceAtLeast(1)
+  val started get() = !finished && if (percent) fraction > 0.01f else pos > 60_000
+  val left get() = if (percent) "${(fraction * 100).toInt()}% watched" else "${((dur - pos) / 60_000).coerceAtLeast(1)} min left"
 }
 
 fun progressKey(item: Item, season: Int?, episode: Int?) = "${item.type}:${item.id}" + if (season != null) ":$season:$episode" else ""
@@ -72,7 +77,10 @@ fun progressKey(item: Item, season: Int?, episode: Int?) = "${item.type}:${item.
 
 class Store(ctx: Context) {
   private val p = ctx.getSharedPreferences("zylo", Context.MODE_PRIVATE)
-  private fun put(k: String, v: String) = p.edit().putString(k, v).apply()
+  fun put(k: String, v: String) = p.edit().putString(k, v).apply()
+  fun str(k: String) = p.getString(k, "")!!
+  fun long(k: String) = p.getLong(k, 0)
+  fun putLong(k: String, v: Long) = p.edit().putLong(k, v).apply()
 
   // ponytail: keys live in app-private storage, not Keystore-encrypted; add that if the Shield is shared or rooted
   var tmdb: String
@@ -90,6 +98,11 @@ class Store(ctx: Context) {
   var previews: Boolean
     get() = previewsState.value
     set(v) { previewsState.value = v; p.edit().putBoolean("previews", v).apply() }
+
+  private val trailerSoundState = mutableStateOf(p.getBoolean("trailerSound", false))
+  var trailerSound: Boolean
+    get() = trailerSoundState.value
+    set(v) { trailerSoundState.value = v; p.edit().putBoolean("trailerSound", v).apply() }
 
   private val reduceMotionState = mutableStateOf(p.getBoolean("reduceMotion", false))
   var reduceMotion: Boolean
@@ -122,7 +135,7 @@ class Store(ctx: Context) {
     all.keys().asSequence().mapNotNull { k ->
       val o = all.optJSONObject(k) ?: return@mapNotNull null
       runCatching {
-        Watch(k, Item.from(o.getJSONObject("item")), if (o.has("s")) o.getInt("s") else null, if (o.has("e")) o.getInt("e") else null, o.optLong("pos"), o.optLong("dur"), o.optLong("at"))
+        Watch(k, Item.from(o.getJSONObject("item")), if (o.has("s")) o.getInt("s") else null, if (o.has("e")) o.getInt("e") else null, o.optLong("pos"), o.optLong("dur"), o.optLong("at"), o.optBoolean("pct"))
       }.getOrNull()
     }.toList()
   }.also { watchCache = it }
@@ -131,11 +144,22 @@ class Store(ctx: Context) {
   fun latest(item: Item) = watches().filter { it.item.key == item.key }.maxByOrNull { it.at }
   fun continueWatching() = watches().filter { it.started }.sortedByDescending { it.at }.distinctBy { it.item.key }.take(12)
 
-  fun saveWatch(item: Item, season: Int?, episode: Int?, pos: Long, dur: Long) {
-    val o = JSONObject().put("item", item.toJson()).put("pos", pos).put("dur", dur).put("at", System.currentTimeMillis())
+  fun saveWatch(item: Item, season: Int?, episode: Int?, pos: Long, dur: Long, at: Long = System.currentTimeMillis(), percent: Boolean = false) {
+    val o = JSONObject().put("item", item.toJson()).put("pos", pos).put("dur", dur).put("at", at)
+    if (percent) o.put("pct", true)
     if (season != null) o.put("s", season).put("e", episode ?: 0)
     put("progress", allProgress().put(progressKey(item, season, episode), o).toString())
     watchCache = null
+  }
+
+  /** Watched here (90%+) or in Trakt's history. Keys as progressKey(). */
+  fun watched(key: String) = watch(key)?.finished == true || key in traktWatched()
+
+  private var traktCache: Set<String>? = null
+  fun traktWatched(): Set<String> = traktCache ?: strings(JSONArray(p.getString("trakt_watched", "[]"))).toSet().also { traktCache = it }
+  fun setTraktWatched(keys: Set<String>) {
+    put("trakt_watched", JSONArray(keys.toList()).toString())
+    traktCache = keys
   }
 
   fun forget(key: String) {
@@ -159,12 +183,16 @@ class Tmdb(private val key: String) {
   /** Everything a detail page or preview needs, in one request. Cached for the session. */
   fun details(type: String, id: Int): JSONObject = cache.getOrPut("$type:$id") {
     val extra = if (type == "movie") "release_dates" else "content_ratings"
-    get("/$type/$id?append_to_response=external_ids,videos,credits,recommendations,$extra&include_video_language=en,null")
+    get("/$type/$id?append_to_response=external_ids,videos,credits,recommendations,images,$extra&include_video_language=en,null&include_image_language=en,null")
   }
 
   fun season(id: Int, n: Int): JSONObject = cache.getOrPut("season:$id:$n") { get("/tv/$id/season/$n") }
 
   fun genres(type: String) = cache.getOrPut("genres:$type") { get("/genre/$type/list") }.optJSONArray("genres")?.objects()?.map { it.optInt("id") to it.optString("name") }.orEmpty()
+
+  /** A TMDB card from another site's id (imdb_id, tvdb_id). */
+  fun find(id: String, source: String, type: String): Item? = cache.getOrPut("find:$source:$id") { get("/find/${enc(id)}?external_source=$source") }
+    .optJSONArray(if (type == "movie") "movie_results" else "tv_results")?.objects()?.firstOrNull()?.let { item(it, type) }
 
   /** Details for a preview card. A failure is remembered, so a broken title isn't retried on every focus. */
   fun preview(item: Item): JSONObject? = if (item.key in failed) null else runCatching { details(item.type, item.id) }.onFailure { failed += item.key }.getOrNull()
@@ -214,11 +242,17 @@ class Tmdb(private val key: String) {
   }
 }
 
-class RowSpec(val title: String, val path: String, val type: String?)
+/** A row of titles: a TMDB list path, or a custom loader (Trakt, anime trackers). */
+class RowSpec(val title: String, val path: String, val type: String?, val load: ((Tmdb) -> List<Item>)? = null)
 
 fun homeRows(store: Store): List<RowSpec> {
   val last = store.watches().maxByOrNull { it.at }?.item
-  return listOf(
+  val trakt = if (Trakt.connected(store)) listOf(
+    RowSpec("Your Trakt Watchlist", "", null) { Trakt.items(it, Trakt.watchlist(store)) },
+    RowSpec("Recommended For You", "", null) { Trakt.items(it, Trakt.recommendations(store)) },
+  ) else emptyList()
+  val popular = if (store.str("trakt_client").isNotEmpty()) listOf(RowSpec("Popular on Trakt", "", null) { Trakt.items(it, Trakt.trending(store)) }) else emptyList()
+  return trakt + listOf(
     RowSpec("Trending Movies", "/trending/movie/week", "movie"),
     RowSpec("Popular Series", "/tv/popular", "tv"),
     RowSpec("Popular Anime", "/discover/tv?with_genres=16&with_origin_country=JP&sort_by=popularity.desc", "tv"),
@@ -226,7 +260,7 @@ fun homeRows(store: Store): List<RowSpec> {
     RowSpec("In Cinemas Now", "/movie/now_playing?region=GB", "movie"),
     RowSpec("New Episodes This Week", "/tv/on_the_air", "tv"),
     RowSpec("Top Rated Films", "/movie/top_rated", "movie"),
-  )
+  ) + popular
 }
 
 val DISCOVER_ROWS = listOf(

@@ -70,6 +70,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   var inList by remember { mutableStateOf(store.inMyList(item)) }
   var tick by remember { mutableIntStateOf(0) }
   val latest = remember(tick) { store.latest(item) }
+  val look = rememberLook(store, item)
 
   LaunchedEffect(item) { runCatching { withContext(Dispatchers.IO) { t.details(item.type, item.id) } }.onSuccess { d = it }.onFailure { error = it.message } }
   val seasons = d?.optJSONArray("seasons")?.objects().orEmpty()
@@ -92,7 +93,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val playLabel = (if (resuming != null) "Resume" else "Play") + if (tv) " S$playSeason E$playEpisode" else ""
 
   Box(Modifier.fillMaxSize()) {
-    AsyncImage(img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg, 0.5f to Z.Bg.copy(alpha = 0.85f), 1f to Z.Bg.copy(alpha = 0.35f))))
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 0.8f to Z.Bg)))
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = Z.Pad, end = Z.Pad, top = 36.dp, bottom = 40.dp)) {
@@ -100,7 +101,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
         Artwork(img(item.poster, "w342"), item.title, Modifier.width(168.dp).aspectRatio(2f / 3f).clip(Z.Medium))
         Spacer(Modifier.width(32.dp))
         Column(Modifier.weight(1f)) {
-          Text(item.title, style = MaterialTheme.typography.displayMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+          TitleLogo(look, item.title, MaterialTheme.typography.displayMedium, 380.dp, 100.dp)
           MetaLine(Tmdb.meta(item, d).let { m -> if (tv) m + listOfNotNull(d?.optInt("number_of_episodes")?.takeIf { it > 0 }?.let { "$it Episodes" }) else m }, Modifier.padding(top = 8.dp))
           Rating(d?.optDouble("vote_average", 0.0) ?: item.rating, Modifier.padding(top = 8.dp))
           Text(d?.str("overview") ?: item.overview, Modifier.padding(top = 12.dp).fillMaxWidth(0.92f), style = MaterialTheme.typography.bodyLarge, color = Z.Text2, maxLines = 4, overflow = TextOverflow.Ellipsis)
@@ -108,12 +109,14 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
           Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ZButton(playLabel, { nav.push(Screen.Sources(item, playSeason, playEpisode, autoplay = true)) }, Modifier.focusMemory(focus, "play", default = true), primary = true, icon = Icons.Filled.PlayArrow)
             ZButton("Choose Source", { nav.push(Screen.Sources(item, playSeason, playEpisode)) }, Modifier.focusMemory(focus, "source"))
-            ZButton("My List", { inList = store.toggleMyList(item) }, Modifier.focusMemory(focus, "list"), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+            ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(focus, "list"), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
             if (trailer != null) ZButton("Trailer", { openTrailer(ctx, trailer) }, Modifier.focusMemory(focus, "trailer"))
             if (!tv) {
-              val watched = latest?.finished == true
+              val watched = remember(tick) { store.watched(progressKey(item, null, null)) }
               ZButton(if (watched) "Watched" else "Mark as Watched", {
                 if (watched) store.forget(progressKey(item, null, null)) else store.saveWatch(item, null, null, 1, 1)
+                Trakt.setWatched(store, item, null, null, !watched)
+                if (!watched) Anime.watched(ctx, store, item, null, null)
                 tick++
               }, Modifier.focusMemory(focus, "watched"), icon = if (watched) Icons.Filled.Check else null)
             }
@@ -154,15 +157,16 @@ private fun Episodes(store: Store, item: Item, seasons: List<JSONObject>, season
       val s = season ?: 0
       val n = e.optInt("episode_number")
       val w = store.watch(progressKey(item, s, n))
+      val watched = store.watched(progressKey(item, s, n))
       Column(Modifier.width(220.dp)) {
         ZCard({ nav.push(Screen.Sources(item, s, n, e.optString("name"), autoplay = true)) }, Modifier.focusMemory(focus, "ep/$s/$n").fillMaxWidth().aspectRatio(16f / 9f)) {
           Box(Modifier.fillMaxSize()) {
             Artwork(img(e.str("still_path"), "w300") ?: img(item.backdrop, "w300"), e.optString("name"))
-            WatchMarks(w)
+            WatchMarks(w, watched)
           }
         }
         Text("$n. ${e.optString("name")}", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        MetaLine(listOfNotNull(e.optInt("runtime").takeIf { it > 0 }?.let { "${it}m" }, e.str("air_date"), "Watched".takeIf { w?.finished == true }))
+        MetaLine(listOfNotNull(e.optInt("runtime").takeIf { it > 0 }?.let { "${it}m" }, e.str("air_date"), "Watched".takeIf { watched }))
         Text(e.optString("overview"), Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
       }
     }
@@ -344,16 +348,24 @@ fun PlayerPage(store: Store, s: Screen.Play) {
   var controls by remember { mutableStateOf(false) }
   var view by remember { mutableStateOf<PlayerView?>(null) }
   val player = remember {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.9.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
+    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.10.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(http)).build().apply {
       setMediaItem(MediaItem.fromUri(s.url))
-      store.watch(key)?.takeIf { it.started }?.let { seekTo(it.pos) }
+      store.watch(key)?.takeIf { it.started && !it.percent }?.let { seekTo(it.pos) }
       prepare()
       playWhenReady = true
     }
   }
+  val resumeAt = remember { store.watch(key)?.takeIf { it.started && it.percent }?.fraction } // from Trakt: a percentage, seek once the length is known
+  var finishedSent by remember { mutableStateOf(store.watch(key)?.finished == true) }
+  fun progress() = if (player.duration > 0) player.currentPosition * 100f / player.duration else 0f
   fun save() {
-    if (player.duration > 0) store.saveWatch(s.item, s.season, s.episode, player.currentPosition, player.duration)
+    if (player.duration <= 0) return
+    store.saveWatch(s.item, s.season, s.episode, player.currentPosition, player.duration)
+    if (!finishedSent && player.currentPosition >= player.duration * 0.9) {
+      finishedSent = true
+      Anime.watched(ctx, store, s.item, s.season, s.episode)
+    }
   }
   LaunchedEffect(player) {
     while (true) {
@@ -363,8 +375,16 @@ fun PlayerPage(store: Store, s: Screen.Play) {
   }
   val lifecycle = LocalLifecycleOwner.current.lifecycle
   DisposableEffect(player) {
+    var seeked = false
     val listener = object : Player.Listener {
       override fun onPlayerError(e: PlaybackException) { error = "Couldn't play this source (${e.errorCodeName}). Press Back and choose another." }
+      override fun onPlaybackStateChanged(state: Int) {
+        if (state == Player.STATE_READY && !seeked && resumeAt != null && player.duration > 0) { seeked = true; player.seekTo((player.duration * resumeAt).toLong()) }
+      }
+      // Trakt "now watching": start when playing, pause when paused, stop when leaving (80%+ counts as watched).
+      override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (player.duration > 0) Trakt.scrobble(store, if (isPlaying) "start" else "pause", s.item, s.season, s.episode, progress())
+      }
     }
     val observer = LifecycleEventObserver { _, event -> if (event == Lifecycle.Event.ON_STOP) { save(); player.pause() } }
     player.addListener(listener)
@@ -372,6 +392,7 @@ fun PlayerPage(store: Store, s: Screen.Play) {
     onDispose {
       lifecycle.removeObserver(observer)
       save()
+      if (player.duration > 0) Trakt.scrobble(store, "stop", s.item, s.season, s.episode, progress())
       player.release()
     }
   }

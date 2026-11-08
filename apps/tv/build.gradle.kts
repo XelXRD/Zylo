@@ -13,8 +13,8 @@ android {
     applicationId = "tv.zylo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 3
-    versionName = "0.9.0"
+    versionCode = 4
+    versionName = "0.10.0"
   }
   // Same key as the old WebView build, so this installs over it.
   signingConfigs { getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "zylo"; keyPassword = "android" } }
@@ -37,6 +37,7 @@ dependencies {
   implementation("androidx.media3:media3-exoplayer-hls:1.8.0")
   implementation("androidx.media3:media3-ui:1.8.0")
   implementation("io.coil-kt:coil-compose:2.7.0")
+  implementation("com.google.zxing:core:3.5.3") // QR codes for signing in from a phone
   testImplementation("junit:junit:4.13.2")
   testImplementation("org.json:json:20250517") // android.jar's org.json is stubbed in unit tests
 }

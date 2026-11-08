@@ -215,7 +215,7 @@ fun MetaLine(parts: List<String>, modifier: Modifier = Modifier, color: Color = 
 fun PosterCard(store: Store, item: Item, modifier: Modifier = Modifier, onClick: () -> Unit) = ZCard(onClick, modifier.aspectRatio(2f / 3f)) {
   Box(Modifier.fillMaxSize()) {
     Artwork(img(item.poster, "w342"), item.title)
-    WatchMarks(store.latest(item)?.takeIf { item.type == "movie" || !it.finished }) // a finished episode isn't a finished series
+    Marks(store, item)
   }
 }
 
@@ -226,13 +226,17 @@ fun Artwork(url: String?, title: String, modifier: Modifier = Modifier.fillMaxSi
   AsyncImage(url, title, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
 }
 
+/** Card marks: a tick on watched films, a progress bar on anything part-watched. A finished episode isn't a finished series. */
 @Composable
-fun BoxScope.WatchMarks(w: Watch?) {
-  if (w == null) return
-  if (w.finished) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(22.dp).clip(CircleShape).background(Z.Bg.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
+fun BoxScope.Marks(store: Store, item: Item) =
+  WatchMarks(store.latest(item)?.takeIf { !it.finished }, item.type == "movie" && store.watched(progressKey(item, null, null)))
+
+@Composable
+fun BoxScope.WatchMarks(w: Watch?, watched: Boolean = w?.finished == true) {
+  if (watched) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(22.dp).clip(CircleShape).background(Z.Bg.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
     Glyph(Icons.Filled.Check, 14.dp, Z.Text)
   }
-  else if (w.started) ProgressBar(w.fraction, Modifier.align(Alignment.BottomCenter))
+  else if (w?.started == true) ProgressBar(w.fraction, Modifier.align(Alignment.BottomCenter))
 }
 
 // --- Focus memory: put focus back where it was when returning to a screen -------------------------

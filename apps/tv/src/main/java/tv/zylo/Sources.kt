@@ -245,6 +245,7 @@ fun testService(service: String, key: String) {
   when (service) {
     "tmdb" -> Tmdb(key).get("/configuration")
     "torbox" -> http("https://api.torbox.app/v1/api/user/me", headers = mapOf("Authorization" to "Bearer $key"))
+    "fanart" -> http("https://webservice.fanart.tv/v3/movies/603?api_key=${enc(key)}")
     "realdebrid" -> http("https://api.real-debrid.com/rest/1.0/user", headers = mapOf("Authorization" to "Bearer $key"))
     else -> JSONObject(http("https://www.premiumize.me/api/account/info?apikey=${enc(key)}")).let {
       if (it.optString("status") != "success") throw HttpError(401, it.optString("message", "Premiumize didn't accept the key."))

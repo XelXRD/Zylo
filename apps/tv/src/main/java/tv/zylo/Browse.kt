@@ -8,13 +8,14 @@ import androidx.compose.animation.Crossfade
 import androidx.compose.animation.core.FastOutSlowInEasing
 import androidx.compose.animation.core.animateDpAsState
 import androidx.compose.animation.core.tween
-import androidx.compose.foundation.ExperimentalFoundationApi
+import androidx.compose.animation.core.animateFloatAsState
+import androidx.compose.animation.core.snap
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.*
 import androidx.compose.foundation.lazy.grid.*
-import androidx.compose.foundation.relocation.BringIntoViewRequester
-import androidx.compose.foundation.relocation.bringIntoViewRequester
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
@@ -26,6 +27,9 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.alpha
+import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
@@ -64,7 +68,7 @@ class RowsState(private val specs: () -> List<RowSpec>) {
     error = null
     val got = specs().map { spec ->
       async {
-        spec.title to runCatching { t.list(spec.path, spec.type) }.getOrElse {
+        spec.title to runCatching { spec.load?.invoke(t) ?: t.list(spec.path, spec.type) }.getOrElse {
           if (it is HttpError && it.code == 401) error = "TMDB didn't accept your key. Check it in Settings > Integrations."
           emptyList()
         }
@@ -96,33 +100,36 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 76.dp, bottom = 56.dp)) {
     if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 4.dp), style = MaterialTheme.typography.displaySmall) }
     if (featured != null) item("hero") { HomeHero(store, featured, nav, s.focus) }
-    if (watching.isNotEmpty()) item("continue") { ContinueRow(watching, s, nav) }
+    if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
     items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = !hero && name == rows.first().first) }
   }
 }
 
 @Composable
 fun HomeHero(store: Store, item: Item, nav: Nav, focus: FocusMemory) {
-  var d by remember(item) { mutableStateOf(Tmdb.cached(item)) }
-  LaunchedEffect(item) { if (d == null) d = withContext(Dispatchers.IO) { Tmdb(store.tmdb).preview(item) } }
+  val look = rememberLook(store, item)
+  val d = look?.details
   var inList by remember(item) { mutableStateOf(store.inMyList(item)) }
   Box(Modifier.fillMaxWidth().height(360.dp)) {
-    AsyncImage(img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg, 0.38f to Z.Bg.copy(alpha = 0.7f), 0.72f to Color.Transparent)))
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Z.Bg)))
     Column(Modifier.align(Alignment.BottomStart).padding(start = Z.Pad, bottom = 18.dp).fillMaxWidth(0.46f)) {
-      Text(item.title, style = MaterialTheme.typography.displayLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
-      MetaLine(Tmdb.meta(item, d), Modifier.padding(top = 8.dp))
+      TitleLogo(look, item.title, MaterialTheme.typography.displayLarge, 340.dp, 96.dp)
+      MetaLine(Tmdb.meta(item, d), Modifier.padding(top = 10.dp))
       Rating(item.rating, Modifier.padding(top = 6.dp))
       Text(item.overview, Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
       Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
         ZButton("Play", { nav.play(item) }, Modifier.focusMemory(focus, "hero/play", default = true), primary = true, icon = Icons.Filled.PlayArrow)
         ZButton("More Info", { nav.push(Screen.Title(item)) }, Modifier.focusMemory(focus, "hero/info"), icon = Icons.Filled.Info)
-        ZButton("My List", { inList = store.toggleMyList(item) }, Modifier.focusMemory(focus, "hero/list"), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+        ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(focus, "hero/list"), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
       }
     }
   }
 }
+
+/** My List, mirrored to the Trakt watchlist when Trakt is connected. Returns true if it's now on the list. */
+fun toggleList(store: Store, item: Item) = store.toggleMyList(item).also { Trakt.setWatchlisted(store, item, it) }
 
 @Composable
 fun Rating(rating: Double, modifier: Modifier = Modifier) {
@@ -139,9 +146,10 @@ fun Rating(rating: Double, modifier: Modifier = Modifier) {
 @Composable
 fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: Nav, default: Boolean) = Column {
   Text(name, Modifier.padding(start = Z.Pad, top = 10.dp), style = MaterialTheme.typography.titleLarge)
+  PivotRow {
   LazyRow(
     state = s.rowLists.getOrPut(name) { LazyListState() },
-    contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 14.dp),
+    contentPadding = PaddingValues(start = Z.Pad, end = 400.dp, top = 14.dp, bottom = 14.dp), // end room so the last card can reach the pivot
     horizontalArrangement = Arrangement.spacedBy(14.dp),
   ) {
     itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
@@ -152,35 +160,50 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
       ) { nav.push(Screen.Title(item)) }
     }
   }
+  }
+}
+
+/**
+ * Netflix-style rows: the focused card always sits at the left edge, so moving along a row scrolls it by one card
+ * instead of the card sliding about (that, plus collapsing instantly, is what stops the bounce between previews).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun PivotRow(content: @Composable () -> Unit) {
+  val pad = with(LocalDensity.current) { Z.Pad.toPx() }
+  val spec = remember(pad) { object : BringIntoViewSpec { override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = offset - pad } }
+  CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
 }
 
 /** Poster that widens into a 16:9 preview (artwork, then muted trailer) once focus rests on it. OK opens the title. */
-@OptIn(ExperimentalFoundationApi::class)
 @Composable
 fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
-  val width by animateDpAsState(if (expanded) 330.dp else 124.dp, tween(ms(300), easing = FastOutSlowInEasing), label = "card")
-  val bring = remember { BringIntoViewRequester() }
-  var d by remember { mutableStateOf(Tmdb.cached(item)) }
-  LaunchedEffect(expanded) { if (expanded && d == null) d = withContext(Dispatchers.IO) { Tmdb(store.tmdb).preview(item) } }
-  val grow = ms(320).toLong()
+  // Grows smoothly, shrinks at once: an animated shrink drags the next card sideways while the row scrolls.
+  val width by animateDpAsState(if (expanded) 330.dp else 124.dp, if (expanded) tween(ms(300), easing = FastOutSlowInEasing) else snap(), label = "card")
+  val look = rememberLook(store, item, enabled = expanded)
+  val d = look?.details
+  var grown by remember { mutableStateOf(false) } // the trailer only starts once the card is full size
+  val growMs = ms(300).toLong()
   LaunchedEffect(expanded) {
-    if (!expanded) return@LaunchedEffect
-    delay(grow)
-    bring.bringIntoView() // keep the wider card on screen
+    grown = false
+    if (expanded) { delay(growMs); grown = true }
   }
-  ZCard(onClick, modifier.bringIntoViewRequester(bring).width(width).height(186.dp).onFocusChanged { onFocus(it.isFocused) }) {
+  var playing by remember { mutableStateOf(false) }
+  val overlay by animateFloatAsState(if (playing) 0f else 1f, tween(ms(250)), label = "overlay")
+  ZCard(onClick, modifier.width(width).height(186.dp).onFocusChanged { onFocus(it.isFocused) }) {
     Crossfade(expanded, animationSpec = tween(ms(250)), label = "preview") { open ->
       Box(Modifier.fillMaxSize()) {
         if (!open) {
           Artwork(img(item.poster, "w342"), item.title)
-          WatchMarks(store.latest(item)?.takeIf { item.type == "movie" || !it.finished })
+          Marks(store, item)
         } else {
           AsyncImage(img(item.backdrop ?: item.poster, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
           val trailer = Tmdb.trailer(d)
-          if (trailer != null && store.previews) Trailer(trailer, Modifier.fillMaxSize())
-          Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.3f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f))))
-          Column(Modifier.align(Alignment.BottomStart).padding(12.dp)) {
-            Text(item.title, style = MaterialTheme.typography.titleMedium, color = Z.Text, maxLines = 1, overflow = TextOverflow.Ellipsis)
+          if (trailer != null && grown && store.previews) Trailer(trailer, Modifier.fillMaxSize(), store.trailerSound) { playing = it }
+          // Details over the artwork; they fade away once the trailer is playing so it fills the whole card.
+          Box(Modifier.fillMaxSize().alpha(overlay).background(Brush.verticalGradient(0.3f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f))))
+          Column(Modifier.align(Alignment.BottomStart).padding(12.dp).alpha(overlay)) {
+            TitleLogo(look, item.title, MaterialTheme.typography.titleMedium.copy(color = Z.Text), 170.dp, 44.dp)
             MetaLine(Tmdb.meta(item, d) + listOfNotNull(item.rating.takeIf { it > 0 }?.let { "★ %.1f".format(it) }), Modifier.padding(top = 3.dp))
             Text(item.overview, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
           }
@@ -191,7 +214,7 @@ fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier,
 }
 
 @Composable
-fun ContinueRow(list: List<Watch>, s: RowsState, nav: Nav) = Column {
+fun ContinueRow(store: Store, list: List<Watch>, s: RowsState, nav: Nav) = Column {
   Text("Continue Watching", Modifier.padding(start = Z.Pad, top = 10.dp), style = MaterialTheme.typography.titleLarge)
   LazyRow(
     state = s.rowLists.getOrPut("continue") { LazyListState() },
@@ -199,15 +222,16 @@ fun ContinueRow(list: List<Watch>, s: RowsState, nav: Nav) = Column {
     horizontalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     items(list, key = { it.key }) { w ->
+      val look = rememberLook(store, w.item)
       Column(Modifier.width(232.dp)) {
         ZCard({ nav.push(Screen.Sources(w.item, w.season, w.episode, autoplay = true)) }, Modifier.focusMemory(s.focus, "continue/${w.key}").fillMaxWidth().aspectRatio(16f / 9f)) {
           Box(Modifier.fillMaxSize()) {
-            Artwork(img(w.item.backdrop ?: w.item.poster, "w780"), w.item.title)
+            Artwork(look?.thumb ?: img(w.item.backdrop ?: w.item.poster, "w780"), w.item.title)
             ProgressBar(w.fraction, Modifier.align(Alignment.BottomCenter))
           }
         }
         Text(w.item.title, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        MetaLine(listOfNotNull(w.season?.let { "S$it E${w.episode}" }, "${w.minutesLeft} min left"))
+        MetaLine(listOfNotNull(w.season?.let { "S$it E${w.episode}" }, w.left))
       }
     }
   }
@@ -317,14 +341,50 @@ fun PosterGrid(store: Store, items: List<Item>, focus: FocusMemory, nav: Nav, st
     }
   }
 
+/** One tab on My List: Zylo's own list, the Trakt watchlist, your Trakt lists, anime tracker lists. */
+class ListSource(val id: String, val label: String, val load: () -> List<Item>)
+
+private val listCache = java.util.concurrent.ConcurrentHashMap<String, List<Item>>()
+
 @Composable
 fun MyListPage(store: Store, nav: Nav, focus: FocusMemory, restore: Boolean) {
-  val list = remember { store.myList }
-  RestoreFocus(focus, list.isNotEmpty() && restore)
+  val ctx = LocalContext.current
+  val tmdb = remember { Tmdb(store.tmdb) }
+  var sources by remember { mutableStateOf(listOf(ListSource("mine", "My List") { store.myList })) }
+  LaunchedEffect(Unit) {
+    val more = withContext(Dispatchers.IO) {
+      val trakt = if (Trakt.connected(store)) listOf(ListSource("trakt-watchlist", "Trakt Watchlist") { Trakt.items(tmdb, Trakt.watchlist(store), 200) }) +
+        runCatching { Trakt.lists(store) }.getOrDefault(emptyList()).map { l -> ListSource("trakt-${l.id}", l.name) { Trakt.items(tmdb, Trakt.listItems(store, l), 200) } }
+      else emptyList()
+      val anime = Anime.NAMES.filterKeys { Anime.connected(store, it) }.flatMap { (t, name) ->
+        listOf(ListSource("$t-watching", "$name · Watching") { Anime.items(ctx, store, t, "watching") }, ListSource("$t-planning", "$name · Plan to Watch") { Anime.items(ctx, store, t, "planning") })
+      }
+      trakt + anime
+    }
+    sources = sources + more
+  }
+  val tab = nav.ui.listTab
+  val source = sources.find { it.id == tab } ?: sources.first()
+  var items by remember(source.id) { mutableStateOf(if (source.id == "mine") store.myList else listCache[source.id]) }
+  var error by remember(source.id) { mutableStateOf<String?>(null) }
+  LaunchedEffect(source.id) {
+    if (source.id == "mine") return@LaunchedEffect
+    runCatching { withContext(Dispatchers.IO) { source.load() } }.onSuccess { items = it; listCache[source.id] = it }.onFailure { error = it.message }
+  }
+  RestoreFocus(focus, items?.isNotEmpty() == true && restore)
   Column(Modifier.fillMaxSize().padding(top = 76.dp)) {
-    Text("My List", Modifier.padding(horizontal = Z.Pad), style = MaterialTheme.typography.displaySmall)
-    if (list.isEmpty()) Text("Nothing here yet. Choose My List on any film or series to save it here.", Modifier.padding(Z.Pad), color = Z.Text2)
-    else PosterGrid(store, list, focus, nav)
+    Text("My Lists", Modifier.padding(horizontal = Z.Pad), style = MaterialTheme.typography.displaySmall)
+    LazyRow(contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+      items(sources, key = { it.id }) { src -> Chip(src.label, src.id == source.id) { nav.ui.listTab = src.id; focus.key = null } }
+    }
+    val list = items
+    when {
+      error != null && list == null -> Text(error!!, Modifier.padding(Z.Pad), color = Z.Warning)
+      list == null -> Text("Loading…", Modifier.padding(Z.Pad), color = Z.Text2)
+      list.isEmpty() && source.id == "mine" -> Text("Nothing here yet. Choose My List on any film or series to save it here.", Modifier.padding(Z.Pad), color = Z.Text2)
+      list.isEmpty() -> Text("This list is empty.", Modifier.padding(Z.Pad), color = Z.Text2)
+      else -> key(source.id) { PosterGrid(store, list, focus, nav) }
+    }
   }
 }
 

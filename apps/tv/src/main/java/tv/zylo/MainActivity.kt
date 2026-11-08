@@ -27,6 +27,7 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -37,6 +38,7 @@ import androidx.lifecycle.compose.LocalLifecycleOwner
 import androidx.lifecycle.compose.currentStateAsState
 import androidx.tv.material3.*
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 
 sealed interface Screen {
   data object Main : Screen
@@ -59,6 +61,8 @@ class UiState(store: Store) {
   val myList = FocusMemory()
   val search = FocusMemory()
   val titles = HashMap<String, FocusMemory>()
+  val content = FocusRequester() // the current page, so Down from the top bar always lands back in it
+  var listTab by mutableStateOf("mine")
 }
 
 class Nav(private val stack: SnapshotStateList<Screen>, private val store: Store, val ui: UiState) {
@@ -85,6 +89,7 @@ class MainActivity : ComponentActivity() {
     super.onCreate(savedInstanceState)
     val store = Store(this)
     val ui = UiState(store)
+    Trakt.io.launch { runCatching { Trakt.sync(store) } } // history and paused-elsewhere titles, at most every 15 minutes
     setContent {
       ZTheme(store.reduceMotion) {
         val stack = remember { mutableStateListOf<Screen>(Screen.Main) }
@@ -115,14 +120,15 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
   BackHandler(ui.section != Section.Home) { ui.stayInNav = true; ui.section = Section.Home }
   val restore = !ui.stayInNav
   Box(Modifier.fillMaxSize()) {
-    key(ui.section) {
+    // focusRestorer: coming back down from the top bar returns to the card you left, even if it scrolled away.
+    Box(Modifier.fillMaxSize().focusRequester(ui.content).focusRestorer().focusGroup()) { key(ui.section) {
       when (val s = ui.section) {
         Section.Home -> RowsPage(store, ui.home, nav, restore, hero = true)
         Section.Discover -> RowsPage(store, ui.discover, nav, restore, title = "Discover")
         Section.MyList -> MyListPage(store, nav, ui.myList, restore)
         else -> BrowsePage(store, ui.browse.getValue(s), nav, s.label, restore)
       }
-    }
+    } }
     TopNav(ui, nav)
   }
 }
@@ -137,6 +143,7 @@ fun TopNav(ui: UiState, nav: Nav) {
     ui.stayInNav = true
     ui.section = s
   }
+  val down = Modifier.focusProperties { this.down = ui.content }
   Row(
     Modifier.fillMaxWidth()
       .background(Brush.verticalGradient(listOf(Z.Bg.copy(alpha = 0.95f), Z.Bg.copy(alpha = 0.55f), Color.Transparent)))
@@ -145,11 +152,11 @@ fun TopNav(ui: UiState, nav: Nav) {
       .focusGroup(),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    NavSurface({ go(Section.Home) }) { Box(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) { Logo(20.dp, color = LocalContentColor.current) } }
+    NavSurface({ go(Section.Home) }, down) { Box(Modifier.padding(horizontal = 10.dp, vertical = 7.dp)) { Logo(20.dp, color = LocalContentColor.current) } }
     Spacer(Modifier.width(20.dp))
     Section.entries.forEach { s ->
       val selected = ui.section == s
-      NavSurface({ go(s) }, if (selected) Modifier.focusRequester(active) else Modifier, selected) {
+      NavSurface({ go(s) }, down.then(if (selected) Modifier.focusRequester(active) else Modifier), selected) {
         Column(Modifier.padding(horizontal = 12.dp, vertical = 6.dp), horizontalAlignment = Alignment.CenterHorizontally) {
           Text(s.label, style = MaterialTheme.typography.labelLarge)
           Box(Modifier.padding(top = 3.dp).width(16.dp).height(2.dp).background(if (selected) Z.Red else Color.Transparent))
@@ -157,8 +164,8 @@ fun TopNav(ui: UiState, nav: Nav) {
       }
     }
     Spacer(Modifier.weight(1f))
-    NavIcon(Icons.Filled.Search) { nav.push(Screen.Search) }
-    NavIcon(Icons.Filled.Settings) { nav.push(Screen.Settings) }
+    NavIcon(Icons.Filled.Search, down) { nav.push(Screen.Search) }
+    NavIcon(Icons.Filled.Settings, down) { nav.push(Screen.Settings) }
   }
 }
 
@@ -174,7 +181,7 @@ private fun NavSurface(onClick: () -> Unit, modifier: Modifier = Modifier, selec
 )
 
 @Composable
-private fun NavIcon(icon: ImageVector, onClick: () -> Unit) = NavSurface(onClick) { Box(Modifier.padding(9.dp)) { Glyph(icon, 20.dp) } }
+private fun NavIcon(icon: ImageVector, modifier: Modifier, onClick: () -> Unit) = NavSurface(onClick, modifier) { Box(Modifier.padding(9.dp)) { Glyph(icon, 20.dp) } }
 
 @Composable
 fun Welcome(nav: Nav) {
@@ -207,13 +214,16 @@ fun rememberForeground(): Boolean {
 }
 
 /**
- * Muted YouTube trailer through the official IFrame Player API, in a WebView that never takes focus.
- * Fades in once it is really playing; gone when it ends, after 10 s without starting, or when the app is in the background.
+ * YouTube trailer through the official IFrame Player API, in a WebView that never takes focus. Muted unless
+ * Settings > Playback > Trailer sound is on. Fades in once it is really playing (onPlaying lets the card hide its
+ * text); gone when it ends, after 10 s without starting, or when the app is in the background.
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun Trailer(youtubeKey: String, modifier: Modifier) {
+fun Trailer(youtubeKey: String, modifier: Modifier, sound: Boolean, onPlaying: (Boolean) -> Unit = {}) {
   var playing by remember { mutableStateOf(false) }
+  LaunchedEffect(playing) { onPlaying(playing) }
+  DisposableEffect(Unit) { onDispose { onPlaying(false) } }
   var gaveUp by remember { mutableStateOf(false) }
   LaunchedEffect(Unit) {
     delay(10_000)
@@ -236,19 +246,20 @@ fun Trailer(youtubeKey: String, modifier: Modifier) {
           @JavascriptInterface fun state(s: Int) = post { if (s == 1) playing = true else if (s == 0) playing = false }
         }, "Zylo")
         // An https base URL gives YouTube the referrer it requires for embeds.
-        loadDataWithBaseURL("https://zylo.tv/", trailerHtml(youtubeKey), "text/html", "utf-8", null)
+        loadDataWithBaseURL("https://zylo.tv/", trailerHtml(youtubeKey, sound), "text/html", "utf-8", null)
       }
     },
     onRelease = { it.destroy() },
   )
 }
 
-private fun trailerHtml(key: String) = """
+// The player fills the WebView exactly (the card is 16:9, like the video), so nothing is letterboxed or cut off.
+private fun trailerHtml(key: String, sound: Boolean) = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{margin:0;background:#000;overflow:hidden;height:100%}#p{position:absolute;left:0;top:50%;width:100vw;height:56.25vw;transform:translateY(-50%);border:0}</style>
+<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}#p,iframe{position:fixed;top:0;left:0;width:100%!important;height:100%!important;border:0}</style>
 </head><body><div id="p"></div>
 <script>
-function onYouTubeIframeAPIReady(){new YT.Player('p',{videoId:'$key',playerVars:{autoplay:1,mute:1,controls:0,rel:0,playsinline:1,iv_load_policy:3,disablekb:1,fs:0,modestbranding:1,origin:'https://zylo.tv'},
-events:{onReady:function(e){e.target.mute();e.target.playVideo()},onStateChange:function(e){Zylo.state(e.data)}}})}
+function onYouTubeIframeAPIReady(){new YT.Player('p',{width:'100%',height:'100%',videoId:'$key',playerVars:{autoplay:1,mute:${if (sound) 0 else 1},controls:0,rel:0,playsinline:1,iv_load_policy:3,disablekb:1,fs:0,modestbranding:1,origin:'https://zylo.tv'},
+events:{onReady:function(e){${if (sound) "e.target.unMute();e.target.setVolume(100);" else "e.target.mute();"}e.target.playVideo()},onStateChange:function(e){Zylo.state(e.data)}}})}
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>
 """

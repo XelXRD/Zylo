@@ -20,7 +20,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.graphics.asImageBitmap
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.unit.sp
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.*
@@ -50,11 +52,7 @@ fun SettingsScreen(store: Store) {
     Box(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 40.dp, vertical = 36.dp)) {
       when (page) {
         SettingsPage.Playback -> Playback(store)
-        SettingsPage.Integrations -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
-          Header("Integrations", "Connect your accounts. Zylo tests each one before showing it as connected.")
-          ServiceCard(store, "tmdb", "TMDB", "Film and TV details, artwork and trailers. Required.", "TM", { store.tmdb }, { store.tmdb = it })
-          Text("Trakt, AniList, MyAnimeList and media servers (Plex, Jellyfin, Emby) are coming in later builds.", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodySmall, color = Z.Muted)
-        }
+        SettingsPage.Integrations -> Integrations(store)
         SettingsPage.Addons -> Addons(store)
         SettingsPage.Debrid -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           Header("Debrid Services", "Stream torrent sources from your debrid account. Zylo uses the first connected service that has a title ready.")
@@ -78,6 +76,7 @@ private fun Header(title: String, text: String) = Column(Modifier.padding(bottom
 private fun Playback(store: Store) = Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
   Header("Playback", "How browsing and previews behave.")
   Toggle("Trailer previews", "Play a muted trailer when you rest on a title.", store.previews) { store.previews = !store.previews }
+  Toggle("Trailer sound", "Play preview trailers with sound instead of muted.", store.trailerSound) { store.trailerSound = !store.trailerSound }
   Toggle("Reduce motion", "Turn off card growth, fades and focus zoom.", store.reduceMotion) { store.reduceMotion = !store.reduceMotion }
 }
 
@@ -115,17 +114,7 @@ private fun ServiceCard(store: Store, id: String, name: String, text: String, ti
     failure != null -> "Needs attention" to Z.Warning
     else -> "Not tested" to Z.Warning
   }
-  Row(Modifier.fillMaxWidth().background(Z.Card, Z.Medium).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-    Tile(tile, 44.dp)
-    Spacer(Modifier.width(16.dp))
-    Column(Modifier.weight(1f)) {
-      Text(name, style = MaterialTheme.typography.titleMedium)
-      Text(failure ?: text, style = MaterialTheme.typography.bodySmall, color = if (failure != null) Z.Warning else Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
-    }
-    Spacer(Modifier.width(12.dp))
-    StatusChip(label, color)
-    Spacer(Modifier.width(16.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+  AccountRow(tile, name, failure ?: text, failure != null, label, color) {
       ZButton(if (current.isEmpty()) "Connect" else "Change Key", {
         ask(ctx, "$name API key", current) {
           setKey(it)
@@ -138,8 +127,190 @@ private fun ServiceCard(store: Store, id: String, name: String, text: String, ti
         ZButton("Test", { test(current) })
         ZButton("Disconnect", { setKey(""); store.setStatus(id, ""); tick++ })
       }
+  }
+}
+
+/** The shared look of every integration: icon tile, name, description, honest status, actions. */
+@Composable
+private fun AccountRow(tile: String, name: String, text: String, warn: Boolean, status: String, color: androidx.compose.ui.graphics.Color, actions: @Composable RowScope.() -> Unit) =
+  Row(Modifier.fillMaxWidth().background(Z.Card, Z.Medium).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
+    Tile(tile, 44.dp)
+    Spacer(Modifier.width(16.dp))
+    Column(Modifier.weight(1f)) {
+      Text(name, style = MaterialTheme.typography.titleMedium)
+      Text(text, style = MaterialTheme.typography.bodySmall, color = if (warn) Z.Warning else Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+    }
+    Spacer(Modifier.width(12.dp))
+    StatusChip(status, color)
+    Spacer(Modifier.width(16.dp))
+    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), content = actions)
+  }
+
+// --- Integrations ------------------------------------------------------------------------------------
+
+@Composable
+private fun Integrations(store: Store) {
+  var panel by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
+  val close = { panel = null }
+  panel?.let { return it() }
+  Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+    Header("Integrations", "Connect your accounts. Zylo tests each one before showing it as connected.")
+    ServiceCard(store, "tmdb", "TMDB", "Film and TV details, artwork and trailers. Required.", "TM", { store.tmdb }, { store.tmdb = it })
+    ServiceCard(store, "fanart", "fanart.tv", "Title logos, clean backgrounds and landscape art. Optional: a free personal API key from fanart.tv.", "FA",
+      { store.str("fanart_key") }, { store.put("fanart_key", it) })
+    TraktCard(store) { clientId -> panel = { TraktConnect(store, clientId, close) } }
+    Anime.NAMES.forEach { (t, name) -> AnimeCard(store, t, name) { url -> panel = { PasteConnect(store, t, name, url, close) } } }
+  }
+}
+
+@Composable
+private fun TraktCard(store: Store, connect: (String) -> Unit) {
+  val ctx = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var tick by remember { mutableIntStateOf(0) }
+  var busy by remember { mutableStateOf(false) }
+  val connected = remember(tick) { Trakt.connected(store) }
+  val failure = remember(tick) { store.status("trakt").takeIf { it.startsWith("fail:") }?.removePrefix("fail:") }
+  val synced = remember(tick) { store.long("trakt_synced") }
+  fun sync() = scope.launch {
+    busy = true
+    val r = withContext(Dispatchers.IO) { runCatching { Trakt.sync(store, force = true) } }
+    store.setStatus("trakt", if (r.isSuccess) "ok" else "fail:${r.exceptionOrNull()?.message}")
+    busy = false
+    tick++
+  }
+  val (label, color) = when {
+    busy -> "Syncing…" to Z.Info
+    !connected -> "Not connected" to Z.Muted
+    failure != null -> "Needs attention" to Z.Warning
+    else -> "Connected" to Z.Success
+  }
+  val text = when {
+    !connected -> "Lists you made or follow, your watchlist, watch history and scrobbling."
+    failure != null -> failure
+    else -> "@${store.str("trakt_user")} · " + if (synced > 0) "synced ${ago(synced)}" else "not synced yet"
+  }
+  AccountRow("TR", "Trakt", text, failure != null && connected, label, color) {
+    if (!connected) ZButton("Connect", {
+      ask(ctx, "Trakt Client ID (trakt.tv > Settings > Your API Apps)", store.str("trakt_client")) { if (it.isNotBlank()) connect(it.trim()) }
+    }, primary = true)
+    else {
+      ZButton("Sync Now", { sync() })
+      ZButton("Disconnect", { Trakt.disconnect(store); store.setStatus("trakt", ""); tick++ })
     }
   }
+}
+
+@Composable
+private fun AnimeCard(store: Store, t: String, name: String, connect: (String) -> Unit) {
+  val ctx = LocalContext.current
+  var tick by remember { mutableIntStateOf(0) }
+  val connected = remember(tick) { Anime.connected(store, t) }
+  val help = if (t == "anilist") "AniList client ID (anilist.co > Settings > Developer; redirect URL https://anilist.co/api/v2/oauth/pin)"
+  else "MyAnimeList client ID (myanimelist.net/apiconfig; app type: other)"
+  AccountRow(if (t == "anilist") "AL" else "MAL", name, if (connected) "Connected as ${store.str("${t}_user")} · finishing an anime episode updates your progress." else "Updates your anime progress and shows your lists in My Lists.",
+    false, if (connected) "Connected" else "Not connected", if (connected) Z.Success else Z.Muted) {
+    if (!connected) ZButton("Connect", {
+      ask(ctx, help, store.str("${t}_client")) { id ->
+        if (id.isBlank()) return@ask
+        store.put("${t}_client", id.trim())
+        connect(if (t == "anilist") Anime.anilistUrl(id.trim()) else Anime.malUrl(store, id.trim()))
+      }
+    }, primary = true)
+    else ZButton("Disconnect", { Anime.disconnect(store, t); tick++ })
+  }
+}
+
+/** Trakt device code: shown here, entered at trakt.tv/activate on any phone or computer. */
+@Composable
+private fun TraktConnect(store: Store, clientId: String, close: () -> Unit) {
+  var code by remember { mutableStateOf<Trakt.DeviceCode?>(null) }
+  var message by remember { mutableStateOf("Asking Trakt for a code…") }
+  val cancel = remember { FocusRequester() }
+  LaunchedEffect(Unit) {
+    delay(80); runCatching { cancel.requestFocus() }
+    val dc = withContext(Dispatchers.IO) { runCatching { Trakt.deviceCode(clientId) } }.getOrElse { message = it.message ?: "Trakt didn't answer."; return@LaunchedEffect }
+    code = dc
+    message = "Waiting for you to approve on Trakt…"
+    val end = System.currentTimeMillis() + dc.expiresIn * 1000
+    while (System.currentTimeMillis() < end) {
+      delay(dc.interval * 1000)
+      val r = withContext(Dispatchers.IO) { runCatching { Trakt.poll(store, clientId, dc.device) } }
+      r.exceptionOrNull()?.let { message = it.message ?: "That didn't work."; return@LaunchedEffect }
+      if (r.getOrNull() == true) {
+        message = "Connected. Syncing your history…"
+        val s = withContext(Dispatchers.IO) { runCatching { Trakt.sync(store, force = true) } }
+        store.setStatus("trakt", if (s.isSuccess) "ok" else "fail:${s.exceptionOrNull()?.message}")
+        close()
+        return@LaunchedEffect
+      }
+    }
+    message = "The code expired. Try connecting again."
+  }
+  Column {
+    Header("Connect Trakt", "On your phone or computer, open the address below (or scan the code) and enter this code.")
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      code?.let { Qr(it.url, 168.dp) }
+      Spacer(Modifier.width(28.dp))
+      Column {
+        Text(code?.url?.removePrefix("https://") ?: "", style = MaterialTheme.typography.titleLarge, color = Z.Text2)
+        Text(code?.user ?: "", Modifier.padding(vertical = 10.dp), style = MaterialTheme.typography.displayMedium.copy(letterSpacing = 6.sp))
+        Text(message, style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+      }
+    }
+    ZButton("Cancel", close, Modifier.padding(top = 24.dp).focusRequester(cancel))
+  }
+}
+
+/** AniList / MyAnimeList: approve on the phone, then paste what it shows back here. */
+@Composable
+private fun PasteConnect(store: Store, t: String, name: String, url: String, close: () -> Unit) {
+  val ctx = LocalContext.current
+  val scope = rememberCoroutineScope()
+  var message by remember { mutableStateOf<String?>(null) }
+  val paste = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(80); runCatching { paste.requestFocus() } }
+  val steps = if (t == "anilist") listOf("Scan the code with your phone and sign in to AniList.", "Approve Zylo. AniList then shows a long token.", "Copy it, choose Paste Token below and paste it (the Google TV app's keyboard can paste).")
+  else listOf("Scan the code with your phone and sign in to MyAnimeList.", "Approve Zylo. Your phone then opens a page that won't load: that's fine.", "Copy that page's address, choose Paste Address below and paste it (the Google TV app's keyboard can paste).")
+  Column {
+    Header("Connect $name", "Sign in on your phone, then bring the result back here.")
+    Row {
+      Qr(url, 168.dp)
+      Spacer(Modifier.width(28.dp))
+      Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
+        steps.forEachIndexed { i, s -> Text("${i + 1}.  $s", style = MaterialTheme.typography.bodyMedium, color = Z.Text2) }
+        message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Z.Warning) }
+      }
+    }
+    Row(Modifier.padding(top = 24.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+      ZButton(if (t == "anilist") "Paste Token" else "Paste Address", {
+        ask(ctx, if (t == "anilist") "AniList token" else "Address from your phone", "") { text ->
+          scope.launch {
+            message = "Checking…"
+            withContext(Dispatchers.IO) { runCatching { if (t == "anilist") Anime.anilistConnect(store, text) else Anime.malConnect(store, text) } }
+              .onSuccess { toast(ctx, "$name connected"); close() }
+              .onFailure { message = "That didn't work: ${it.message}" }
+          }
+        }
+      }, Modifier.focusRequester(paste), primary = true)
+      ZButton("Cancel", close)
+    }
+  }
+}
+
+@Composable
+fun Qr(text: String, size: androidx.compose.ui.unit.Dp) {
+  val bitmap = remember(text) {
+    val m = com.google.zxing.qrcode.QRCodeWriter().encode(text, com.google.zxing.BarcodeFormat.QR_CODE, 0, 0, mapOf(com.google.zxing.EncodeHintType.MARGIN to 2))
+    val px = IntArray(m.width * m.height) { if (m.get(it % m.width, it / m.width)) android.graphics.Color.BLACK else android.graphics.Color.WHITE }
+    android.graphics.Bitmap.createBitmap(px, m.width, m.height, android.graphics.Bitmap.Config.ARGB_8888).asImageBitmap()
+  }
+  androidx.compose.foundation.Image(bitmap, "QR code", Modifier.size(size), filterQuality = androidx.compose.ui.graphics.FilterQuality.None)
+}
+
+private fun ago(t: Long): String {
+  val m = (System.currentTimeMillis() - t) / 60_000
+  return when { m < 1 -> "just now"; m < 60 -> "$m min ago"; m < 1440 -> "${m / 60} h ago"; else -> "${m / 1440} days ago" }
 }
 
 @Composable
@@ -183,7 +354,7 @@ private fun Addons(store: Store) {
 private fun About() = Column(Modifier.verticalScroll(rememberScrollState())) {
   Logo(40.dp)
   Text("One interface. Your entire media world.", Modifier.padding(top = 14.dp), style = MaterialTheme.typography.titleLarge, color = Z.Text2)
-  Text("Version 0.9.0", Modifier.padding(top = 24.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+  Text("Version 0.10.0", Modifier.padding(top = 24.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
   Text(
     "Film and TV information and artwork come from TMDB. This product uses the TMDB API but is not endorsed or certified by TMDB.",
     Modifier.padding(top = 8.dp).fillMaxWidth(0.8f), style = MaterialTheme.typography.bodySmall, color = Z.Muted,
