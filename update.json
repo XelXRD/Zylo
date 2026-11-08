@@ -1,5 +1,5 @@
 {
-  "version": "0.21.1",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.21.1.apk",
-  "notes": "What's new in 0.21.1\n\n• Live TV no longer crashes: your channels load first and are saved on the TV (refreshed once a day), then the TV guide loads once a day, keeping only your channels.\n• Categories switch instantly.\n• Sports: rest on a match for 3 seconds to find which channels show it, or press OK to go straight there.\n• Live TV: move up and down the channel names; hold OK on one to favourite it; OK on a later show sets a reminder."
+  "version": "0.21.2",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.21.2.apk",
+  "notes": "What's new in 0.21.2\n\n• Sports no longer crashes or freezes, and finds channels for a match by itself after a moment (or press OK to go straight there).\n• Live TV loads your channels first and keeps them on the TV, refreshing once a day; the TV guide follows once a day."
 }
