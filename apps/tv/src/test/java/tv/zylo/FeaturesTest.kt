@@ -360,6 +360,26 @@ class UpdateTest {
   }
 }
 
+class SportsSearchTest {
+  @Test fun findsChannelsFast() {
+    // 20,000 channels, a guide with the match on one of them: found, tied to your channel, quickly.
+    val all = (1..20_000).map { Channel(it, it, "UK | Channel $it HD", null, "1") } + Channel(99_999, 401, "UK: SKY SPORTS MAIN EVENT ᶠᴴᴰ", null, "1")
+    val idx = ChannelIndex(all)
+    val e = Sports.parse(Sports.LEAGUES.first(), """{"events":[{"id":"1","date":"2026-11-08T16:30Z","competitions":[{"competitors":[
+      {"homeAway":"home","team":{"displayName":"Arsenal"}},{"homeAway":"away","team":{"displayName":"Chelsea"}}]}],"status":{"type":{"state":"pre"}}}]}""").single()
+    val progs = (1..3000).associate { "Ch$it.uk" to listOf(Programme("Show $it", "", e.start - 3_600_000, e.start + 3_600_000)) } +
+      ("Sky.Sports.Main.Event.HD.uk" to listOf(Programme("Live: Arsenal v Chelsea", "", e.start - 1_800_000, e.start + 7_200_000)))
+    val guide = Guide(mapOf("Sky.Sports.Main.Event.HD.uk" to GuideChannel("Sky.Sports.Main.Event.HD.uk", listOf("Sky Sports Main Event HD"))), progs)
+    val files = HashMap<String, Mem>()
+    val t0 = System.nanoTime()
+    val got = options(Store { files.getOrPut(it) { Mem() } }, e, idx, guide, emptyMap())
+    val ms = (System.nanoTime() - t0) / 1_000_000
+    assertEquals(listOf(99_999), got.mapNotNull { it.channel?.id })
+    assertEquals(false, got.single().guessed) // the guide proves it: a sure Watch
+    assertEquals(true, ms < 1_000)
+  }
+}
+
 class ScheduleTest {
   @Test fun asksOneDayAtATime() {
     val asked = java.util.Collections.synchronizedList(mutableListOf<String>())
@@ -367,7 +387,7 @@ class ScheduleTest {
     val nfl = """{"events":[{"id":"9","date":"2026-11-08T18:00Z","competitions":[{"competitors":[{"homeAway":"home","team":{"displayName":"Atlanta Falcons"}},{"homeAway":"away","team":{"displayName":"Cincinnati Bengals"}}]}]}]}"""
     val got = Sports.schedule(1, { u -> asked += u; if ("-" in u.substringAfter("dates=").substringBefore('&')) throw HttpError(400, "range"); if ("football/nfl" in u && "20261108" in u) nfl else """{"events":[]}""" }, now)
     assertEquals(listOf("Atlanta Falcons v Cincinnati Bengals"), got.map { it.name })
-    assertEquals(Sports.LEAGUES.size * 2, asked.size) // today and tomorrow, every league
+    assertEquals(Sports.LEAGUES.count { !it.allDay } * 2 + Sports.LEAGUES.count { it.allDay }, asked.size) // today and tomorrow; tournaments today only
     assertEquals(true, asked.all { Regex("dates=\\d{8}&").containsMatchIn(it) })
     assertEquals("all down", runCatching { Sports.schedule(0, { throw java.io.IOException("all down") }, now) }.exceptionOrNull()?.message)
   }

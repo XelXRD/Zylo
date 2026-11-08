@@ -56,7 +56,8 @@ object Sports {
    */
   fun schedule(days: Int = 6, fetch: (String) -> String = { http(it) }, now: Long = System.currentTimeMillis()): List<SportEvent> = runBlocking(Dispatchers.IO) {
     val gate = Semaphore(8)
-    val asks = LEAGUES.flatMap { l -> (0..days).map { d -> l to day.format(Date(now + d * 86_400_000L)) } }
+    // Tournaments (golf, tennis) run all week and their answers are huge (full leaderboards): ask for today only.
+    val asks = LEAGUES.flatMap { l -> (0..(if (l.allDay) 0 else days)).map { d -> l to day.format(Date(now + d * 86_400_000L)) } }
     val got = asks.map { (l, date) ->
       async { gate.withPermit { runCatching { parse(l, fetch("https://site.api.espn.com/apis/site/v2/sports/${l.path}/scoreboard?dates=$date&limit=200")) } } }
     }.awaitAll()

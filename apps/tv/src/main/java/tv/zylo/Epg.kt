@@ -222,3 +222,36 @@ object Epg {
 
   private fun String.esc() = replace('\t', ' ').replace('\n', ' ')
 }
+
+/**
+ * Your channels prepared once for fast lookups (big providers have tens of thousands): by id, by EPG id, by reduced
+ * name, and by word, so finding "Sky Sports Main Event" only scores channels sharing a word with it, not all of them.
+ */
+class ChannelIndex(val all: List<Channel>) {
+  private val byId = all.associateBy { it.id }
+  private val byEpg = HashMap<String, Channel>().apply { all.forEach { c -> c.epgId?.lowercase()?.let { putIfAbsent(it, c) } } }
+  private val byKey = HashMap<String, Channel>().apply { all.forEach { c -> putIfAbsent(channelKey(c.name), c) } }
+  private val byWord = HashMap<String, MutableList<Channel>>().apply { all.forEach { c -> channelWords(c.name).forEach { w -> getOrPut(w) { mutableListOf() } += c } } }
+
+  fun id(id: Int) = byId[id]
+
+  /** One of your channels for a guide channel: its id is your channel's EPG id, or one of its names is your channel's. */
+  fun forGuide(g: GuideChannel?, id: String): Channel? =
+    byEpg[id.lowercase()] ?: (g?.names.orEmpty() + Guide.idName(id)).firstNotNullOfOrNull { byKey[channelKey(it)] }
+
+  /** Channels most like [name], best first (only those sharing a word, or the start of one, with it). */
+  fun rank(name: String, min: Double = 0.3): List<Pair<Channel, Double>> {
+    val words = channelWords(name)
+    val pool = HashSet<Channel>()
+    words.forEach { w -> byWord[w]?.let(pool::addAll); if (w.length >= 3) byWord.forEach { (k, v) -> if (k.startsWith(w) || (k.length >= 3 && w.startsWith(k))) pool.addAll(v) } }
+    return pool.map { it to channelLikeness(name, it.name) }.filter { it.second >= min }.sortedByDescending { it.second }
+  }
+
+  /** Sure enough to use without asking (it can still be changed): the top match, clearly ahead of the next. */
+  fun best(name: String): Channel? {
+    byKey[channelKey(name)]?.let { return it }
+    val r = rank(name, 0.75).take(2)
+    val top = r.firstOrNull() ?: return null
+    return top.first.takeIf { r.size < 2 || top.second - r[1].second >= 0.05 }
+  }
+}

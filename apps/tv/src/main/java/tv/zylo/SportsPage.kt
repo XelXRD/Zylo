@@ -24,6 +24,7 @@ import androidx.tv.material3.*
 import coil.compose.AsyncImage
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
 import java.util.Date
@@ -36,6 +37,7 @@ class SportsState {
   var sport by mutableStateOf("All")
   var focused by mutableStateOf<SportEvent?>(null)
   var all by mutableStateOf<List<Channel>>(emptyList()) // every channel the provider has
+  var index by mutableStateOf<ChannelIndex?>(null) // built once from [all], off the main thread
   var options by mutableStateOf<List<WatchOption>?>(null)
   var linking by mutableStateOf<WatchOption?>(null)
   var links by mutableIntStateOf(0) // bumps when a channel is linked, to search again
@@ -56,6 +58,7 @@ private fun dayLabel(t: Long, now: Long): String {
 fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
   val s = live.sched
   val ctx = LocalContext.current
+  val scope = rememberCoroutineScope()
   BackHandler { live.sports = false }
   LaunchedEffect(Unit) {
     if (s.events == null || System.currentTimeMillis() - s.loadedAt > 10 * 60_000L) {
@@ -63,13 +66,18 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
         .onFailure { s.error = it.message }
     }
   }
-  LaunchedEffect(live.all) { s.all = live.all } // the channels saved on the TV (Live TV loads them once a day)
+  LaunchedEffect(live.all) { // the channels saved on the TV (Live TV loads them once a day), indexed once
+    s.all = live.all
+    if (s.index?.all !== live.all) s.index = withContext(Dispatchers.Default) { ChannelIndex(live.all) }
+  }
   // Where to watch the focused event: searched across every guide loaded, after a moment on it.
-  LaunchedEffect(s.focused, s.all, s.links, Epg.changes) {
+  LaunchedEffect(s.focused, s.index, s.links, Epg.changes) {
     val e = s.focused ?: return@LaunchedEffect
+    val idx = s.index ?: return@LaunchedEffect
     s.options = null
     delay(3_000) // rest on a match for 3 s before searching the guides (OK searches at once)
-    s.options = withContext(Dispatchers.Default) { options(store, e, s.all, live) }
+    val rows = live.guide.toMap() // a copy: the guide keeps loading rows while this runs
+    s.options = withContext(Dispatchers.Default) { runCatching { options(store, e, idx, Epg.current, rows) }.getOrDefault(emptyList()) }
   }
   val now = remember { System.currentTimeMillis() }
   val shown = s.events.orEmpty().filter { (s.sport == "All" || it.sport == s.sport) && (it.start > now - 4 * 3_600_000L || it.live) }
@@ -95,7 +103,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
           LazyColumn(Modifier.weight(0.56f).fillMaxHeight(), contentPadding = PaddingValues(start = Z.Pad, end = 12.dp, bottom = 40.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             shown.groupBy { dayLabel(it.start, now) }.forEach { (day, list) ->
               item(key = "d$day") { Text(day, Modifier.padding(top = 10.dp, bottom = 2.dp), style = MaterialTheme.typography.titleSmall, color = Z.Text2) }
-              items(list, key = { it.id }) { e -> EventRow(e, s, Modifier.focusMemory(s.focus, "e${e.id}", default = e == shown.first())) { watchNow(store, ctx, s, live, nav) } }
+              items(list, key = { it.id }) { e -> EventRow(e, s, Modifier.focusMemory(s.focus, "e${e.id}", default = e == shown.first())) { scope.launch { watchNow(store, ctx, s, live, nav) } } }
             }
           }
           WhereToWatch(store, s, live, nav, Modifier.weight(0.44f).fillMaxHeight().padding(end = Z.Pad))
@@ -107,8 +115,14 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
 }
 
 /** OK on a fixture: straight to the channel Zylo is sure shows it (else the best guess); otherwise say how to pick one. */
-private fun watchNow(store: Store, ctx: android.content.Context, s: SportsState, live: LiveState, nav: Nav) {
-  val o = s.options ?: s.focused?.let { e -> options(store, e, s.all, live) }?.also { s.options = it }
+private suspend fun watchNow(store: Store, ctx: android.content.Context, s: SportsState, live: LiveState, nav: Nav) {
+  val idx = s.index
+  val e = s.focused
+  if (s.options == null && idx != null && e != null) {
+    val rows = live.guide.toMap()
+    s.options = withContext(Dispatchers.Default) { runCatching { options(store, e, idx, Epg.current, rows) }.getOrDefault(emptyList()) }
+  }
+  val o = s.options
   val pick = o?.firstOrNull { it.channel != null && !it.guessed } ?: o?.firstOrNull { it.channel != null }
   when {
     pick != null -> play(pick.channel!!, live, nav)
@@ -144,19 +158,29 @@ private fun EventRow(e: SportEvent, s: SportsState, modifier: Modifier, onClick:
     }
   }
 
-/** Guide listings across every loaded guide (provider + epgshare), labelled with your channel when there is one. */
-private fun options(store: Store, e: SportEvent, all: List<Channel>, live: LiveState): List<WatchOption> {
-  val g = Epg.current
-  val mine = HashMap<String, Channel>()
-  all.forEach { c -> g.idFor(c)?.let { id -> mine.putIfAbsent(id, c) } }
-  val guides = g.programmes.map { (id, list) -> Triple(g.channels[id]?.names?.firstOrNull() ?: Guide.idName(id), mine[id], list) } +
-    live.guide.mapNotNull { (cid, list) -> all.find { it.id == cid }?.let { c -> Triple(c.name, c, list) } }
-  // Not linked and not in your guide: the closest of your channels by name, when it's a clear match (changeable).
-  // A guide listing naming the match is proof: if one of your channels is clearly that channel, it's a sure Watch.
-  // A US broadcaster's name alone is only a best guess.
-  return Sports.whereToWatch(e, all, guides, Sports.links(store)).map { w ->
-    if (w.channel != null) w else bestChannel(w.label, all)?.let { w.copy(channel = it, guessed = w.programme == null) } ?: w
-  }.distinctBy { it.channel?.id?.toString() ?: "b:${it.label}" }
+/**
+ * Where to watch [e]: listings around kick-off that name it, in the daily guide and the guide rows already loaded,
+ * each tied to one of your channels (a link you made, the guide's channel, or a clear name match); then ESPN's
+ * broadcasters (best guesses). Only listings near the time are looked at, and channels come from [idx].
+ */
+fun options(store: Store, e: SportEvent, idx: ChannelIndex, guide: Guide, rows: Map<Int, List<Programme>>): List<WatchOption> {
+  val links = Sports.links(store)
+  fun linked(label: String) = links[channelKey(label)]?.let(idx::id)
+  val found = ArrayList<WatchOption>()
+  for ((gid, list) in guide.programmes) {
+    val p = list.firstOrNull { Sports.matches(e, it) } ?: continue
+    val g = guide.channels[gid]
+    val label = g?.names?.firstOrNull() ?: Guide.idName(gid)
+    found += WatchOption(label, p, linked(label) ?: idx.forGuide(g, gid) ?: idx.best(label), "TV guide")
+  }
+  for ((cid, list) in rows) {
+    val p = list.firstOrNull { Sports.matches(e, it) } ?: continue
+    idx.id(cid)?.let { c -> found += WatchOption(c.name, p, c, "TV guide") }
+  }
+  for (b in e.broadcasters) found += (linked(b)?.let { WatchOption(b, null, it, "US broadcaster") }
+    ?: WatchOption(b, null, idx.best(b), "US broadcaster", guessed = true))
+  return found.map { if (it.channel == null) it.copy(guessed = false) else it }
+    .distinctBy { it.channel?.id?.toString() ?: "b:${it.label}" }
     .sortedBy { when { it.channel != null && !it.guessed -> 0; it.channel != null -> 1; else -> 2 } }
 }
 
@@ -175,7 +199,7 @@ private fun WhereToWatch(store: Store, s: SportsState, live: LiveState, nav: Nav
     }
     val o = s.options
     when {
-      o == null -> Text(if (Epg.busy) "Downloading TV guides…" else "Rest here a moment to find channels showing this, or press OK.", color = Z.Text2)
+      o == null -> Text(when { s.index == null -> "Loading your channels…"; Epg.busy -> "Downloading TV guides…"; else -> "Finding channels showing this… (or press OK)" }, color = Z.Text2)
       o.isEmpty() -> Text(if (Epg.current.size == 0) "Turn on the better TV guide in Settings > Live TV so Zylo can find which channels show this."
         else "No channel in your TV guides lists this yet. Listings often appear a day or two before.", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
       else -> LazyColumn(verticalArrangement = Arrangement.spacedBy(6.dp)) {
@@ -210,7 +234,8 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
   val ctx = LocalContext.current
   BackHandler { s.linking = null }
   var query by remember { mutableStateOf(w.label) }
-  val ranked = remember(query, s.all) { rankChannels(query, s.all).take(60).map { it.first } }
+  var ranked by remember { mutableStateOf<List<Channel>>(emptyList()) }
+  LaunchedEffect(query, s.index) { ranked = withContext(Dispatchers.Default) { s.index?.rank(query)?.take(60)?.map { it.first }.orEmpty() } }
   val first = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
   Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.75f)), contentAlignment = Alignment.CenterEnd) {
@@ -222,7 +247,7 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
         ZButton("Search by Name", { ask(ctx, "Channel name", query) { if (it.isNotBlank()) query = it } }, Modifier.focusRequester(first))
         if (w.channel != null) ZButton("Unlink", { Sports.link(store, w.label, null); s.linking = null; s.links++ })
       }
-      if (s.all.isEmpty()) Text("Loading your channels…", color = Z.Text2)
+      if (s.index == null) Text("Loading your channels…", color = Z.Text2)
       else if (ranked.isEmpty()) Text("No channel names look like \"$query\". Search by another name.", style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
       LazyColumn(verticalArrangement = Arrangement.spacedBy(4.dp)) {
         items(ranked, key = { it.id }) { c ->
@@ -239,13 +264,6 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
   }
 }
 
-/** Channels most like a name first: "Sky Sports Main Event HD" puts "UK | SKY SPORTS MAIN EVENT ᶠᴴᴰ" at the top. */
-fun rankChannels(name: String, all: List<Channel>, min: Double = 0.3): List<Pair<Channel, Double>> =
-  all.map { it to channelLikeness(name, it.name) }.filter { it.second >= min }.sortedByDescending { it.second }
-
-/** Sure enough to use without asking (it can still be changed): the top match, clearly ahead of the next. */
-fun bestChannel(name: String, all: List<Channel>): Channel? {
-  val r = rankChannels(name, all, 0.75).take(2)
-  val top = r.firstOrNull() ?: return null
-  return top.first.takeIf { r.size < 2 || top.second - r[1].second >= 0.05 || channelKey(top.first.name) == channelKey(name) }
-}
+/** Channels most like a name first (tests and one-offs; screens use a [ChannelIndex]). */
+fun rankChannels(name: String, all: List<Channel>, min: Double = 0.3) = ChannelIndex(all).rank(name, min)
+fun bestChannel(name: String, all: List<Channel>) = ChannelIndex(all).best(name)
