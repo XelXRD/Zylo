@@ -493,6 +493,41 @@ class ExtrasTest {
     assertTrue(!isAnime(org.json.JSONObject("""{"original_language":"en","genres":[{"id":16}]}""")))
   }
 
+  @Test fun movieNightMatch() {
+    val deck = listOf(Item("movie", 1, "A", "/a", "/a", "", "2020"), Item("movie", 2, "B", "/b", "/b", "", "2021"), Item("movie", 3, "C", "/c", "/c", "", "2022"))
+    val v = MatchVotes(deck)
+    v.vote("amy", "movie1", true); v.vote("amy", "movie2", true)
+    assertNull(v.match()) // one person isn't a match
+    v.vote("ben", "movie1", false); v.vote("ben", "movie2", true)
+    assertEquals("B", v.match()?.title) // first title both said yes to
+    v.passed += "movie2"; assertNull(v.match()) // "Find Another"
+    v.vote("amy", "movie3", true); v.vote("ben", "movie3", true)
+    assertEquals("C", v.match()?.title)
+  }
+
+  @Test fun thumbsAndAnimeFilter() {
+    val st = store()
+    val a = Item("movie", 1, "Liked", "/a", "/a", "", "2020")
+    val b = Item("tv", 2, "Disliked", "/b", "/b", "", "2021")
+    Thumbs.set(st, a, 1); Thumbs.set(st, b, -1)
+    assertEquals(1, Thumbs.of(st, a)); assertEquals(a.key, Thumbs.lastLiked(st)?.key); assertEquals(setOf(b.key), Thumbs.disliked(st))
+    Thumbs.set(st, b, 0); assertTrue(Thumbs.disliked(st).isEmpty())
+    val anime = org.json.JSONObject("""{"id":5,"name":"Frieren","original_language":"ja","genre_ids":[16,10759],"poster_path":"/p"}""")
+    val cartoon = org.json.JSONObject("""{"id":6,"name":"Bluey","original_language":"en","genre_ids":[16],"poster_path":"/p"}""")
+    assertTrue(Tmdb.animeSeries(anime, "tv") && !Tmdb.animeSeries(cartoon, "tv") && !Tmdb.animeSeries(anime, "movie"))
+    assertTrue(Tmdb.keepsAnime("/discover/tv?with_genres=16&with_origin_country=JP") && !Tmdb.keepsAnime("/tv/popular") && Tmdb.keepsAnime("/search/multi?query=x"))
+  }
+
+  @Test fun wrappedNumbers() {
+    fun ep(show: String, at: String) = org.json.JSONObject("""{"type":"episode","watched_at":"$at","episode":{"runtime":30},"show":{"title":"$show","genres":["comedy"]}}""")
+    fun film(t: String, at: String) = org.json.JSONObject("""{"type":"movie","watched_at":"$at","movie":{"title":"$t","runtime":120,"genres":["science-fiction"]}}""")
+    val w = WrappedStats.of(listOf(ep("Silo", "2026-03-01T20:00:00.000Z"), ep("Silo", "2026-03-01T21:00:00.000Z"), ep("Silo", "2026-03-01T22:00:00.000Z"),
+      ep("Bluey", "2026-04-02T10:00:00.000Z"), film("Dune", "2026-05-01T20:00:00.000Z"), film("Dune", "2026-06-01T20:00:00.000Z")), 2026)
+    assertEquals(2, w.films); assertEquals(4, w.episodes); assertEquals(6, w.hours) // 4 × 30 min + 2 × 120 min
+    assertEquals("Silo" to 3, w.topShow); assertEquals("Silo" to 3, w.binge); assertEquals("Dune" to 2, w.rewatch)
+    assertEquals("Comedy", w.topGenres.first())
+  }
+
   @Test fun startingSoonAndBusy() {
     val st = store()
     val c = Channel(1, 1, "BBC One", null, "1")

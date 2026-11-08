@@ -166,7 +166,7 @@ class Store(private val open: (String) -> SharedPreferences) {
     g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color).apply { it.kids?.let { k -> put("kids", k) } } }).toString()).apply()
 
   companion object {
-    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "anime_dub", "outbox", "synclog", "xc_favs", "reminders")
+    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "anime_dub", "thumbs", "outbox", "synclog", "xc_favs", "reminders")
     val AVATARS = listOf(0xFFBD1422, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
 
     private fun profilesIn(g: SharedPreferences): List<Profile> =
@@ -292,7 +292,8 @@ class Tmdb(private val key: String) {
     return getJson(url, if (v3) emptyMap() else mapOf("Authorization" to "Bearer $key"))
   }
 
-  fun list(path: String, type: String?) = safe(get(path).optJSONArray("results")?.objects()?.mapNotNull { item(it, type) }?.distinctBy { it.key }.orEmpty())
+  fun list(path: String, type: String?) = safe(get(path).optJSONArray("results")?.objects()
+    ?.filter { keepsAnime(path) || !animeSeries(it, type) }?.mapNotNull { item(it, type) }?.distinctBy { it.key }.orEmpty())
 
   /** On a kids profile, only titles rated at or below its level. Every list goes through here, so rows, search and browse all agree. */
   fun safe(items: List<Item>): List<Item> = if (Ratings.max == null) items else runBlocking(Dispatchers.IO) {
@@ -330,6 +331,14 @@ class Tmdb(private val key: String) {
     private val failed: MutableSet<String> = ConcurrentHashMap.newKeySet()
 
     fun cached(item: Item): JSONObject? = cache["${item.type}:${item.id}"]
+
+    /** Anime series (Japanese animation) belong in the Anime section only (Alex, 8 Nov): kept out of other TV lists. */
+    fun animeSeries(o: JSONObject, type: String?) = (type ?: o.optString("media_type")) == "tv" && o.optString("original_language") == "ja" &&
+      o.optJSONArray("genre_ids")?.let { g -> (0 until g.length()).any { g.optInt(it) == 16 } } == true
+
+    /** Lists that may show anime series: the Anime section and anime quiz (Japanese-only queries), search, "more like this". */
+    fun keepsAnime(path: String) = "with_origin_country=JP" in path || "with_original_language=ja" in path || path.startsWith("/search/") ||
+      "/recommendations" in path || "/similar" in path
 
     fun item(o: JSONObject, type: String?): Item? {
       val t = type ?: o.optString("media_type")
@@ -396,12 +405,32 @@ fun homeRows(store: Store): List<RowSpec> {
   return trakt + listOf(
     RowSpec("Trending Movies", "/trending/movie/week", "movie"),
     RowSpec("Popular Series", "/tv/popular", "tv"),
-    RowSpec("Popular Anime", "/discover/tv?with_genres=16&with_origin_country=JP&sort_by=popularity.desc", "tv"),
-  ) + listOfNotNull(last?.let { RowSpec("Because You Watched ${it.title}", "/${it.type}/${it.id}/recommendations", null) }) + listOf(
+  ) + listOfNotNull(
+    last?.let { RowSpec("Because You Watched ${it.title}", "/${it.type}/${it.id}/recommendations", null) },
+    Thumbs.lastLiked(store)?.takeIf { it.key != last?.key }?.let { RowSpec("Because You Liked ${it.title}", "/${it.type}/${it.id}/recommendations", null) },
+  ) + moodRows(store) + listOf(
     RowSpec("In Cinemas Now", "/movie/now_playing?region=GB", "movie"),
     RowSpec("New Episodes This Week", "/tv/on_the_air", "tv"),
     RowSpec("Top Rated Films", "/movie/top_rated", "movie"),
   ) + popular
+}
+
+/** Rows by feel rather than genre. "Something Different" is a new genre each launch. */
+fun moodRows(store: Store): List<RowSpec> {
+  val different = listOf(37 to "Westerns", 10752 to "War Films", 36 to "History", 10402 to "Musicals & Music", 9648 to "Mysteries", 14 to "Fantasy", 99 to "Documentaries", 16 to "Animated Films", 10749 to "Romance").random()
+  val comfort = RowSpec("Comfort Rewatch", "", null) { t ->
+    // Things you've finished before: films, and series you last watched over three months ago.
+    val films = (store.traktWatched().filter { it.startsWith("movie:") } + store.watches().filter { it.finished && it.season == null }.map { "movie:${it.item.id}" })
+      .mapNotNull { it.removePrefix("movie:").toIntOrNull() }.distinct().map { Ref("movie", it) }
+    val shows = Trakt.recentShows(store).filter { System.currentTimeMillis() - it.second > 90L * 86_400_000 }.map { Ref("tv", it.first) }
+    Trakt.items(t, (films + shows).shuffled().take(24), 20)
+  }
+  return listOf(
+    comfort,
+    RowSpec("Under 90 Minutes", "/discover/movie?with_runtime.gte=60&with_runtime.lte=90&vote_count.gte=500&sort_by=popularity.desc", "movie"),
+    RowSpec("Hidden Gems", "/discover/movie?vote_average.gte=7.4&vote_count.gte=150&vote_count.lte=1500&sort_by=vote_average.desc", "movie"),
+    RowSpec("Something Different: ${different.second}", "/discover/movie?with_genres=${different.first}&vote_average.gte=7&vote_count.gte=300&sort_by=popularity.desc", "movie"),
+  )
 }
 
 val DISCOVER_ROWS = listOf(

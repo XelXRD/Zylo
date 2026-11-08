@@ -111,7 +111,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boolean = false, title: String? = null) {
+fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boolean = false, title: String? = null, extras: (@Composable () -> Unit)? = null) {
   val key = store.tmdb
   LaunchedEffect(key) { if (s.loadedFor != key) s.load(Tmdb(key), key) }
   // The app stays open for days on a TV: new hero titles every 4 hours.
@@ -133,7 +133,9 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
     s.nextUps.map { ContinueEntry("next/${it.item.key}", it.item, it.season, it.episode, "S${it.season} E${it.episode} · " + if (it.isNew) "New episode" else "Next episode", null, it.at, it.name, it.isNew) })
     .sortedByDescending { it.at }
   val mine = remember { if (hero) store.myList else emptyList() }
-  val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows
+  // A thumbs down keeps a title out of the rows.
+  val disliked = remember(s.rows) { Thumbs.disliked(store) }
+  val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows.map { (n, l) -> n to l.filter { it.key !in disliked } }
   val featured = if (hero) s.heroItems.getOrNull(s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))) else null
   // Focus in the hero keeps the page at the very top, so the hero is never cut off.
   LaunchedEffect(s.heroFocused, watching.size) { if (s.heroFocused) s.list.animateScrollToItem(0) }
@@ -157,6 +159,7 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
     CompositionLocalProvider(LocalBringIntoViewSpec provides centre) {
     LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 84.dp, bottom = 56.dp)) {
       if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 14.dp), style = MaterialTheme.typography.displaySmall) }
+      if (extras != null) item("extras") { extras() }
       if (featured != null) item("hero") { HeroInfo(store, s, featured, nav) }
       if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
       if (hero) item("live") { LiveHome(store, s.focus, nav) }

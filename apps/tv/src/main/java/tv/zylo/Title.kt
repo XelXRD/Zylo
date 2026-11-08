@@ -115,7 +115,8 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
     }
     return
   }
-  val tabs = listOfNotNull("Episodes".takeIf { tv }, "Overview", "More Like This".takeIf { recs.isNotEmpty() })
+  val hasCast = d?.optJSONObject("credits")?.optJSONArray("cast")?.length()?.let { it > 0 } == true
+  val tabs = listOfNotNull("Episodes".takeIf { tv }, "Overview", "Cast & Crew".takeIf { hasCast }, "More Like This".takeIf { recs.isNotEmpty() })
   val trailer = Tmdb.trailer(d)
   // Where Play starts: a film where you stopped; a series at your next episode (or where you stopped in it).
   val playSeason = if (tv) next?.season ?: 1 else null
@@ -174,8 +175,25 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
         }
         when (tabs[selected]) {
           "Episodes" -> Episodes(store, item, seasons, season, episodes, focus, nav, next) { season = it }
-          "Overview" -> Overview(d!!, tv)
+          "Overview" -> Column {
+            Overview(d!!, tv)
+            Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+              Text("Your verdict", Modifier.width(130.dp), style = MaterialTheme.typography.labelLarge, color = Z.Text2)
+              ThumbButtons(store, item, first = Modifier.focusMemory(focus, "thumbs"))
+            }
+          }
+          "Cast & Crew" -> CastRow(d!!, focus, nav)
           else -> LazyRow(Modifier.padding(top = 8.dp).bleed(Z.Pad), contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+            // First: follow the suggestions as a chain.
+            item("rabbit") {
+              ZSurface({ nav.push(Screen.Rabbit(item)) }, Modifier.focusMemory(focus, "rabbit").width(124.dp).aspectRatio(2f / 3f), container = Z.Card) {
+                Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
+                  Text("🐇", style = MaterialTheme.typography.displaySmall)
+                  Text("Rabbit Hole", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
+                  Text("Follow it as far as it goes", style = MaterialTheme.typography.bodySmall, color = Z.Text2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
+                }
+              }
+            }
             items(recs, key = { it.key }) { r -> PosterCard(store, r, Modifier.width(124.dp).focusMemory(focus, "rec/${r.key}")) { nav.push(Screen.Title(r)) } }
           }
         }
@@ -273,11 +291,20 @@ fun clock(ms: Long): String {
 
 // --- Choose Source ------------------------------------------------------------------------------------
 
-/** The last source list, so coming back from the player doesn't search again. */
+/** The id addons know a video by: tt123 for a film, tt123:1:2 for an episode (tmdb:… when there's no IMDb id). */
+suspend fun videoIdOf(store: Store, item: Item, season: Int?, episode: Int?): String {
+  val d = withContext(Dispatchers.IO) { Tmdb(store.tmdb).preview(item) }
+  val imdb = d?.optJSONObject("external_ids")?.str("imdb_id") ?: "tmdb:${item.id}"
+  return if (season != null) "$imdb:$season:$episode" else imdb
+}
+
+/** The last source list, so coming back from the player doesn't search again (and the next episode's, found early). */
 object SourcesMemo {
-  private var last: Triple<Screen.Sources, Pair<Found, List<Sub>?>, Long>? = null
-  fun get(s: Screen.Sources) = last?.takeIf { it.first.item == s.item && it.first.season == s.season && it.first.episode == s.episode && System.currentTimeMillis() - it.third < 30 * 60_000 }?.second
-  fun put(s: Screen.Sources, f: Found, subs: List<Sub>?) { last = Triple(s, f to subs, System.currentTimeMillis()) }
+  private class Entry(val s: Screen.Sources, val found: Found, val subs: List<Sub>?, val at: Long)
+  private var kept = listOf<Entry>() // the last three: this episode, the next one, and one spare
+  private fun same(a: Screen.Sources, b: Screen.Sources) = a.item == b.item && a.season == b.season && a.episode == b.episode
+  fun get(s: Screen.Sources) = kept.find { same(it.s, s) && System.currentTimeMillis() - it.at < 30 * 60_000 }?.let { it.found to it.subs }
+  @Synchronized fun put(s: Screen.Sources, f: Found, subs: List<Sub>?) { kept = (listOf(Entry(s, f, subs, System.currentTimeMillis())) + kept.filter { !same(it.s, s) }).take(3) }
 }
 
 @Composable
@@ -318,9 +345,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
   LaunchedEffect(s) {
     if (addons.isEmpty() && servers.isEmpty()) return@LaunchedEffect
     val f = found ?: run {
-      val d = withContext(Dispatchers.IO) { Tmdb(store.tmdb).preview(s.item) }
-      val imdb = d?.optJSONObject("external_ids")?.str("imdb_id") ?: "tmdb:${s.item.id}"
-      val videoId = if (s.season != null) "$imdb:${s.season}:${s.episode}" else imdb
+      val videoId = videoIdOf(store, s.item, s.season, s.episode)
       launch { subs = runCatching { findSubtitles(store, s.item.type, videoId) }.getOrDefault(emptyList()) }
       findSources(store, s.item, s.season, s.episode, videoId).also { found = it }
     }
@@ -521,6 +546,40 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
       .setPreferredTextLanguage(store.subLang.ifEmpty { java.util.Locale.getDefault().language.ifEmpty { "en" } }).setIgnoredTextSelectionFlags(0).build()
   }
 
+  // --- Next episode, found early: three minutes from the end its sources (and subtitles) are searched for, so
+  // Up Next starts it without the wait. Choose Source for it then opens at once too.
+  LaunchedEffect(next) {
+    val n = next ?: return@LaunchedEffect
+    while (!(player.duration > 0 && player.duration - player.currentPosition < 180_000)) delay(5_000)
+    val nextScreen = Screen.Sources(s.item, n.season, n.episode, n.name, autoplay = true)
+    if (SourcesMemo.get(nextScreen) != null) return@LaunchedEffect
+    withContext(Dispatchers.IO) {
+      runCatching {
+        val videoId = videoIdOf(store, s.item, n.season, n.episode)
+        val subs = runCatching { findSubtitles(store, s.item.type, videoId) }.getOrDefault(emptyList())
+        SourcesMemo.put(nextScreen, findSources(store, s.item, n.season, n.episode, videoId), subs)
+      }
+    }
+  }
+
+  // --- Pause screen: paused for a few seconds, the picture dims and shows what you're watching. ---
+  var paused by remember { mutableStateOf(false) }
+  var pauseScreen by remember { mutableStateOf(false) }
+  var synopsis by remember { mutableStateOf(s.item.overview) }
+  LaunchedEffect(Unit) {
+    if (s.season != null) synopsis = withContext(Dispatchers.IO) {
+      runCatching { Tmdb(store.tmdb).season(s.item.id, s.season).optJSONArray("episodes")?.objects()?.find { it.optInt("episode_number") == s.episode }?.str("overview") }.getOrNull()
+    } ?: synopsis
+    while (true) { delay(500); paused = !player.playWhenReady && player.playbackState == Player.STATE_READY }
+  }
+  LaunchedEffect(paused) {
+    pauseScreen = false
+    if (!paused) return@LaunchedEffect
+    delay(6_000)
+    pauseScreen = true
+    view?.hideController()
+  }
+
   // --- Skip Intro / Recap / Credits (IntroDB; AniSkip for anime). ---
   var segments by remember { mutableStateOf(emptyList<Segment>()) }
   var skip by remember { mutableStateOf<Segment?>(null) }
@@ -603,6 +662,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
       lifecycle.removeObserver(observer)
       save()
       if (player.duration > 0) Trakt.scrobble(store, "stop", s.item, s.season, s.episode, progress()) // 80%+ records the play
+      if (s.season == null && progress() >= 90f && Thumbs.of(store, s.item) == 0 && store.profile.kids == null) nav.ui.rate = s.item // how was it?
       player.release()
     }
   }
@@ -654,6 +714,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     val sk = skip
     if (sk != null && !upNext && !timing) SkipButton(Skip.label(sk.kind).let { if (sk.kind == "credits" && next != null) "Next Episode" else it }, Modifier.align(Alignment.BottomEnd)) { doSkip(sk) }
     if (timing) SubtitleTiming(offset, Modifier.align(Alignment.BottomStart), { offset += it }) { timing = false; view?.requestFocus() }
+    if (pauseScreen && !controls && !upNext && !timing) PauseScreen(s, synopsis, (player.duration - player.currentPosition).coerceAtLeast(0))
     val n = next
     if (upNext && !dismissed && n != null) UpNextCard(s.item, n, countdown, Modifier.align(Alignment.BottomEnd), ::playNext) { dismissed = true; view?.requestFocus() }
     error?.let {
@@ -669,6 +730,20 @@ object AutoSource {
   val CHOICES = listOf(1, 3, 5, 10, 20, 0)
   fun min(store: Store) = store.str("autosource").toIntOrNull() ?: 1
   fun label(n: Int) = if (n == 0) "Off" else if (n == 1) "As soon as one is found" else "When $n+ are found"
+}
+
+/** Paused a while: the picture dims behind what you're watching. Not focusable: any key brings the controls back. */
+@Composable
+private fun PauseScreen(s: Screen.Play, synopsis: String, left: Long) {
+  Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Color.Black.copy(alpha = 0.85f), 0.65f to Color.Black.copy(alpha = 0.45f), 1f to Color.Black.copy(alpha = 0.25f)))) {
+    Column(Modifier.align(Alignment.CenterStart).padding(start = Z.Pad * 2).fillMaxWidth(0.55f)) {
+      Text("You're watching", style = MaterialTheme.typography.titleMedium, color = Z.Text2)
+      Text(s.item.title, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.displayMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+      if (s.subtitle.isNotEmpty()) Text(s.subtitle, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleLarge)
+      Text(synopsis, Modifier.padding(top = 12.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2, maxLines = 5, overflow = TextOverflow.Ellipsis)
+      Text("${clock(left)} left  ·  Paused", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.labelLarge, color = Z.Muted)
+    }
+  }
 }
 
 /** Takes focus once when it appears, so OK skips; it goes when the part is over. */

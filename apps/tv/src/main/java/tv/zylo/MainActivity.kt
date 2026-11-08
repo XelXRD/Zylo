@@ -50,6 +50,11 @@ sealed interface Screen {
   data object Search : Screen
   data class Title(val item: Item) : Screen
   data class More(val title: String, val path: String, val type: String?) : Screen
+  data class Person(val id: Int, val name: String) : Screen
+  data class Rabbit(val item: Item) : Screen
+  data object Calendar : Screen
+  data object Wrapped : Screen
+  data object MovieNight : Screen
   data class Sources(val item: Item, val season: Int?, val episode: Int?, val episodeName: String = "", val autoplay: Boolean = false) : Screen
   data class Play(
     val item: Item, val season: Int?, val episode: Int?, val url: String, val headers: Map<String, String>, val subtitle: String, val source: String,
@@ -76,6 +81,7 @@ class UiState(store: Store) {
   val content = FocusRequester() // the current page, so Down from the top bar always lands back in it
   val navActive = FocusRequester() // the current section in the top bar
   var navFocused by mutableStateOf(false)
+  var rate by mutableStateOf<Item?>(null) // a film just finished: ask for a thumbs up or down
   val profile = store.profile
   var listTab by mutableStateOf("mine")
 }
@@ -147,6 +153,11 @@ class MainActivity : ComponentActivity() {
             Screen.Settings -> SettingsGate(store, nav) { SettingsScreen(store) }
             Screen.Search -> SearchPage(store, nav, ui.search)
             is Screen.More -> MorePage(store, s, nav)
+            is Screen.Person -> PersonPage(store, s, nav)
+            is Screen.Rabbit -> RabbitHolePage(store, s.item, nav)
+            Screen.Calendar -> CalendarPage(store, nav)
+            Screen.Wrapped -> WrappedPage(store, nav)
+            Screen.MovieNight -> MovieNightPage(store, nav)
             is Screen.Title -> TitlePage(store, s.item, nav)
             is Screen.Sources -> SourcesPage(store, s, nav)
             is Screen.Play -> PlayerPage(store, s, nav)
@@ -157,6 +168,9 @@ class MainActivity : ComponentActivity() {
         }
         // A newer version on the update server: offered once per version (Settings > About can check again).
         if (s !is Screen.Play && s != Screen.LivePlay) UpdatePrompt(store, Updates.asked)
+        // After a film: thumbs up or down. On Home: an episode or film you asked to be reminded about is out.
+        ui.rate?.let { item -> if (s !is Screen.Play) RatePrompt(store, item) { ui.rate = null } }
+        if (s == Screen.Main && ui.rate == null) EpisodeAlert(store, nav)
         // Live TV reminders, over anything (switching from a film or another channel is the point).
         if (Xtream.from(store) != null && ui.profile.kids == null) ReminderAlert(store, ui, nav)
       }
@@ -177,7 +191,7 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
     Box(Modifier.fillMaxSize().focusRequester(ui.content).focusRestorer().focusGroup()) { key(ui.section) {
       when (val s = ui.section) {
         Section.Home -> RowsPage(store, ui.home, nav, restore, hero = true)
-        Section.Discover -> RowsPage(store, ui.discover, nav, restore, title = "Discover")
+        Section.Discover -> RowsPage(store, ui.discover, nav, restore, title = "Discover", extras = { DiscoverExtras(store, nav) })
         Section.MyList -> MyListPage(store, nav, ui.myList, restore)
         Section.Live -> LivePage(store, ui.live, nav, restore)
         else -> BrowsePage(store, ui.browse.getValue(s), nav, s.label, restore)

@@ -169,6 +169,21 @@ object Trakt {
     return (mine + liked).filter { it.id.isNotEmpty() }
   }
 
+  /** Thumbs up = 9/10, down = 3/10, null = rating removed. Through the Outbox, so it lands even offline. */
+  fun rate(store: Store, item: Item, rating: Int?) {
+    if (!connected(store)) return
+    Outbox.add(store, item.title + (rating?.let { " rated $it/10" } ?: " rating removed"),
+      JSONObject().put("service", "trakt").put("path", if (rating != null) "/sync/ratings" else "/sync/ratings/remove")
+        .put("body", body(item, null, null) { if (rating != null) put("rating", rating) }))
+  }
+
+  /** Your shows' episodes and the films on your lists coming out over [days] from [start] (yyyy-MM-dd). */
+  fun calendar(store: Store, start: String, days: Int): Pair<List<JSONObject>, List<JSONObject>> =
+    arr(call(store, "/calendars/my/shows/$start/$days")).objects() to runCatching { arr(call(store, "/calendars/my/movies/$start/$days")).objects() }.getOrDefault(emptyList())
+
+  /** Everything you watched between two ISO times, with runtimes and genres (extended=full). */
+  fun history(store: Store, from: String, to: String) = paged(store, "/sync/history?start_at=$from&end_at=$to&extended=full")
+
   /** Lists you own (the ones you can add to). */
   fun ownLists(store: Store) = arr(call(store, "/users/me/lists")).objects().mapNotNull { o ->
     o.optJSONObject("ids")?.optString("trakt")?.takeIf { it.isNotEmpty() }?.let { TraktList(o.optString("name"), "me", it, o.optInt("item_count")) }
