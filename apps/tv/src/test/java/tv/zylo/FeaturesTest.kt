@@ -106,3 +106,11 @@ class ProgressTest {
     assertEquals(null, target(store(), show, next)) // never watched: start at the beginning
   }
 }
+
+class ScrollTest {
+  @Test fun onlyScrollsWhatsNeeded() {
+    assertEquals(0f, keepDistance(300f, 50f, 1000f, 100f, 30f)) // hero buttons already on screen: page stays put
+    assertEquals(-60f, keepDistance(40f, 50f, 1000f, 100f, 30f)) // above the top bar: down just enough to clear it
+    assertEquals(80f, keepDistance(950f, 100f, 1000f, 100f, 30f)) // off the bottom: up just enough
+  }
+}

@@ -97,6 +97,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
   }
 }
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boolean = false, title: String? = null) {
   val key = store.tmdb
@@ -132,11 +133,14 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   }
   Box(Modifier.fillMaxSize()) {
     if (featured != null) HeroBackdrop(store, s, featured, Modifier.fillMaxSize().alpha(artAlpha))
+    // Rows scroll just into view, clear of the top bar.
+    CompositionLocalProvider(LocalBringIntoViewSpec provides keepInView(100.dp, 32.dp)) {
     LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 84.dp, bottom = 56.dp)) {
       if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 14.dp), style = MaterialTheme.typography.displaySmall) }
       if (featured != null) item("hero") { HeroInfo(store, s, featured, nav) }
       if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
       items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = !hero && name == rows.first().first) }
+    }
     }
   }
 }
@@ -331,9 +335,10 @@ class ContinueEntry(
 @Composable
 fun ContinueRow(store: Store, list: List<ContinueEntry>, s: RowsState, nav: Nav) = Column {
   Text("Continue Watching", Modifier.padding(start = Z.Pad, top = 10.dp), style = MaterialTheme.typography.titleLarge)
+  PivotRow {
   LazyRow(
     state = s.rowLists.getOrPut("continue") { LazyListState() },
-    contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 14.dp),
+    contentPadding = PaddingValues(start = Z.Pad, end = 400.dp, top = 14.dp, bottom = 14.dp),
     horizontalArrangement = Arrangement.spacedBy(16.dp),
   ) {
     items(list, key = { it.key }) { w ->
@@ -351,6 +356,7 @@ fun ContinueRow(store: Store, list: List<ContinueEntry>, s: RowsState, nav: Nav)
         MetaLine(listOf(w.meta))
       }
     }
+  }
   }
 }
 

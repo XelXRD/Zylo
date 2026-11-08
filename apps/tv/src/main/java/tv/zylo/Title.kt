@@ -161,7 +161,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
         when (tabs[selected]) {
           "Episodes" -> Episodes(store, item, seasons, season, episodes, focus, nav, next) { season = it }
           "Overview" -> Overview(d!!, tv)
-          else -> LazyRow(Modifier.padding(top = 8.dp), contentPadding = PaddingValues(vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
+          else -> LazyRow(Modifier.padding(top = 8.dp).bleed(Z.Pad), contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             items(recs, key = { it.key }) { r -> PosterCard(store, r, Modifier.width(124.dp).focusMemory(focus, "rec/${r.key}")) { nav.push(Screen.Title(r)) } }
           }
         }
@@ -178,13 +178,13 @@ private fun Episodes(store: Store, item: Item, seasons: List<JSONObject>, season
   val upTo = if (next?.season == season) episodes.indexOfFirst { it.optInt("episode_number") == next?.episode } else -1
   LaunchedEffect(upTo) { if (upTo > 0) row.scrollToItem(upTo) }
   val upToCard = remember { FocusRequester() }
-  LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+  LazyRow(Modifier.bleed(Z.Pad), contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 6.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     items(seasons) { s ->
       val n = s.optInt("season_number")
       Chip(if (n == 0) "Specials" else "Season $n", n == season) { pick(n) }
     }
   }
-  LazyRow(Modifier.padding(top = 12.dp).focusRestorer(if (upTo >= 0) upToCard else FocusRequester.Default), state = row, contentPadding = PaddingValues(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+  LazyRow(Modifier.padding(top = 12.dp).bleed(Z.Pad).focusRestorer(if (upTo >= 0) upToCard else FocusRequester.Default), state = row, contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
     itemsIndexed(episodes, key = { _, it -> it.optInt("id") }) { i, e ->
       val s = season ?: 0
       val n = e.optInt("episode_number")

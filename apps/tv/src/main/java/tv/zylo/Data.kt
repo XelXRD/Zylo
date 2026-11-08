@@ -6,43 +6,37 @@ import android.content.SharedPreferences
 import androidx.compose.runtime.mutableStateOf
 import org.json.JSONArray
 import org.json.JSONObject
-import java.net.HttpURLConnection
-import java.net.URL
+import okhttp3.MediaType.Companion.toMediaTypeOrNull
+import okhttp3.OkHttpClient
+import okhttp3.Request
+import okhttp3.RequestBody.Companion.toRequestBody
+import java.util.concurrent.TimeUnit
 import java.net.URLEncoder
 import java.util.concurrent.ConcurrentHashMap
 
-// Browser-style, because addon hosts behind Cloudflare (Torrentio, ElfHosted…) answer 403 to unknown clients.
-const val UA = "Mozilla/5.0 (Linux; Android 11; Android TV) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0 Safari/537.36 Zylo/0.14.2"
+const val UA = "Zylo/0.14.3 (Android TV)"
 
 class HttpError(val code: Int, message: String) : Exception(message)
 
+// OkHttp, as Stremio and Nuvio use: Cloudflare-fronted addon hosts (ElfHosted, Torrentio…) answer 403 to Android's
+// built-in HttpURLConnection even when a browser on the same connection gets through. It also does PATCH natively.
+private val client = OkHttpClient.Builder().followRedirects(true).build()
+
 fun http(url: String, method: String = "GET", headers: Map<String, String> = emptyMap(), body: ByteArray? = null, type: String? = null, timeout: Int = 10_000): String {
-  val c = URL(url).openConnection() as HttpURLConnection
-  try {
-    try {
-      c.requestMethod = method
-    } catch (e: java.net.ProtocolException) { // PATCH (MyAnimeList) on stacks that only list the classic methods
-      HttpURLConnection::class.java.getDeclaredField("method").apply { isAccessible = true }.set(c, method)
-    }
-    c.connectTimeout = timeout
-    c.readTimeout = 20_000
-    c.setRequestProperty("User-Agent", UA)
-    c.setRequestProperty("Accept", "application/json, text/plain, */*")
-    headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
-    if (body != null) {
-      c.doOutput = true
-      if (type != null) c.setRequestProperty("Content-Type", type)
-      c.outputStream.use { it.write(body) }
-    }
-    val code = c.responseCode
+  val req = Request.Builder().url(url).header("User-Agent", UA).header("Accept", "application/json, text/plain, */*")
+  headers.forEach { (k, v) -> req.header(k, v) }
+  val rb = body?.toRequestBody(type?.toMediaTypeOrNull()) ?: if (method == "GET" || method == "DELETE") null else ByteArray(0).toRequestBody(null)
+  val call = client.newBuilder().connectTimeout(timeout.toLong(), TimeUnit.MILLISECONDS).readTimeout(20, TimeUnit.SECONDS).build()
+    .newCall(req.method(method, rb).build())
+  call.execute().use { r ->
+    val code = r.code
+    val host = r.request.url.host
     // ponytail: reads the whole body; add a size cap if an addon ever sends something huge
-    val text = (if (code < 400) c.inputStream else c.errorStream)?.bufferedReader()?.use { it.readText() } ?: ""
-    if (code == 401) throw HttpError(code, "${c.url.host} didn't accept the key (401).")
-    if (code == 403) throw HttpError(code, "${c.url.host} refused the request (403).")
-    if (code >= 400) throw HttpError(code, "${c.url.host} answered $code.")
+    val text = r.body?.string() ?: ""
+    if (code == 401) throw HttpError(code, "$host didn't accept the key (401).")
+    if (code == 403) throw HttpError(code, "$host refused the request (403).")
+    if (code >= 400) throw HttpError(code, "$host answered $code.")
     return text
-  } finally {
-    c.disconnect()
   }
 }
 

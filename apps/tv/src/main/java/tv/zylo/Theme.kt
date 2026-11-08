@@ -5,6 +5,10 @@ import androidx.compose.foundation.BorderStroke
 import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
+import androidx.compose.foundation.gestures.BringIntoViewSpec
+import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -103,6 +107,7 @@ val LocalReduceMotion = staticCompositionLocalOf { false }
 /** Animation length, or 0 when Reduce motion is on. */
 @Composable fun ms(n: Int) = if (LocalReduceMotion.current) 0 else n
 
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
 fun ZTheme(reduceMotion: Boolean, content: @Composable () -> Unit) {
   MaterialTheme(
@@ -112,10 +117,44 @@ fun ZTheme(reduceMotion: Boolean, content: @Composable () -> Unit) {
     ),
     typography = ZType,
   ) {
-    CompositionLocalProvider(LocalReduceMotion provides reduceMotion) {
+    CompositionLocalProvider(LocalReduceMotion provides reduceMotion, LocalBringIntoViewSpec provides keepInView(24.dp, 24.dp)) {
       Surface(Modifier.fillMaxSize(), colors = SurfaceDefaults.colors(containerColor = Z.Bg, contentColor = Z.Text)) { content() }
     }
   }
+}
+
+/**
+ * Scroll only as far as needed to show what has focus, with a margin. On Android TV, Compose's default instead pulls
+ * focus to a fixed point ~30% down the screen: that made pages jump, centred the detail page's buttons and fought
+ * the "stay at the top" scrolls (it never showed on the emulator, which isn't a TV device).
+ */
+@OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
+@Composable
+fun keepInView(lead: Dp, trail: Dp): BringIntoViewSpec {
+  val d = LocalDensity.current
+  val (a, b) = with(d) { lead.toPx() to trail.toPx() }
+  return remember(a, b) {
+    object : BringIntoViewSpec {
+      override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = keepDistance(offset, size, containerSize, a, b)
+    }
+  }
+}
+
+fun keepDistance(offset: Float, size: Float, container: Float, lead: Float, trail: Float): Float {
+  val start = offset - lead
+  val end = offset + size + trail
+  return when {
+    start >= 0 && end <= container -> 0f
+    start < 0 || size + lead + trail > container -> start
+    else -> end - container
+  }
+}
+
+/** Lets a row draw across its parent's side padding (contentPadding puts it back), so focus scaling isn't clipped. */
+fun Modifier.bleed(by: Dp) = layout { m, c ->
+  val px = by.roundToPx()
+  val p = m.measure(c.copy(minWidth = c.minWidth + 2 * px, maxWidth = c.maxWidth + 2 * px))
+  layout(p.width - 2 * px, p.height) { p.place(-px, 0) }
 }
 
 // --- Brand ----------------------------------------------------------------------------------

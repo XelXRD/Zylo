@@ -40,7 +40,7 @@ class Addon(val url: String, val manifest: JSONObject) {
       // People often paste the addon's home or /configure page rather than its manifest link.
       if (!url.substringBefore('?').endsWith("manifest.json")) url = url.substringBefore('?').removeSuffix("/").removeSuffix("/configure") + "/manifest.json"
       val m = try { getJson(url) } catch (e: JSONException) { throw Exception("That address didn't return an addon manifest.") } catch (e: HttpError) {
-        throw Exception(if (e.code == 403) "${URL(url).host} refused Zylo (403). Some addons block VPNs and some hosts need you to configure the addon first: set it up on its website, then paste the manifest link it gives you." else e.message)
+        throw Exception(if (e.code == 403) "${URL(url).host} refused Zylo (403). Some addons block VPNs, and some need setting up on their website first: paste the manifest link it gives you." else e.message)
       }
       if (m.str("id") == null || m.str("name") == null || m.str("version") == null || (m.optJSONArray("resources")?.length() ?: 0) == 0 || m.optJSONArray("types") == null)
         throw Exception("That link works, but it isn't a Stremio addon manifest.")
