@@ -36,6 +36,8 @@ enum class SettingsPage(val label: String) { Playback("Playback"), Integrations(
 @Composable
 fun SettingsScreen(store: Store) {
   var page by rememberSaveable { mutableStateOf(if (store.tmdb.isEmpty()) SettingsPage.Integrations else SettingsPage.Playback) }
+  // A sign-in panel (Trakt code, AniList/MAL QR). Kept here, above the pages, so nothing can switch it away mid-sign-in.
+  var panel by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
   val first = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
   Row(Modifier.fillMaxSize()) {
@@ -44,7 +46,7 @@ fun SettingsScreen(store: Store) {
       Text("Settings", Modifier.padding(start = 12.dp, bottom = 12.dp), style = MaterialTheme.typography.headlineSmall)
       SettingsPage.entries.forEach { p ->
         // Moving through the sidebar shows each page; Right goes into it.
-        ZSurface({ page = p }, (if (p == page) Modifier.focusRequester(first) else Modifier).fillMaxWidth().padding(vertical = 2.dp).onFocusChanged { if (it.isFocused) page = p }, selected = p == page) {
+        ZSurface({ page = p }, (if (p == page) Modifier.focusRequester(first) else Modifier).fillMaxWidth().padding(vertical = 2.dp).onFocusChanged { if (it.isFocused && panel == null) page = p }, selected = p == page) {
           Text(p.label, Modifier.padding(horizontal = 12.dp, vertical = 10.dp), style = MaterialTheme.typography.labelLarge)
         }
       }
@@ -52,7 +54,7 @@ fun SettingsScreen(store: Store) {
     Box(Modifier.weight(1f).fillMaxHeight().padding(horizontal = 40.dp, vertical = 36.dp)) {
       when (page) {
         SettingsPage.Playback -> Playback(store)
-        SettingsPage.Integrations -> Integrations(store)
+        SettingsPage.Integrations -> panel?.let { it() } ?: Integrations(store) { p -> panel = p?.let { content -> { content { panel = null } } } }
         SettingsPage.Addons -> Addons(store)
         SettingsPage.Debrid -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           Header("Debrid Services", "Stream torrent sources from your debrid account. Zylo uses the first connected service that has a title ready.")
@@ -148,18 +150,16 @@ private fun AccountRow(tile: String, name: String, text: String, warn: Boolean, 
 
 // --- Integrations ------------------------------------------------------------------------------------
 
+/** open(panel): show a sign-in panel; it gets a close() to call when done or cancelled. */
 @Composable
-private fun Integrations(store: Store) {
-  var panel by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
-  val close = { panel = null }
-  panel?.let { return it() }
+private fun Integrations(store: Store, open: ((@Composable (close: () -> Unit) -> Unit)?) -> Unit) {
   Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
     Header("Integrations", "Connect your accounts. Zylo tests each one before showing it as connected.")
     ServiceCard(store, "tmdb", "TMDB", "Film and TV details, artwork and trailers. Required.", "TM", { store.tmdb }, { store.tmdb = it })
     ServiceCard(store, "fanart", "fanart.tv", "Title logos, clean backgrounds and landscape art. Optional: a free personal API key from fanart.tv.", "FA",
       { store.str("fanart_key") }, { store.put("fanart_key", it) })
-    TraktCard(store) { clientId -> panel = { TraktConnect(store, clientId, close) } }
-    Anime.NAMES.forEach { (t, name) -> AnimeCard(store, t, name) { url -> panel = { PasteConnect(store, t, name, url, close) } } }
+    TraktCard(store) { clientId -> open { close -> TraktConnect(store, clientId, close) } }
+    Anime.NAMES.forEach { (t, name) -> AnimeCard(store, t, name) { url -> open { close -> PasteConnect(store, t, name, url, close) } } }
   }
 }
 
@@ -170,6 +170,7 @@ private fun TraktCard(store: Store, connect: (String) -> Unit) {
   var tick by remember { mutableIntStateOf(0) }
   var busy by remember { mutableStateOf(false) }
   val connected = remember(tick) { Trakt.connected(store) }
+  val clientId = remember(tick) { store.str("trakt_client") }
   val failure = remember(tick) { store.status("trakt").takeIf { it.startsWith("fail:") }?.removePrefix("fail:") }
   val synced = remember(tick) { store.long("trakt_synced") }
   fun sync() = scope.launch {
@@ -181,20 +182,39 @@ private fun TraktCard(store: Store, connect: (String) -> Unit) {
   }
   val (label, color) = when {
     busy -> "Syncing…" to Z.Info
-    !connected -> "Not connected" to Z.Muted
     failure != null -> "Needs attention" to Z.Warning
-    else -> "Connected" to Z.Success
+    connected -> "Connected" to Z.Success
+    clientId.isNotEmpty() -> "Not signed in" to Z.Warning
+    else -> "Not connected" to Z.Muted
   }
   val text = when {
-    !connected -> "Lists you made or follow, your watchlist, watch history and scrobbling."
     failure != null -> failure
-    else -> "@${store.str("trakt_user")} · " + if (synced > 0) "synced ${ago(synced)}" else "not synced yet"
+    connected -> "@${store.str("trakt_user")} · " + if (synced > 0) "synced ${ago(synced)}" else "not synced yet"
+    clientId.isNotEmpty() -> "Client ID saved. Sign in to sync your lists, watchlist and history."
+    else -> "Lists you made or follow, your watchlist, watch history and scrobbling."
   }
-  AccountRow("TR", "Trakt", text, failure != null && connected, label, color) {
-    if (!connected) ZButton("Connect", {
-      ask(ctx, "Trakt Client ID (trakt.tv > Settings > Your API Apps)", store.str("trakt_client")) { if (it.isNotBlank()) connect(it.trim()) }
-    }, primary = true)
-    else {
+  fun enterClientId() = ask(ctx, "Trakt Client ID (trakt.tv > Settings > Your API Apps; not the Client Secret)", clientId) { entered ->
+    val id = entered.trim()
+    when {
+      id.isEmpty() -> return@ask
+      !Trakt.validClientId(id) -> {
+        store.setStatus("trakt", "fail:That isn't a Trakt Client ID: it should be 64 letters and numbers (you entered ${id.length} characters).")
+        tick++
+      }
+      else -> {
+        store.put("trakt_client", id) // saved now, even before sign-in finishes
+        store.setStatus("trakt", "")
+        tick++
+        connect(id)
+      }
+    }
+  }
+  AccountRow("TR", "Trakt", text, failure != null, label, color) {
+    if (!connected && clientId.isEmpty()) ZButton("Connect", { enterClientId() }, primary = true)
+    else if (!connected) {
+      ZButton("Sign In", { store.setStatus("trakt", ""); tick++; connect(clientId) }, primary = true)
+      ZButton("Change Client ID", { enterClientId() })
+    } else {
       ZButton("Sync Now", { sync() })
       ZButton("Disconnect", { Trakt.disconnect(store); store.setStatus("trakt", ""); tick++ })
     }
@@ -229,14 +249,22 @@ private fun TraktConnect(store: Store, clientId: String, close: () -> Unit) {
   val cancel = remember { FocusRequester() }
   LaunchedEffect(Unit) {
     delay(80); runCatching { cancel.requestFocus() }
-    val dc = withContext(Dispatchers.IO) { runCatching { Trakt.deviceCode(clientId) } }.getOrElse { message = it.message ?: "Trakt didn't answer."; return@LaunchedEffect }
+    val dc = withContext(Dispatchers.IO) { runCatching { Trakt.deviceCode(clientId) } }.getOrElse {
+      message = it.message ?: "Trakt didn't answer."
+      store.setStatus("trakt", "fail:$message") // also shown on the Trakt card after you go back
+      return@LaunchedEffect
+    }
     code = dc
     message = "Waiting for you to approve on Trakt…"
     val end = System.currentTimeMillis() + dc.expiresIn * 1000
     while (System.currentTimeMillis() < end) {
       delay(dc.interval * 1000)
       val r = withContext(Dispatchers.IO) { runCatching { Trakt.poll(store, clientId, dc.device) } }
-      r.exceptionOrNull()?.let { message = it.message ?: "That didn't work."; return@LaunchedEffect }
+      r.exceptionOrNull()?.let {
+        message = it.message ?: "That didn't work."
+        store.setStatus("trakt", "fail:$message")
+        return@LaunchedEffect
+      }
       if (r.getOrNull() == true) {
         message = "Connected. Syncing your history…"
         val s = withContext(Dispatchers.IO) { runCatching { Trakt.sync(store, force = true) } }
@@ -258,7 +286,7 @@ private fun TraktConnect(store: Store, clientId: String, close: () -> Unit) {
         Text(message, style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
       }
     }
-    ZButton("Cancel", close, Modifier.padding(top = 24.dp).focusRequester(cancel))
+    ZButton(if (code == null || message.startsWith("Waiting")) "Cancel" else "Back", close, Modifier.padding(top = 24.dp).focusRequester(cancel))
   }
 }
 

@@ -46,6 +46,17 @@ object Trakt {
     }
   }
 
+  /** OAuth calls. api.trakt.tv answers them (checked 8 Nov 2026); auth.trakt.tv is Trakt's newer host, used if api ever stops. */
+  private fun oauth(path: String, clientId: String, body: JSONObject): String = try {
+    http("$API$path", "POST", headers(clientId), body.toString().toByteArray(), "application/json")
+  } catch (e: HttpError) {
+    if (e.code != 404 && e.code != 405) throw e
+    http("$AUTH$path", "POST", headers(clientId), body.toString().toByteArray(), "application/json")
+  }
+
+  /** Trakt Client IDs are 64 hexadecimal characters. */
+  fun validClientId(id: String) = Regex("[0-9a-fA-F]{64}").matches(id.trim())
+
   private fun arr(s: String) = if (s.isBlank()) JSONArray() else JSONArray(s)
 
   // --- Sign-in --------------------------------------------------------------------
@@ -53,14 +64,20 @@ object Trakt {
   class DeviceCode(val device: String, val user: String, val url: String, val interval: Long, val expiresIn: Long)
 
   fun deviceCode(clientId: String): DeviceCode {
-    val o = JSONObject(http("$AUTH/oauth/device/code", "POST", headers(clientId), JSONObject().put("client_id", clientId).toString().toByteArray(), "application/json"))
+    val o = try {
+      JSONObject(oauth("/oauth/device/code", clientId, JSONObject().put("client_id", clientId)))
+    } catch (e: HttpError) {
+      throw HttpError(e.code, if (e.code == 401 || e.code == 403) "Trakt doesn't recognise that Client ID. Copy it again from trakt.tv > Settings > Your API Apps." else "Trakt answered ${e.code}.")
+    } catch (e: java.io.IOException) {
+      throw java.io.IOException("Couldn't reach Trakt (${e.message}). Check the TV's internet connection.")
+    }
     return DeviceCode(o.getString("device_code"), o.getString("user_code"), o.optString("verification_url", "https://trakt.tv/activate"), o.optLong("interval", 5), o.optLong("expires_in", 600))
   }
 
   /** One poll: true when connected, false to keep waiting. Throws when it's over (expired, declined). */
   fun poll(store: Store, clientId: String, deviceCode: String): Boolean {
     val t = try {
-      JSONObject(http("$AUTH/oauth/device/token", "POST", headers(clientId), JSONObject().put("code", deviceCode).put("client_id", clientId).toString().toByteArray(), "application/json"))
+      JSONObject(oauth("/oauth/device/token", clientId, JSONObject().put("code", deviceCode).put("client_id", clientId)))
     } catch (e: HttpError) {
       when (e.code) {
         400, 429 -> return false // not approved yet / polling too fast
@@ -88,7 +105,7 @@ object Trakt {
       val body = JSONObject().put("refresh_token", store.str("trakt_refresh")).put("client_id", store.str("trakt_client"))
         .put("redirect_uri", REDIRECT).put("grant_type", "refresh_token")
       val t = try {
-        JSONObject(http("$AUTH/oauth/token", "POST", headers(store.str("trakt_client")), body.toString().toByteArray(), "application/json"))
+        JSONObject(oauth("/oauth/token", store.str("trakt_client"), body))
       } catch (e: HttpError) {
         if (e.code == 400 || e.code == 401) {
           disconnect(store)
