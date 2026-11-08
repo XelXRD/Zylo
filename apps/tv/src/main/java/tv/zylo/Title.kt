@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.lazy.itemsIndexed
+import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
@@ -82,10 +83,16 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val latest = remember(tick) { store.latest(item) }
   val look = rememberLook(store, item)
 
+  // Where you're up to (Zylo + Trakt history): the series opens on that season and episode.
+  var next by remember { mutableStateOf<Target?>(null) }
+  var nextKnown by remember { mutableStateOf(!tv) }
+  LaunchedEffect(item, tick) {
+    if (tv) { next = withContext(Dispatchers.IO) { runCatching { target(store, t, item) }.getOrNull() }; nextKnown = true }
+  }
   LaunchedEffect(item) { runCatching { withContext(Dispatchers.IO) { t.details(item.type, item.id) } }.onSuccess { d = it }.onFailure { error = it.message } }
   val seasons = d?.optJSONArray("seasons")?.objects().orEmpty()
-  LaunchedEffect(d) {
-    if (d != null && season == null) season = latest?.season ?: seasons.map { it.optInt("season_number") }.let { n -> n.firstOrNull { it > 0 } ?: n.firstOrNull() }
+  LaunchedEffect(d, nextKnown) {
+    if (d != null && nextKnown && season == null) season = next?.season ?: seasons.map { it.optInt("season_number") }.let { n -> n.firstOrNull { it > 0 } ?: n.firstOrNull() }
   }
   LaunchedEffect(season) {
     val n = season ?: return@LaunchedEffect
@@ -96,11 +103,11 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val recs = d?.optJSONObject("recommendations")?.optJSONArray("results")?.objects()?.mapNotNull { Tmdb.item(it, null) }.orEmpty()
   val tabs = listOfNotNull("Episodes".takeIf { tv }, "Overview", "More Like This".takeIf { recs.isNotEmpty() })
   val trailer = Tmdb.trailer(d)
-  // Where Play starts: resume, next episode after a finished one, or the beginning.
-  val playSeason = if (tv) latest?.season ?: season ?: 1 else null
-  val playEpisode = if (tv) latest?.episode?.let { if (latest.finished) it + 1 else it } ?: 1 else null
-  val resuming = latest?.takeIf { it.started && (!tv || it.episode == playEpisode) }
-  val playLabel = (if (resuming != null) "Resume" else "Play") + if (tv) " S$playSeason E$playEpisode" else ""
+  // Where Play starts: a film where you stopped; a series at your next episode (or where you stopped in it).
+  val playSeason = if (tv) next?.season ?: 1 else null
+  val playEpisode = if (tv) next?.episode ?: 1 else null
+  val resuming = if (tv) next?.resume == true else latest?.started == true
+  val playLabel = (if (resuming) "Resume" else "Play") + if (tv) " S$playSeason E$playEpisode" else ""
 
   var popup by remember { mutableStateOf(false) } // trailer pop-out
   BackHandler(popup) { popup = false }
@@ -152,7 +159,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
         }
         }
         when (tabs[selected]) {
-          "Episodes" -> Episodes(store, item, seasons, season, episodes, focus, nav) { season = it }
+          "Episodes" -> Episodes(store, item, seasons, season, episodes, focus, nav, next) { season = it }
           "Overview" -> Overview(d!!, tv)
           else -> LazyRow(Modifier.padding(top = 8.dp), contentPadding = PaddingValues(vertical = 14.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
             items(recs, key = { it.key }) { r -> PosterCard(store, r, Modifier.width(124.dp).focusMemory(focus, "rec/${r.key}")) { nav.push(Screen.Title(r)) } }
@@ -165,21 +172,27 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
 }
 
 @Composable
-private fun Episodes(store: Store, item: Item, seasons: List<JSONObject>, season: Int?, episodes: List<JSONObject>, focus: FocusMemory, nav: Nav, pick: (Int) -> Unit) = Column(Modifier.padding(top = 16.dp)) {
+private fun Episodes(store: Store, item: Item, seasons: List<JSONObject>, season: Int?, episodes: List<JSONObject>, focus: FocusMemory, nav: Nav, next: Target?, pick: (Int) -> Unit) = Column(Modifier.padding(top = 16.dp)) {
+  // The row starts on your next episode, and moving down into it lands there.
+  val row = rememberLazyListState()
+  val upTo = if (next?.season == season) episodes.indexOfFirst { it.optInt("episode_number") == next?.episode } else -1
+  LaunchedEffect(upTo) { if (upTo > 0) row.scrollToItem(upTo) }
+  val upToCard = remember { FocusRequester() }
   LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
     items(seasons) { s ->
       val n = s.optInt("season_number")
       Chip(if (n == 0) "Specials" else "Season $n", n == season) { pick(n) }
     }
   }
-  LazyRow(Modifier.padding(top = 12.dp), contentPadding = PaddingValues(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
-    items(episodes, key = { it.optInt("id") }) { e ->
+  LazyRow(Modifier.padding(top = 12.dp).focusRestorer(if (upTo >= 0) upToCard else FocusRequester.Default), state = row, contentPadding = PaddingValues(vertical = 10.dp), horizontalArrangement = Arrangement.spacedBy(18.dp)) {
+    itemsIndexed(episodes, key = { _, it -> it.optInt("id") }) { i, e ->
       val s = season ?: 0
       val n = e.optInt("episode_number")
       val w = store.watch(progressKey(item, s, n))
       val watched = store.watched(progressKey(item, s, n))
       Column(Modifier.width(220.dp)) {
-        ZCard({ nav.push(Screen.Sources(item, s, n, e.optString("name"), autoplay = true)) }, Modifier.focusMemory(focus, "ep/$s/$n").fillMaxWidth().aspectRatio(16f / 9f)) {
+        ZCard({ nav.push(Screen.Sources(item, s, n, e.optString("name"), autoplay = true)) },
+          Modifier.then(if (i == upTo) Modifier.focusRequester(upToCard) else Modifier).focusMemory(focus, "ep/$s/$n").fillMaxWidth().aspectRatio(16f / 9f)) {
           Box(Modifier.fillMaxSize()) {
             Artwork(img(e.str("still_path"), "w300") ?: img(item.backdrop, "w300"), e.optString("name"))
             WatchMarks(w, watched)
@@ -402,7 +415,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   var controls by remember { mutableStateOf(false) }
   var view by remember { mutableStateOf<PlayerView?>(null) }
   val player = remember {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.13.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
+    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.14.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(http)).build().apply {
       // Addon subtitles ride along as extra text tracks; subtitles inside the file are found automatically.
       setMediaItem(MediaItem.Builder().setUri(s.url).setSubtitleConfigurations(s.subs.map { sub ->

@@ -23,7 +23,7 @@ fun http(url: String, method: String = "GET", headers: Map<String, String> = emp
     }
     c.connectTimeout = timeout
     c.readTimeout = 20_000
-    c.setRequestProperty("User-Agent", "Zylo/0.13.0")
+    c.setRequestProperty("User-Agent", "Zylo/0.14.0")
     headers.forEach { (k, v) -> c.setRequestProperty(k, v) }
     if (body != null) {
       c.doOutput = true
@@ -345,7 +345,7 @@ val DISCOVER_ROWS = listOf(
 
 // --- Up Next ---------------------------------------------------------------------------------------
 
-class NextEp(val season: Int, val episode: Int, val name: String, val still: String?)
+class NextEp(val season: Int, val episode: Int, val name: String, val still: String?, val airDate: String? = null)
 
 /**
  * The episode after S[season]E[episode]: the next one in the season, else the first of the next season (specials,
@@ -353,7 +353,7 @@ class NextEp(val season: Int, val episode: Int, val name: String, val still: Str
  */
 fun nextEpisode(episodesOf: (Int) -> List<JSONObject>, seasons: List<Int>, season: Int, episode: Int, today: String): NextEp? {
   fun aired(e: JSONObject) = e.str("air_date")?.let { it <= today } ?: false
-  fun of(s: Int, e: JSONObject) = if (aired(e)) NextEp(s, e.optInt("episode_number"), e.optString("name"), e.str("still_path")) else null
+  fun of(s: Int, e: JSONObject) = if (aired(e)) NextEp(s, e.optInt("episode_number"), e.optString("name"), e.str("still_path"), e.str("air_date")) else null
   episodesOf(season).find { it.optInt("episode_number") == episode + 1 }?.let { return of(season, it) }
   val following = seasons.filter { it > season && it > 0 }.minOrNull() ?: return null
   return episodesOf(following).minByOrNull { it.optInt("episode_number") }?.let { of(following, it) }

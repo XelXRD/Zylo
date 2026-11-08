@@ -167,12 +167,18 @@ object Trakt {
   fun sync(store: Store, force: Boolean = false) {
     if (!connected(store) || (!force && System.currentTimeMillis() - store.long("trakt_synced") < 15 * 60_000)) return
     val watched = mutableSetOf<String>()
-    arr(call(store, "/sync/watched/movies")).objects().forEach { o -> o.optJSONObject("movie")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 }?.let { watched += "movie:$it" } }
-    arr(call(store, "/sync/watched/shows")).objects().forEach { o ->
+    val movies = arr(call(store, "/sync/watched/movies")).objects()
+    movies.forEach { o -> o.optJSONObject("movie")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 }?.let { watched += "movie:$it" } }
+    val shows = arr(call(store, "/sync/watched/shows")).objects()
+    val recent = JSONArray() // shows by when you last watched them, for Up Next
+    shows.forEach { o ->
       val id = o.optJSONObject("show")?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 } ?: return@forEach
       o.optJSONArray("seasons")?.objects()?.forEach { s -> s.optJSONArray("episodes")?.objects()?.forEach { e -> watched += "tv:$id:${s.optInt("number")}:${e.optInt("number")}" } }
+      recent.put(JSONObject().put("id", id).put("at", parseDate(o.optString("last_watched_at"))))
     }
     store.setTraktWatched(watched)
+    store.put("trakt_shows", JSONArray(recent.objects().sortedByDescending { it.optLong("at") }.take(60)).toString())
+    val episodes = watched.count { it.startsWith("tv:") }
 
     // Paused elsewhere: shows up in Continue Watching, unless Zylo has a newer position.
     val tmdb = Tmdb(store.tmdb)
@@ -190,7 +196,12 @@ object Trakt {
       }
     }
     store.putLong("trakt_synced", System.currentTimeMillis())
+    store.setStatus("trakt", "ok")
+    Outbox.log(store, "trakt", "Synced from Trakt", "${movies.size} films and $episodes episodes watched (${shows.size} series).", true)
   }
+
+  /** Series you've watched on Trakt, most recent first: (TMDB id, last watched time). */
+  fun recentShows(store: Store) = runCatching { JSONArray(store.str("trakt_shows").ifEmpty { "[]" }).objects().map { it.optInt("id") to it.optLong("at") } }.getOrDefault(emptyList())
 
   private fun parseDate(s: String) = runCatching {
     SimpleDateFormat("yyyy-MM-dd'T'HH:mm:ss", Locale.UK).apply { timeZone = TimeZone.getTimeZone("UTC") }.parse(s.take(19))!!.time

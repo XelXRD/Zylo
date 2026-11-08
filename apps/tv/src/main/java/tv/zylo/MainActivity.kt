@@ -39,6 +39,8 @@ import androidx.lifecycle.compose.currentStateAsState
 import androidx.tv.material3.*
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
 
 sealed interface Screen {
   data object Main : Screen
@@ -84,12 +86,13 @@ class Nav(private val stack: SnapshotStateList<Screen>, private val store: Store
     if (stack.size > 1) stack.removeAt(stack.lastIndex)
   }
 
-  /** Play from the right place: where you stopped, or the next episode after a finished one. */
+  /** Play from the right place: a film from where you stopped; a series from your next episode (Zylo + Trakt history). */
   fun play(item: Item) {
-    val w = store.latest(item)
     if (item.type == "movie") return push(Screen.Sources(item, null, null, autoplay = true))
-    val episode = w?.episode?.let { if (w.finished) it + 1 else it } ?: 1
-    push(Screen.Sources(item, w?.season ?: 1, episode, autoplay = true))
+    Trakt.io.launch {
+      val t = runCatching { target(store, Tmdb(store.tmdb), item) }.getOrNull()
+      withContext(Dispatchers.Main) { push(Screen.Sources(item, t?.season ?: 1, t?.episode ?: 1, autoplay = true)) }
+    }
   }
 }
 
@@ -100,7 +103,11 @@ class MainActivity : ComponentActivity() {
     val ui = UiState(store)
     coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
     Trakt.io.launch {
-      runCatching { Trakt.sync(store) } // history and paused-elsewhere titles, at most every 15 minutes
+      // History and paused-elsewhere titles, at most every 15 minutes. A failure shows on the Trakt card and in Sync activity.
+      runCatching { Trakt.sync(store) }.onFailure {
+        store.setStatus("trakt", "fail:Couldn't sync: ${it.message}")
+        Outbox.log(store, "trakt", "Sync from Trakt", it.message ?: "Sync failed.", false)
+      }
       Outbox.flush(store) // anything that couldn't be sent last time
     }
     setContent {

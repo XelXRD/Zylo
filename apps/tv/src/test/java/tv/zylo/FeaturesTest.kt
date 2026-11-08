@@ -83,3 +83,26 @@ class Mem : SharedPreferences {
     override fun apply() {}
   }
 }
+
+class ProgressTest {
+  private val show = Item("tv", 1399, "Show", "/p", null, "", "2011")
+  private fun store() = HashMap<String, Mem>().let { files -> Store { files.getOrPut(it) { Mem() } } }
+  private val seasons = mapOf(3 to 10, 4 to 8) // episodes per season
+  private val next = { s: Int, e: Int -> if (e < (seasons[s] ?: 0)) NextEp(s, e + 1, "E${e + 1}", null) else seasons[s + 1]?.let { NextEp(s + 1, 1, "E1", null) } }
+
+  @Test fun picksUpFromTraktHistory() {
+    val st = store()
+    st.setTraktWatched((1..10).map { "tv:1399:3:$it" }.toSet() + setOf("tv:1399:4:1", "tv:1399:4:2"))
+    assertEquals(Target(4, 3, false), target(st, show, next)) // watched to S4E2 elsewhere → S4E3, not S1E1
+    st.setTraktWatched(st.traktWatched() + "tv:1399:4:3" + "tv:1399:4:4") // E3 and E4 ticked off → E5
+    assertEquals(Target(4, 5, false), target(st, show, next))
+  }
+
+  @Test fun resumesAnEpisodeInProgress() {
+    val st = store()
+    st.setTraktWatched(setOf("tv:1399:4:2"))
+    st.saveWatch(show, 4, 3, 600_000, 3_000_000)
+    assertEquals(Target(4, 3, true), target(st, show, next))
+    assertEquals(null, target(store(), show, next)) // never watched: start at the beginning
+  }
+}

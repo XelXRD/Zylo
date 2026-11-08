@@ -252,7 +252,7 @@ fun BoxScope.Marks(store: Store, item: Item) =
 
 @Composable
 fun BoxScope.WatchMarks(w: Watch?, watched: Boolean = w?.finished == true) {
-  if (watched) Box(Modifier.align(Alignment.TopEnd).padding(6.dp).size(22.dp).clip(CircleShape).background(Z.Bg.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
+  if (watched) Box(Modifier.align(Alignment.BottomEnd).padding(6.dp).size(22.dp).clip(CircleShape).background(Z.Bg.copy(alpha = 0.85f)), contentAlignment = Alignment.Center) {
     Glyph(Icons.Filled.Check, 14.dp, Z.Text)
   }
   else if (w?.started == true) ProgressBar(w.fraction, Modifier.align(Alignment.BottomCenter))

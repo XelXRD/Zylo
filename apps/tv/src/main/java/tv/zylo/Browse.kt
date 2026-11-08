@@ -69,6 +69,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
   var heroIndex by mutableIntStateOf(0)
   var heroFocused by mutableStateOf(false)
   var heroPlaying by mutableStateOf(false)
+  var nextUps by mutableStateOf<List<NextUp>>(emptyList()) // next episodes of series you're watching (Home only)
   var rows by mutableStateOf<List<Pair<String, List<Item>>>>(emptyList())
   var error by mutableStateOf<String?>(null)
   var loadedFor = ""
@@ -110,7 +111,12 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   RestoreFocus(s.focus, s.rows.isNotEmpty() && restore)
   if (s.rows.isEmpty()) return if (s.error != null) Loading(s.error) else RowsSkeleton(top = if (hero) 440.dp else 120.dp)
 
-  val watching = remember { if (hero) store.continueWatching() else emptyList() }
+  // Continue Watching: what you stopped partway through, plus the next episode of each series you're watching.
+  LaunchedEffect(hero) { if (hero) s.nextUps = withContext(Dispatchers.IO) { runCatching { nextUps(store, Tmdb(key)) }.getOrDefault(s.nextUps) } }
+  val inProgress = remember { if (hero) store.continueWatching() else emptyList() }
+  val watching = (inProgress.map { ContinueEntry(it.key, it.item, it.season, it.episode, listOfNotNull(it.season?.let { n -> "S$n E${it.episode}" }, it.left).joinToString("  ·  "), it.fraction, it.at) } +
+    s.nextUps.map { ContinueEntry("next/${it.item.key}", it.item, it.season, it.episode, "S${it.season} E${it.episode} · " + if (it.isNew) "New episode" else "Next episode", null, it.at, it.name, it.isNew) })
+    .sortedByDescending { it.at }
   val mine = remember { if (hero) store.myList else emptyList() }
   val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows
   val featured = if (hero) s.heroItems.getOrNull(s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))) else null
@@ -317,8 +323,13 @@ fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier,
   }
 }
 
+class ContinueEntry(
+  val key: String, val item: Item, val season: Int?, val episode: Int?, val meta: String, val fraction: Float?, val at: Long,
+  val name: String = "", val isNew: Boolean = false,
+)
+
 @Composable
-fun ContinueRow(store: Store, list: List<Watch>, s: RowsState, nav: Nav) = Column {
+fun ContinueRow(store: Store, list: List<ContinueEntry>, s: RowsState, nav: Nav) = Column {
   Text("Continue Watching", Modifier.padding(start = Z.Pad, top = 10.dp), style = MaterialTheme.typography.titleLarge)
   LazyRow(
     state = s.rowLists.getOrPut("continue") { LazyListState() },
@@ -328,14 +339,16 @@ fun ContinueRow(store: Store, list: List<Watch>, s: RowsState, nav: Nav) = Colum
     items(list, key = { it.key }) { w ->
       val look = rememberLook(store, w.item)
       Column(Modifier.width(232.dp)) {
-        ZCard({ nav.push(Screen.Sources(w.item, w.season, w.episode, autoplay = true)) }, Modifier.focusMemory(s.focus, "continue/${w.key}").fillMaxWidth().aspectRatio(16f / 9f)) {
+        ZCard({ nav.push(Screen.Sources(w.item, w.season, w.episode, w.name, autoplay = true)) }, Modifier.focusMemory(s.focus, "continue/${w.key}").fillMaxWidth().aspectRatio(16f / 9f)) {
           Box(Modifier.fillMaxSize()) {
             Artwork(look?.thumb ?: img(w.item.backdrop ?: w.item.poster, "w780"), w.item.title)
-            ProgressBar(w.fraction, Modifier.align(Alignment.BottomCenter))
+            if (w.fraction != null) ProgressBar(w.fraction, Modifier.align(Alignment.BottomCenter))
+            if (w.isNew) Text("New episode", Modifier.align(Alignment.TopStart).padding(8.dp).background(Z.Red, Z.Small).padding(horizontal = 7.dp, vertical = 3.dp),
+              style = MaterialTheme.typography.labelSmall, color = Color.White)
           }
         }
         Text(w.item.title, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        MetaLine(listOfNotNull(w.season?.let { "S$it E${w.episode}" }, w.left))
+        MetaLine(listOf(w.meta))
       }
     }
   }
