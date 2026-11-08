@@ -56,6 +56,7 @@ object Z {
   const val Fast = 180
   const val Normal = 240
   const val PreviewDelay = 800L // focus rest before a card expands and its trailer starts
+  const val HeroTrailerDelay = 3_000L // on a Home hero title before its trailer starts
 }
 
 val Inter = FontFamily(

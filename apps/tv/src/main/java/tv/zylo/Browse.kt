@@ -31,6 +31,11 @@ import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.onPreviewKeyEvent
+import androidx.compose.ui.input.key.type
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -53,7 +58,10 @@ import java.util.Locale
 
 // --- Rows pages (Home, Discover) ---------------------------------------------------------------
 
-class RowsState(private val specs: () -> List<RowSpec>) {
+class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb) -> List<Item>)? = null) {
+  var heroItems by mutableStateOf<List<Item>>(emptyList())
+  var heroIndex by mutableIntStateOf(0)
+  var heroFocused by mutableStateOf(false)
   var rows by mutableStateOf<List<Pair<String, List<Item>>>>(emptyList())
   var error by mutableStateOf<String?>(null)
   var loadedFor = ""
@@ -75,6 +83,8 @@ class RowsState(private val specs: () -> List<RowSpec>) {
       }
     }.awaitAll()
     rows = got.filter { it.second.isNotEmpty() } // only rows that have something in them
+    heroItems = hero?.let { h -> runCatching { h(t) }.getOrDefault(emptyList()).filter { it.backdrop != null }.take(8) }.orEmpty()
+      .ifEmpty { if (hero != null) rows.firstOrNull()?.second?.filter { it.backdrop != null }?.take(8).orEmpty() else emptyList() }
     if (rows.isEmpty() && error == null) error = "Couldn't reach TMDB. Check the internet connection."
   }
 }
@@ -96,36 +106,79 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   val watching = remember { if (hero) store.continueWatching() else emptyList() }
   val mine = remember { if (hero) store.myList else emptyList() }
   val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows
-  val featured = if (hero) s.rows.first().second.firstOrNull { it.backdrop != null } else null
+  // Focus in the hero keeps the page at the very top, so the hero is never cut off.
+  LaunchedEffect(s.heroFocused) { if (s.heroFocused) s.list.animateScrollToItem(0) }
   LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 76.dp, bottom = 56.dp)) {
     if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 4.dp), style = MaterialTheme.typography.displaySmall) }
-    if (featured != null) item("hero") { HomeHero(store, featured, nav, s.focus) }
+    if (hero && s.heroItems.isNotEmpty()) item("hero") { HomeHero(store, s, nav) }
     if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
     items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = !hero && name == rows.first().first) }
   }
 }
 
+/**
+ * Featured latest releases. Left on Play / Right on My List (or the dots) moves between titles. While the hero has
+ * focus, the title's trailer starts after Z.HeroTrailerDelay and the next title follows when it ends; with no
+ * trailer (or previews off) it moves on after a few seconds.
+ */
 @Composable
-fun HomeHero(store: Store, item: Item, nav: Nav, focus: FocusMemory) {
+fun HomeHero(store: Store, s: RowsState, nav: Nav) {
+  val items = s.heroItems
+  val index = s.heroIndex.coerceIn(0, items.lastIndex)
+  val item = items[index]
   val look = rememberLook(store, item)
   val d = look?.details
   var inList by remember(item) { mutableStateOf(store.inMyList(item)) }
-  Box(Modifier.fillMaxWidth().height(360.dp)) {
-    AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+  var trailerOn by remember(item) { mutableStateOf(false) }
+  var playing by remember(item) { mutableStateOf(false) }
+  val trailer = Tmdb.trailer(d)
+  fun move(step: Int) { s.heroIndex = (index + step + items.size) % items.size }
+  LaunchedEffect(item, s.heroFocused, trailer) {
+    trailerOn = false
+    if (!s.heroFocused) return@LaunchedEffect
+    delay(Z.HeroTrailerDelay)
+    if (trailer != null && store.previews) trailerOn = true
+    else { delay(8_000); move(1) }
+  }
+  val fade by animateFloatAsState(if (playing) 0f else 1f, tween(ms(400)), label = "hero")
+  fun Modifier.edge(key: Key, step: Int) = onPreviewKeyEvent { e ->
+    if (e.type == KeyEventType.KeyDown && e.key == key) { move(step); true } else false
+  }
+  Box(Modifier.fillMaxWidth().height(380.dp)) {
+    Crossfade(look?.background ?: img(item.backdrop, "w1280"), animationSpec = tween(ms(400)), label = "heroArt") { url ->
+      AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+    }
+    if (trailerOn) key(trailer) {
+      Trailer(trailer!!, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { playing = it }, onEnded = { move(1) }, onFailed = { move(1) })
+    }
     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg, 0.38f to Z.Bg.copy(alpha = 0.7f), 0.72f to Color.Transparent)))
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.55f to Color.Transparent, 1f to Z.Bg)))
-    Column(Modifier.align(Alignment.BottomStart).padding(start = Z.Pad, bottom = 18.dp).fillMaxWidth(0.46f)) {
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Z.Bg)))
+    Column(Modifier.align(Alignment.BottomStart).padding(start = Z.Pad, bottom = 14.dp).fillMaxWidth(0.46f)) {
+      Text("LATEST RELEASES", style = MaterialTheme.typography.labelMedium, color = Z.Red)
+      Spacer(Modifier.height(8.dp))
       TitleLogo(look, item.title, MaterialTheme.typography.displayLarge, 340.dp, 96.dp)
       MetaLine(Tmdb.meta(item, d), Modifier.padding(top = 10.dp))
       Rating(item.rating, Modifier.padding(top = 6.dp))
-      Text(item.overview, Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
-      Row(Modifier.padding(top = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-        ZButton("Play", { nav.play(item) }, Modifier.focusMemory(focus, "hero/play", default = true), primary = true, icon = Icons.Filled.PlayArrow)
-        ZButton("More Info", { nav.push(Screen.Title(item)) }, Modifier.focusMemory(focus, "hero/info"), icon = Icons.Filled.Info)
-        ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(focus, "hero/list"), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+      // The synopsis steps aside once the trailer is playing.
+      Text(item.overview, Modifier.padding(top = 10.dp).alpha(fade), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
+      Row(Modifier.padding(top = 16.dp).onFocusChanged { s.heroFocused = it.hasFocus }, horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+        ZButton("Play", { nav.play(item) }, Modifier.focusMemory(s.focus, "hero/play", default = true).edge(Key.DirectionLeft, -1), primary = true, icon = Icons.Filled.PlayArrow)
+        ZButton("More Info", { nav.push(Screen.Title(item)) }, Modifier.focusMemory(s.focus, "hero/info"), icon = Icons.Filled.Info)
+        ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(s.focus, "hero/list").edge(Key.DirectionRight, 1), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
+      }
+      Row(Modifier.padding(top = 14.dp), horizontalArrangement = Arrangement.spacedBy(6.dp), verticalAlignment = Alignment.CenterVertically) {
+        items.indices.forEach { i -> Box(Modifier.width(if (i == index) 18.dp else 6.dp).height(4.dp).background(if (i == index) Z.Text else Z.Muted, Z.Small)) }
       }
     }
   }
+}
+
+/** Films released for home viewing (digital or physical) in the last three months, most popular first. */
+fun latestReleases(t: Tmdb): List<Item> {
+  val fmt = SimpleDateFormat("yyyy-MM-dd", Locale.UK)
+  val now = Date()
+  val from = Date(now.time - 90L * 86_400_000)
+  return t.list("/discover/movie?region=GB&with_release_type=4%7C5&release_date.gte=${fmt.format(from)}&release_date.lte=${fmt.format(now)}&sort_by=popularity.desc&vote_count.gte=20", "movie")
 }
 
 /** My List, mirrored to the Trakt watchlist when Trakt is connected. Returns true if it's now on the list. */
@@ -199,7 +252,7 @@ fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier,
         } else {
           AsyncImage(img(item.backdrop ?: item.poster, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
           val trailer = Tmdb.trailer(d)
-          if (trailer != null && grown && store.previews) Trailer(trailer, Modifier.fillMaxSize(), store.trailerSound) { playing = it }
+          if (trailer != null && grown && store.previews) Trailer(trailer, Modifier.fillMaxSize(), store.trailerSound, onPlaying = { playing = it })
           // Details over the artwork; they fade away once the trailer is playing so it fills the whole card.
           Box(Modifier.fillMaxSize().alpha(overlay).background(Brush.verticalGradient(0.3f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f))))
           Column(Modifier.align(Alignment.BottomStart).padding(12.dp).alpha(overlay)) {

@@ -25,7 +25,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.focusRestorer
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.foundation.focusGroup
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
@@ -92,11 +96,16 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val resuming = latest?.takeIf { it.started && (!tv || it.episode == playEpisode) }
   val playLabel = (if (resuming != null) "Resume" else "Play") + if (tv) " S$playSeason E$playEpisode" else ""
 
+  var popup by remember { mutableStateOf(false) } // trailer pop-out
+  BackHandler(popup) { popup = false }
+  val scroll = rememberScrollState()
+  val scope = rememberCoroutineScope()
+  val selectedTab = remember { FocusRequester() }
   Box(Modifier.fillMaxSize()) {
     AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg, 0.5f to Z.Bg.copy(alpha = 0.85f), 1f to Z.Bg.copy(alpha = 0.35f))))
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.35f to Color.Transparent, 0.8f to Z.Bg)))
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(start = Z.Pad, end = Z.Pad, top = 36.dp, bottom = 40.dp)) {
+    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = Z.Pad, end = Z.Pad, top = 36.dp, bottom = 40.dp)) {
       Row {
         Artwork(img(item.poster, "w342"), item.title, Modifier.width(168.dp).aspectRatio(2f / 3f).clip(Z.Medium))
         Spacer(Modifier.width(32.dp))
@@ -106,11 +115,12 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
           Rating(d?.optDouble("vote_average", 0.0) ?: item.rating, Modifier.padding(top = 8.dp))
           Text(d?.str("overview") ?: item.overview, Modifier.padding(top = 12.dp).fillMaxWidth(0.92f), style = MaterialTheme.typography.bodyLarge, color = Z.Text2, maxLines = 4, overflow = TextOverflow.Ellipsis)
           error?.let { Text(it, Modifier.padding(top = 8.dp), color = Z.Error) }
-          Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+          // Any action button focused: the page goes back to the very top so all the details show.
+          Row(Modifier.padding(top = 20.dp).onFocusChanged { if (it.hasFocus) scope.launch { scroll.animateScrollTo(0) } }, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ZButton(playLabel, { nav.push(Screen.Sources(item, playSeason, playEpisode, autoplay = true)) }, Modifier.focusMemory(focus, "play", default = true), primary = true, icon = Icons.Filled.PlayArrow)
             ZButton("Choose Source", { nav.push(Screen.Sources(item, playSeason, playEpisode)) }, Modifier.focusMemory(focus, "source"))
             ZButton("My List", { inList = toggleList(store, item) }, Modifier.focusMemory(focus, "list"), icon = if (inList) Icons.Filled.Check else Icons.Filled.Add)
-            if (trailer != null) ZButton("Trailer", { openTrailer(ctx, trailer) }, Modifier.focusMemory(focus, "trailer"))
+            if (trailer != null) ZButton("Trailer", { popup = true }, Modifier.focusMemory(focus, "trailer"))
             if (!tv) {
               val watched = remember(tick) { store.watched(progressKey(item, null, null)) }
               ZButton(if (watched) "Watched" else "Mark as Watched", {
@@ -125,12 +135,15 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
       }
       if (d != null) {
         val selected = tab.coerceIn(0, tabs.lastIndex)
-        TabRow(selectedTabIndex = selected, modifier = Modifier.padding(top = 28.dp)) {
+        // Coming down into the tabs lands on the selected one (not whichever tab is nearest, which switched tabs on arrival).
+        Box(Modifier.padding(top = 28.dp).focusRestorer(selectedTab).focusGroup()) {
+        TabRow(selectedTabIndex = selected) {
           tabs.forEachIndexed { i, name ->
-            Tab(selected = i == selected, onFocus = { tab = i }, modifier = Modifier.focusMemory(focus, "tab/$name")) {
+            Tab(selected = i == selected, onFocus = { tab = i }, modifier = if (i == selected) Modifier.focusRequester(selectedTab) else Modifier) {
               Text(name, Modifier.padding(horizontal = 16.dp, vertical = 7.dp), style = MaterialTheme.typography.labelLarge)
             }
           }
+        }
         }
         when (tabs[selected]) {
           "Episodes" -> Episodes(store, item, seasons, season, episodes, focus, nav) { season = it }
@@ -141,6 +154,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
         }
       }
     }
+    if (popup && trailer != null) TrailerPopup(trailer, item.title) { popup = false }
   }
 }
 
@@ -196,11 +210,27 @@ private fun Overview(d: JSONObject, tv: Boolean) {
   }
 }
 
-/** Hand the trailer to the YouTube app (or anything that opens YouTube links). */
-fun openTrailer(ctx: Context, key: String) {
-  runCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("vnd.youtube:$key"))) }
-    .recoverCatching { ctx.startActivity(Intent(Intent.ACTION_VIEW, Uri.parse("https://www.youtube.com/watch?v=$key"))) }
-    .onFailure { toast(ctx, "There's no app on this TV that can play YouTube trailers.") }
+/** The trailer in a window over the page, with sound. Back or Close shuts it; it closes itself when the trailer ends. */
+@Composable
+private fun TrailerPopup(key: String, title: String, close: () -> Unit) {
+  val button = remember { FocusRequester() }
+  var failed by remember { mutableStateOf(false) }
+  LaunchedEffect(Unit) { delay(60); runCatching { button.requestFocus() } }
+  Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.88f)), contentAlignment = Alignment.Center) {
+    Column(horizontalAlignment = Alignment.CenterHorizontally) {
+      Box(Modifier.width(740.dp).aspectRatio(16f / 9f).clip(Z.Medium).background(Color.Black), contentAlignment = Alignment.Center) {
+        Text(if (failed) "This trailer couldn't play here." else "Loading trailer…", color = Z.Text2)
+        if (!failed) Trailer(key, Modifier.fillMaxSize(), sound = true, onEnded = close, onFailed = { failed = true })
+      }
+      Row(Modifier.padding(top = 16.dp).width(740.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Focus stays on Close while the window is open, so the page underneath can't be moved about.
+        ZButton("Close", close, Modifier.focusRequester(button).focusProperties {
+          left = FocusRequester.Cancel; right = FocusRequester.Cancel; up = FocusRequester.Cancel; down = FocusRequester.Cancel
+        })
+      }
+    }
+  }
 }
 
 fun clock(ms: Long): String {
@@ -348,7 +378,7 @@ fun PlayerPage(store: Store, s: Screen.Play) {
   var controls by remember { mutableStateOf(false) }
   var view by remember { mutableStateOf<PlayerView?>(null) }
   val player = remember {
-    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.10.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
+    val http = DefaultHttpDataSource.Factory().setUserAgent("Zylo/0.11.0").setAllowCrossProtocolRedirects(true).setDefaultRequestProperties(s.headers)
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(http)).build().apply {
       setMediaItem(MediaItem.fromUri(s.url))
       store.watch(key)?.takeIf { it.started && !it.percent }?.let { seekTo(it.pos) }

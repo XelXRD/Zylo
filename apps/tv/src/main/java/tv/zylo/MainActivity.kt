@@ -55,8 +55,8 @@ enum class Section(val label: String) { Home("Home"), Movies("Movies"), Series("
 class UiState(store: Store) {
   var section by mutableStateOf(Section.Home)
   var stayInNav by mutableStateOf(false) // just switched section from the top bar: leave focus there
-  val home = RowsState { homeRows(store) }
-  val discover = RowsState { DISCOVER_ROWS }
+  val home = RowsState({ homeRows(store) }, ::latestReleases)
+  val discover = RowsState({ DISCOVER_ROWS })
   val browse = mapOf(Section.Movies to BrowseState("movie"), Section.Series to BrowseState("tv"), Section.Anime to BrowseState("tv", anime = true))
   val myList = FocusMemory()
   val search = FocusMemory()
@@ -220,14 +220,20 @@ fun rememberForeground(): Boolean {
  */
 @SuppressLint("SetJavaScriptEnabled")
 @Composable
-fun Trailer(youtubeKey: String, modifier: Modifier, sound: Boolean, onPlaying: (Boolean) -> Unit = {}) {
+fun Trailer(
+  youtubeKey: String, modifier: Modifier, sound: Boolean,
+  cover: Boolean = false, // crop to fill a box wider than 16:9 (the Home hero) instead of fitting it exactly
+  onPlaying: (Boolean) -> Unit = {}, onEnded: () -> Unit = {}, onFailed: () -> Unit = {},
+) {
   var playing by remember { mutableStateOf(false) }
+  var ended by remember { mutableStateOf(false) }
   LaunchedEffect(playing) { onPlaying(playing) }
+  LaunchedEffect(ended) { if (ended) onEnded() }
   DisposableEffect(Unit) { onDispose { onPlaying(false) } }
   var gaveUp by remember { mutableStateOf(false) }
   LaunchedEffect(Unit) {
     delay(10_000)
-    if (!playing) gaveUp = true
+    if (!playing) { gaveUp = true; onFailed() }
   }
   val alpha by animateFloatAsState(if (playing) 1f else 0f, tween(ms(250)), label = "trailer")
   if (!rememberForeground() || gaveUp) return
@@ -243,10 +249,10 @@ fun Trailer(youtubeKey: String, modifier: Modifier, sound: Boolean, onPlaying: (
         settings.mediaPlaybackRequiresUserGesture = false
         webChromeClient = WebChromeClient()
         addJavascriptInterface(object {
-          @JavascriptInterface fun state(s: Int) = post { if (s == 1) playing = true else if (s == 0) playing = false }
+          @JavascriptInterface fun state(s: Int) = post { if (s == 1) playing = true else if (s == 0) { playing = false; ended = true } }
         }, "Zylo")
         // An https base URL gives YouTube the referrer it requires for embeds.
-        loadDataWithBaseURL("https://zylo.tv/", trailerHtml(youtubeKey, sound), "text/html", "utf-8", null)
+        loadDataWithBaseURL("https://zylo.tv/", trailerHtml(youtubeKey, sound, cover), "text/html", "utf-8", null)
       }
     },
     onRelease = { it.destroy() },
@@ -254,9 +260,12 @@ fun Trailer(youtubeKey: String, modifier: Modifier, sound: Boolean, onPlaying: (
 }
 
 // The player fills the WebView exactly (the card is 16:9, like the video), so nothing is letterboxed or cut off.
-private fun trailerHtml(key: String, sound: Boolean) = """
+private fun trailerHtml(key: String, sound: Boolean, cover: Boolean) = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}#p,iframe{position:fixed;top:0;left:0;width:100%!important;height:100%!important;border:0}</style>
+<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}${
+  if (cover) "#p,iframe{position:fixed;left:0;top:50%;width:100%!important;height:56.25vw!important;transform:translateY(-50%);border:0}"
+  else "#p,iframe{position:fixed;top:0;left:0;width:100%!important;height:100%!important;border:0}"
+}</style>
 </head><body><div id="p"></div>
 <script>
 function onYouTubeIframeAPIReady(){new YT.Player('p',{width:'100%',height:'100%',videoId:'$key',playerVars:{autoplay:1,mute:${if (sound) 0 else 1},controls:0,rel:0,playsinline:1,iv_load_policy:3,disablekb:1,fs:0,modestbranding:1,origin:'https://zylo.tv'},
