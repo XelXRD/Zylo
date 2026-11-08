@@ -310,7 +310,7 @@ class Tmdb(private val key: String) {
   /** Everything a detail page or preview needs, in one request. Cached for the session. */
   fun details(type: String, id: Int): JSONObject = cache.getOrPut("$type:$id") {
     val extra = if (type == "movie") "release_dates" else "content_ratings"
-    get("/$type/$id?append_to_response=external_ids,videos,credits,recommendations,images,$extra&include_video_language=en,null&include_image_language=en,null")
+    get("/$type/$id?append_to_response=external_ids,videos,credits,recommendations,images,keywords,$extra&include_video_language=en,null&include_image_language=en,null")
   }
 
   fun season(id: Int, n: Int): JSONObject = cache.getOrPut("season:$id:$n") { get("/tv/$id/season/$n") }

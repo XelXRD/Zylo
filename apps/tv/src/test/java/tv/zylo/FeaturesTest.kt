@@ -528,6 +528,27 @@ class ExtrasTest {
     assertEquals("Comedy", w.topGenres.first())
   }
 
+  @Test fun eliminationLearns() {
+    fun it(id: Int, vararg g: Int) = Item("movie", id, "T$id", "/p", "/b", "", "2020") to g.toList()
+    val pool = listOf(it(1, 28), it(2, 35), it(3, 878), it(4, 878), it(5, 878), it(6, 35), it(7, 27), it(8, 27), it(9, 878), it(10, 35))
+    val g = Elimination(pool, rounds = 4, rnd = kotlin.random.Random(1))
+    // Always keep the sci-fi one: challengers drift towards sci-fi, and a sci-fi film wins.
+    while (!g.done) { g.pick(keepChamp = 878 in g.champ.second || 878 !in g.challenger!!.second) }
+    assertTrue(878 in g.champ.second)
+    assertEquals(listOf("Science Fiction"), g.drawnTo(mapOf(878 to "Science Fiction", 28 to "Action")).take(1))
+  }
+
+  @Test fun journeyOrders() {
+    fun stop(t: String, d: String, orig: String = t) = Stop(Item("movie", t.hashCode(), t, "/p", "/b", "", d.take(4)), orig, d)
+    val all = listOf(stop("Alien", "1979-05-25"), stop("Aliens", "1986-07-18"), stop("Alien³", "1992-05-22"), stop("Prometheus", "2012-05-30"), stop("Alien: Romulus", "2024-08-16"))
+    val story = Journeys.ordered(all, listOf("Prometheus", "Alien", "Alien: Romulus", "Aliens", "Alien³")).map { it.item.title }
+    assertEquals(listOf("Prometheus", "Alien", "Alien: Romulus", "Aliens", "Alien³"), story)
+    assertEquals(all, Journeys.ordered(all, null))
+    // UK titles: "Avengers Assemble" still matches "The Avengers" through its original title.
+    assertTrue(stop("Avengers Assemble", "2012-04-25", orig = "The Avengers").matches("The Avengers"))
+    assertTrue(normTitle("Alien³") != normTitle("Alien"))
+  }
+
   @Test fun startingSoonAndBusy() {
     val st = store()
     val c = Channel(1, 1, "BBC One", null, "1")

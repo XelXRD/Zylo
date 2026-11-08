@@ -176,68 +176,6 @@ fun PersonPage(store: Store, p: Screen.Person, nav: Nav) {
   }
 }
 
-// --- Rabbit Hole ----------------------------------------------------------------------------------------
-
-/**
- * Follow "more like this" as far as you like: OK on a suggestion makes it the next step, Back retraces, OK on the
- * title at the top opens it. The trail of where you've been runs across the top.
- */
-@Composable
-fun RabbitHolePage(store: Store, start: Item, nav: Nav) {
-  val trail = remember { mutableStateListOf(start) }
-  val here = trail.last()
-  var next by remember { mutableStateOf<List<Item>?>(null) }
-  val t = remember { Tmdb(store.tmdb) }
-  LaunchedEffect(here) {
-    next = null
-    next = withContext(Dispatchers.IO) {
-      runCatching {
-        val been = trail.map { it.key }.toSet()
-        // Recommendations first; if they run dry, similar titles. Never somewhere you've already been on this trail.
-        (t.list("/${here.type}/${here.id}/recommendations", here.type) + t.list("/${here.type}/${here.id}/similar", here.type))
-          .filter { it.key !in been && it.backdrop != null }.distinctBy { it.key }.take(8)
-      }.getOrDefault(emptyList())
-    }
-  }
-  androidx.activity.compose.BackHandler(trail.size > 1) { trail.removeAt(trail.lastIndex) }
-  val firstCard = remember { FocusRequester() }
-  LaunchedEffect(next) { if (next?.isNotEmpty() == true) { delay(80); runCatching { firstCard.requestFocus() } } }
-  Box(Modifier.fillMaxSize()) {
-    AsyncImage(img(here.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.78f)))
-    Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad, vertical = 32.dp)) {
-      Text("RABBIT HOLE  ·  ${trail.size} deep", style = MaterialTheme.typography.labelLarge, color = Z.Red)
-      // The trail: where you started and every step since.
-      Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-        trail.takeLast(9).forEachIndexed { i, step ->
-          if (i > 0) Text("›", Modifier.padding(horizontal = 6.dp), color = Z.Muted)
-          Box(Modifier.width(if (step == here) 44.dp else 32.dp).aspectRatio(2f / 3f).clip(Z.Small)) { Artwork(img(step.poster, "w92"), step.title) }
-        }
-      }
-      Row(Modifier.padding(top = 18.dp), verticalAlignment = Alignment.Bottom) {
-        Column(Modifier.weight(1f)) {
-          Text(here.title, style = MaterialTheme.typography.displaySmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-          MetaLine(listOf(here.year, if (here.type == "tv") "Series" else "Film"), Modifier.padding(top = 4.dp))
-          Text(here.overview, Modifier.padding(top = 8.dp).fillMaxWidth(0.7f), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
-        }
-        ZButton("Open ${if (here.type == "tv") "Series" else "Film"}", { nav.push(Screen.Title(here)) }, primary = true)
-      }
-      Text("Where next?", Modifier.padding(top = 22.dp), style = MaterialTheme.typography.titleLarge)
-      when (val n = next) {
-        null -> Text("Digging…", Modifier.padding(top = 12.dp), color = Z.Text2)
-        else -> if (n.isEmpty()) Text("The hole ends here. Press Back to go up a level.", Modifier.padding(top = 12.dp), color = Z.Text2)
-        else PivotRow {
-          LazyRow(Modifier.bleed(Z.Pad), contentPadding = PaddingValues(start = Z.Pad, end = 400.dp, top = 12.dp, bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) {
-            itemsIndexed(n, key = { _, it -> it.key }) { i, item ->
-              PosterCard(store, item, Modifier.width(124.dp).then(if (i == 0) Modifier.focusRequester(firstCard) else Modifier)) { trail += item }
-            }
-          }
-        }
-      }
-    }
-  }
-}
-
 // --- Calendar -------------------------------------------------------------------------------------------
 
 /** One upcoming thing: an episode of a show you watch, or a film on your lists. */
@@ -470,12 +408,3 @@ fun WrappedPage(store: Store, nav: Nav) {
   }
 }
 
-// --- On Discover --------------------------------------------------------------------------------------
-
-/** The fun stuff, at the top of Discover. */
-@Composable
-fun DiscoverExtras(store: Store, nav: Nav) = Row(Modifier.padding(start = Z.Pad, bottom = 18.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-  ZButton("🍿  Movie Night Match", { nav.push(Screen.MovieNight) })
-  ZButton("📅  Calendar", { nav.push(Screen.Calendar) })
-  if (Trakt.connected(store) && store.profile.kids == null) ZButton("✦  Your ${Calendar.getInstance().get(Calendar.YEAR)} Wrapped", { nav.push(Screen.Wrapped) })
-}

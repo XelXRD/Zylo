@@ -55,6 +55,16 @@ sealed interface Screen {
   data object Calendar : Screen
   data object Wrapped : Screen
   data object MovieNight : Screen
+  data object RabbitStart : Screen
+  data object DeepCuts : Screen
+  data object Franchises : Screen
+  data object DoubleFeature : Screen
+  data object Moodboard : Screen
+  data object Challenges : Screen
+  data object TimeMachine : Screen
+  data object BlindDate : Screen
+  data class ThisOrThat(val type: String) : Screen
+  data class HelpMe(val type: String) : Screen
   data class Sources(val item: Item, val season: Int?, val episode: Int?, val episodeName: String = "", val autoplay: Boolean = false) : Screen
   data class Play(
     val item: Item, val season: Int?, val episode: Int?, val url: String, val headers: Map<String, String>, val subtitle: String, val source: String,
@@ -158,6 +168,16 @@ class MainActivity : ComponentActivity() {
             Screen.Calendar -> CalendarPage(store, nav)
             Screen.Wrapped -> WrappedPage(store, nav)
             Screen.MovieNight -> MovieNightPage(store, nav)
+            Screen.RabbitStart -> RabbitStartPage(store, nav)
+            Screen.DeepCuts -> DeepCutsPage(store, nav)
+            Screen.Franchises -> FranchisesPage(store, nav)
+            Screen.DoubleFeature -> DoubleFeaturePage(store, nav)
+            Screen.Moodboard -> MoodboardPage(store, nav)
+            Screen.Challenges -> ChallengesPage(store, nav)
+            Screen.TimeMachine -> TimeMachinePage(store, nav)
+            Screen.BlindDate -> BlindDatePage(store, nav)
+            is Screen.ThisOrThat -> ThisOrThatPage(store, s.type, nav)
+            is Screen.HelpMe -> HelpMePage(s.type, nav)
             is Screen.Title -> TitlePage(store, s.item, nav)
             is Screen.Sources -> SourcesPage(store, s, nav)
             is Screen.Play -> PlayerPage(store, s, nav)
@@ -191,7 +211,7 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
     Box(Modifier.fillMaxSize().focusRequester(ui.content).focusRestorer().focusGroup()) { key(ui.section) {
       when (val s = ui.section) {
         Section.Home -> RowsPage(store, ui.home, nav, restore, hero = true)
-        Section.Discover -> RowsPage(store, ui.discover, nav, restore, title = "Discover", extras = { DiscoverExtras(store, nav) })
+        Section.Discover -> RowsPage(store, ui.discover, nav, restore, title = "Discover", extras = { ExploreRow(store, nav) })
         Section.MyList -> MyListPage(store, nav, ui.myList, restore)
         Section.Live -> LivePage(store, ui.live, nav, restore)
         else -> BrowsePage(store, ui.browse.getValue(s), nav, s.label, restore)

@@ -83,6 +83,11 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
   var specsByTitle = emptyMap<String, RowSpec>() // for Show More: the TMDB list behind each row
   val list = LazyListState()
   val rowLists = HashMap<String, LazyListState>()
+  // Up/Down between poster rows keeps your place: 5th card in one row → 5th card in the next (Alex, 8 Nov).
+  var order = emptyList<String>() // poster rows, top to bottom
+  val sizes = HashMap<String, Int>()
+  private val cards = HashMap<String, FocusRequester>()
+  fun card(row: String, i: Int) = cards.getOrPut("$row#$i") { FocusRequester() }
   val focus = FocusMemory()
   var focused by mutableStateOf<String?>(null) // card that has focus now
   var expanded by mutableStateOf<String?>(null) // card that has been focused long enough to preview
@@ -136,6 +141,7 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   // A thumbs down keeps a title out of the rows.
   val disliked = remember(s.rows) { Thumbs.disliked(store) }
   val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows.map { (n, l) -> n to l.filter { it.key !in disliked } }
+  s.order = rows.map { it.first }
   val featured = if (hero) s.heroItems.getOrNull(s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))) else null
   // Focus in the hero keeps the page at the very top, so the hero is never cut off.
   LaunchedEffect(s.heroFocused, watching.size) { if (s.heroFocused) s.list.animateScrollToItem(0) }
@@ -327,6 +333,9 @@ fun latestReleases(t: Tmdb): List<Item> {
 
 @Composable
 fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: Nav, default: Boolean) = Column {
+  val scope = rememberCoroutineScope()
+  val more = s.specsByTitle[name]?.takeIf { it.load == null && it.path.isNotEmpty() }
+  s.sizes[name] = items.size + if (more != null) 1 else 0
   Text(name, Modifier.padding(start = Z.Pad, top = 10.dp), style = MaterialTheme.typography.titleLarge)
   PivotRow {
   LazyRow(
@@ -337,14 +346,14 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
     itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
       val k = "$name/${item.key}"
       PreviewCard(
-        store, item, s.expanded == k, Modifier.focusMemory(s.focus, k, default && i == 0),
+        store, item, s.expanded == k, Modifier.sameColumn(s, name, i, scope).focusMemory(s.focus, k, default && i == 0),
         onFocus = { f -> if (f) s.focused = k else if (s.focused == k) s.focused = null },
       ) { nav.push(Screen.Title(item)) }
     }
     // End of a row: the whole list, page after page.
-    s.specsByTitle[name]?.takeIf { it.load == null && it.path.isNotEmpty() }?.let { spec ->
+    more?.let { spec ->
       item("more") {
-        ZSurface({ nav.push(Screen.More(spec.title, spec.path, spec.type)) }, Modifier.focusMemory(s.focus, "$name/more").width(124.dp).height(186.dp), container = Z.Card) {
+        ZSurface({ nav.push(Screen.More(spec.title, spec.path, spec.type)) }, Modifier.sameColumn(s, name, items.size, scope).focusMemory(s.focus, "$name/more").width(124.dp).height(186.dp), container = Z.Card) {
           Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Glyph(Icons.Filled.Add, 28.dp)
             Text("Show more", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
@@ -355,6 +364,23 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
   }
   }
 }
+
+/** Up/Down to the card at the same position in the row above or below (scrolled into place first), not the nearest one. */
+private fun Modifier.sameColumn(s: RowsState, row: String, i: Int, scope: kotlinx.coroutines.CoroutineScope) =
+  focusRequester(s.card(row, i)).onPreviewKeyEvent { e ->
+    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+    val step = when (e.key) { Key.DirectionDown -> 1; Key.DirectionUp -> -1; else -> return@onPreviewKeyEvent false }
+    val target = s.order.getOrNull(s.order.indexOf(row) + step) ?: return@onPreviewKeyEvent false // hero, Continue Watching: as before
+    if (s.rowLists[target] == null) return@onPreviewKeyEvent false // not laid out yet: the normal move
+    val n = s.sizes[target]?.takeIf { it > 0 } ?: return@onPreviewKeyEvent false
+    val j = i.coerceAtMost(n - 1)
+    scope.launch {
+      s.rowLists[target]?.scrollToItem(j)
+      repeat(2) { androidx.compose.runtime.withFrameNanos { } }
+      runCatching { s.card(target, j).requestFocus() }
+    }
+    true
+  }
 
 /** Show More: a Home / Discover row as a grid, loading further pages as you scroll down. */
 @Composable
@@ -537,7 +563,7 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
     Text(title, Modifier.padding(horizontal = Z.Pad), style = MaterialTheme.typography.displaySmall)
     LazyRow(Modifier.focusRequester(b.chips).focusRestorer(), contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
       // Can't decide? A few questions, then a pick (Quiz.kt).
-      item { Chip("✦ Pick for Me", false) { nav.push(Screen.Quiz(if (b.anime) "anime" else b.type)) } }
+      item { Chip("✦ Help Me Choose", false) { nav.push(Screen.HelpMe(if (b.anime) "anime" else b.type)) } }
       item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
       itemsIndexed(listOf("Popular", "Top Rated", "New Releases")) { i, label -> Chip(label, b.sort == i) { pick(i, b.genre) } }
       item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
