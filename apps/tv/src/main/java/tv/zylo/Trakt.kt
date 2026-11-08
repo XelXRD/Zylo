@@ -54,8 +54,11 @@ object Trakt {
     http("$AUTH$path", "POST", headers(clientId), body.toString().toByteArray(), "application/json")
   }
 
-  /** Trakt Client IDs are 64 hexadecimal characters. */
-  fun validClientId(id: String) = Regex("[0-9a-fA-F]{64}").matches(id.trim())
+  /**
+   * Only catches obvious paste mistakes (spaces, a stray word). Lengths vary: older Trakt apps have 64-character IDs,
+   * newer ones 43. Trakt itself says whether an ID is real when sign-in starts.
+   */
+  fun validClientId(id: String) = Regex("[A-Za-z0-9_.~-]{20,200}").matches(id.trim())
 
   private fun arr(s: String) = if (s.isBlank()) JSONArray() else JSONArray(s)
 

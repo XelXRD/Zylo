@@ -198,7 +198,7 @@ private fun TraktCard(store: Store, connect: (String) -> Unit) {
     when {
       id.isEmpty() -> return@ask
       !Trakt.validClientId(id) -> {
-        store.setStatus("trakt", "fail:That isn't a Trakt Client ID: it should be 64 letters and numbers (you entered ${id.length} characters).")
+        store.setStatus("trakt", "fail:That doesn't look like a Trakt Client ID (it has spaces or is too short). Copy it again from trakt.tv > Settings > Your API Apps.")
         tick++
       }
       else -> {
