@@ -3,6 +3,11 @@
 // of new episodes and films, and Zylo Wrapped (your year from Trakt).
 package tv.zylo
 
+import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.ThumbUp
+import androidx.compose.material.icons.filled.Notifications
+import androidx.compose.material.icons.filled.KeyboardArrowLeft
+import androidx.compose.material.icons.filled.KeyboardArrowRight
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.focusable
@@ -68,8 +73,8 @@ fun ThumbButtons(store: Store, item: Item, modifier: Modifier = Modifier, first:
   var v by remember(item) { mutableIntStateOf(Thumbs.of(store, item)) }
   fun pick(x: Int) { v = if (v == x) 0 else x; Thumbs.set(store, item, v); done() }
   Row(modifier, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
-    ZButton(if (v == 1) "👍  Liked" else "👍", { pick(1) }, first, primary = v == 1)
-    ZButton(if (v == -1) "👎  Not for me" else "👎", { pick(-1) }, primary = v == -1)
+    ZButton(if (v == 1) "Liked" else "", { pick(1) }, first, primary = v == 1, icon = Icons.Filled.ThumbUp)
+    ZButton(if (v == -1) "Not for me" else "", { pick(-1) }, primary = v == -1, icon = Icons.Filled.ThumbUp, iconTurn = 180f) // Material's thumb down is the thumb up turned over
   }
 }
 
@@ -275,7 +280,7 @@ fun CalendarPage(store: Store, nav: Nav) {
                   Text(u.label, style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
                 }
                 if (u.time % 86_400_000L != 0L) Text(SimpleDateFormat("HH:mm", Locale.UK).format(java.util.Date(u.time)), Modifier.padding(horizontal = 12.dp), style = MaterialTheme.typography.labelLarge, color = Z.Text2)
-                if (on) Text("🔔", style = MaterialTheme.typography.titleMedium)
+                if (on) Glyph(Icons.Filled.Notifications, 20.dp, Z.Text) // a reminder is set
               }
             }
           }
@@ -367,7 +372,7 @@ fun WrappedPage(store: Store, nav: Nav) {
     if (!Trakt.connected(store)) { error = "Zylo Wrapped is worked out from your Trakt history. Connect Trakt in Settings > Integrations."; return@LaunchedEffect }
     withContext(Dispatchers.IO) {
       runCatching { WrappedStats.of(Busy.run("Adding up your year") { Trakt.history(store, "$year-01-01T00:00:00.000Z", "$year-12-31T23:59:59.000Z") }, year) }
-        .onSuccess { w = it }.onFailure { error = "Couldn't get your Trakt history: ${it.message}" }
+        .onSuccess { w = it }.onFailure { error = "Couldn't get your Trakt history. " + plainError(it, "Trakt") }
     }
   }
   val wr = w ?: return Loading(error)
@@ -404,7 +409,7 @@ fun WrappedPage(store: Store, nav: Nav) {
     Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
       slides.indices.forEach { n -> Box(Modifier.width(if (n == i) 22.dp else 8.dp).height(4.dp).background(if (n == i) Z.Text else Z.Text.copy(alpha = 0.3f), Z.Small)) }
     }
-    Text("◀ ▶", Modifier.align(Alignment.BottomEnd).padding(36.dp), style = MaterialTheme.typography.labelLarge, color = Z.Muted)
+    Row(Modifier.align(Alignment.BottomEnd).padding(36.dp)) { Glyph(Icons.Filled.KeyboardArrowLeft, 22.dp, Z.Muted); Glyph(Icons.Filled.KeyboardArrowRight, 22.dp, Z.Muted) }
   }
 }
 

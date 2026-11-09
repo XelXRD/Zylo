@@ -21,6 +21,8 @@ import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
+import androidx.compose.ui.draw.rotate
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
@@ -160,6 +162,18 @@ fun Modifier.bleed(by: Dp) = layout { m, c ->
   layout(p.width - 2 * px, p.height) { p.place(-px, 0) }
 }
 
+/**
+ * Behind the top bar once a page has scrolled: solid Screening Room under the navigation, fading out below it, so rows and
+ * hero text passing upwards disappear under the bar instead of running into its labels. At rest the bar stays a soft fade
+ * over the artwork.
+ */
+@Composable
+fun BoxScope.NavShade(scrolled: Boolean) {
+  val a by androidx.compose.animation.core.animateFloatAsState(if (scrolled) 1f else 0f, androidx.compose.animation.core.tween(ms(Z.Normal), easing = Z.EaseOut), label = "navShade")
+  if (a > 0f) Box(Modifier.align(Alignment.TopStart).fillMaxWidth().height(124.dp).graphicsLayer { alpha = a }
+    .background(androidx.compose.ui.graphics.Brush.verticalGradient(0f to Z.Bg, 0.74f to Z.Bg, 1f to Z.Bg.copy(alpha = 0f))))
+}
+
 // --- Brand ----------------------------------------------------------------------------------
 
 
@@ -189,7 +203,7 @@ fun Glyph(icon: ImageVector, size: Dp = 18.dp, tint: Color = LocalContentColor.c
 
 /** Primary: Zylo red. Secondary: translucent dark, turns white on focus. */
 @Composable
-fun ZButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = false, icon: ImageVector? = null) {
+fun ZButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, primary: Boolean = false, icon: ImageVector? = null, iconTurn: Float = 0f) {
   Button(
     onClick, modifier,
     scale = ButtonDefaults.scale(focusedScale = if (LocalReduceMotion.current) 1f else 1.05f, pressedScale = Z.Press),
@@ -200,11 +214,22 @@ fun ZButton(text: String, onClick: () -> Unit, modifier: Modifier = Modifier, pr
     contentPadding = PaddingValues(horizontal = 18.dp, vertical = 9.dp),
   ) {
     if (icon != null) {
-      Glyph(icon)
-      Spacer(Modifier.width(8.dp))
+      Box(Modifier.rotate(iconTurn)) { Glyph(icon) }
+      if (text.isNotEmpty()) Spacer(Modifier.width(8.dp))
     }
-    Text(text, style = MaterialTheme.typography.labelLarge)
+    if (text.isNotEmpty()) Text(text, style = MaterialTheme.typography.labelLarge)
   }
+}
+
+/**
+ * For actions that throw something away (disconnect a service, remove a profile or addon): the first press asks, the
+ * second within three seconds does it. On a remote, a stray OK is easy; a second deliberate one isn't.
+ */
+@Composable
+fun ConfirmButton(text: String, onConfirm: () -> Unit, modifier: Modifier = Modifier) {
+  var armed by remember { mutableStateOf(false) }
+  LaunchedEffect(armed) { if (armed) { delay(3_000); armed = false } }
+  ZButton(if (armed) "Press again" else text, { if (armed) { armed = false; onConfirm() } else armed = true }, modifier)
 }
 
 @Composable

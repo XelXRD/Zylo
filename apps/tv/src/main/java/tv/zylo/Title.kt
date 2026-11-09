@@ -17,6 +17,7 @@ import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.Share
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.PlayArrow
@@ -131,17 +132,18 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val selectedTab = remember { FocusRequester() }
   Box(Modifier.fillMaxSize()) {
     AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.95f), 0.45f to Z.Bg.copy(alpha = 0.72f), 1f to Z.Bg.copy(alpha = 0.12f))))
+    // Text runs well past the middle, so the scrim holds dark further across than a hero's does.
+    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.96f), 0.55f to Z.Bg.copy(alpha = 0.86f), 0.8f to Z.Bg.copy(alpha = 0.55f), 1f to Z.Bg.copy(alpha = 0.25f))))
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.4f to Color.Transparent, 0.85f to Z.Bg)))
     Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = Z.Pad, end = Z.Pad, top = 36.dp, bottom = 40.dp)) {
       Row {
-        Artwork(img(item.poster, "w342"), item.title, Modifier.width(168.dp).aspectRatio(2f / 3f).shadow(24.dp, Z.Medium).clip(Z.Medium))
+        Artwork(img(item.poster, "w342"), item.title, Modifier.width(168.dp).aspectRatio(2f / 3f).clip(Z.Medium))
         Spacer(Modifier.width(32.dp))
         Column(Modifier.weight(1f)) {
           TitleLogo(look, item.title, MaterialTheme.typography.displayMedium, 380.dp, 100.dp)
           MetaLine(Tmdb.meta(item, d).let { m -> if (tv) m + listOfNotNull(d?.optInt("number_of_episodes")?.takeIf { it > 0 }?.let { "$it Episodes" }) else m }, Modifier.padding(top = 8.dp))
           Rating(d?.optDouble("vote_average", 0.0) ?: item.rating, Modifier.padding(top = 8.dp))
-          Text(d?.str("overview") ?: item.overview, Modifier.padding(top = 12.dp).fillMaxWidth(0.92f), style = MaterialTheme.typography.bodyLarge, color = Z.Text2, maxLines = 4, overflow = TextOverflow.Ellipsis)
+          Text(d?.str("overview") ?: item.overview, Modifier.padding(top = 12.dp).widthIn(max = 520.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2, maxLines = 4, overflow = TextOverflow.Ellipsis)
           error?.let { Text(it, Modifier.padding(top = 8.dp), color = Z.Error) }
           // Any action button focused: the page goes back to the very top so all the details show.
           Row(Modifier.padding(top = 20.dp).onFocusChanged { if (it.hasFocus) scope.launch { scroll.animateScrollTo(0) } }, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
@@ -188,8 +190,8 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
             item("rabbit") {
               ZSurface({ nav.push(Screen.Rabbit(item)) }, Modifier.focusMemory(focus, "rabbit").width(124.dp).aspectRatio(2f / 3f), container = Z.Card) {
                 Column(Modifier.fillMaxSize().padding(10.dp), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
-                  Text("🐇", style = MaterialTheme.typography.displaySmall)
-                  Text("Rabbit Hole", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
+                  Glyph(Icons.Filled.Share, 30.dp) // nodes and links: the web you follow
+                  Text("Rabbit Hole", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.labelLarge)
                   Text("Follow it as far as it goes", style = MaterialTheme.typography.bodySmall, color = Z.Text2, textAlign = androidx.compose.ui.text.style.TextAlign.Center)
                 }
               }
@@ -299,6 +301,14 @@ suspend fun videoIdOf(store: Store, item: Item, season: Int?, episode: Int?): St
 }
 
 /** The last source list, so coming back from the player doesn't search again (and the next episode's, found early). */
+/** What happened in the player, for the source list it came from: which source was tried, whether it failed, and whether to try the next one. */
+object Attempts {
+  val last = HashMap<Screen.Sources, Source>()
+  val failed = HashMap<Screen.Sources, Set<Source>>()
+  var lastFailed = false
+  var tryNext = false
+}
+
 object SourcesMemo {
   private class Entry(val s: Screen.Sources, val found: Found, val subs: List<Sub>?, val at: Long)
   private var kept = listOf<Entry>() // the last three: this episode, the next one, and one spare
@@ -314,7 +324,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
   var found by remember { mutableStateOf(memo?.first) }
   var autoTried by rememberSaveable { mutableStateOf(false) }
   var notes by remember { mutableStateOf(listOf<String>()) }
-  var failed by remember { mutableStateOf(setOf<Source>()) }
+  var failed by remember { mutableStateOf(Attempts.failed[s].orEmpty()) }
   var busy by remember { mutableStateOf(false) }
   val scope = rememberCoroutineScope()
   val first = remember { FocusRequester() }
@@ -338,6 +348,9 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
     // Subtitles come from addons in parallel; wait briefly for them, but never hold up playback for long.
     val subtitles = withTimeoutOrNull(4_000) { snapshotFlow { subs }.first { it != null } } ?: emptyList()
     val play = Screen.Play(s.item, s.season, s.episode, url, src.headers, label, listOfNotNull(name, src.quality, src.hdr.ifEmpty { null }).joinToString(" · "), subtitles, src.signature())
+    Attempts.last[s] = src
+    Attempts.lastFailed = false
+    Attempts.tryNext = false
     nav.push(play) // Back from the player comes back to this list, to pick another source
     return true
   }
@@ -372,6 +385,25 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
     notes = notes + "Couldn't start the best sources automatically. Pick one below."
     busy = false
   }
+  // Back from a player that couldn't play: that source is marked, and Try Next Source starts the one after it.
+  LaunchedEffect(found) {
+    val f = found ?: return@LaunchedEffect
+    if (!Attempts.lastFailed) return@LaunchedEffect
+    val bad = Attempts.last[s]
+    Attempts.lastFailed = false
+    if (bad != null) { failed = failed + bad; Attempts.failed[s] = failed }
+    if (!Attempts.tryNext) return@LaunchedEffect
+    Attempts.tryNext = false
+    val from = f.sources.indexOf(bad).coerceAtLeast(-1)
+    val rest = (f.sources.drop(from + 1) + f.sources.take(from + 1)).filter { it !in failed && !overCap(it, cap) }
+    busy = true
+    for (src in rest.take(4)) {
+      if (start(src)) { busy = false; return@LaunchedEffect }
+      Attempts.failed[s] = failed
+    }
+    notes = notes + "None of the next sources would start. Pick one below."
+    busy = false
+  }
   LaunchedEffect(found, subs) { found?.let { SourcesMemo.put(s, it, subs) } }
   LaunchedEffect(found, busy) { if (found?.sources?.isNotEmpty() == true && !busy) { delay(80); runCatching { first.requestFocus() } } }
 
@@ -402,7 +434,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
         addons.isEmpty() && servers.isEmpty() -> Text("Add a Stremio addon (Settings > Addons) or connect Plex or Jellyfin (Settings > Media Servers) to find sources.", color = Z.Text2)
         f == null -> {}
         f.sources.isEmpty() -> Text(
-          "No playable sources found." + when {
+          "No playable sources found." + (if (f.otherTitles > 0) " ${f.otherTitles} files for other titles were left out." else "") + when {
             f.waiting > 0 && SERVICES.keys.none { store.debrid(it).isNotEmpty() } -> " ${f.waiting} torrent sources need a debrid service: connect one in Settings > Debrid Services."
             f.waiting > 0 -> " ${f.waiting} torrent sources aren't ready on your debrid service."
             else -> ""
@@ -420,6 +452,9 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
             }
           }
         }
+      }
+      f?.takeIf { it.otherTitles > 0 && it.sources.isNotEmpty() }?.let {
+        Text("${it.otherTitles} file${if (it.otherTitles == 1) "" else "s"} for other titles left out.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.labelSmall, color = Z.Muted)
       }
       f?.errors?.takeIf { it.isNotEmpty() }?.let { Text(it.joinToString("  ·  "), Modifier.padding(top = 10.dp), style = MaterialTheme.typography.labelSmall, color = Z.Muted, maxLines = 2) }
     }
@@ -470,7 +505,8 @@ private fun SourceRow(src: Source, best: Boolean, failed: Boolean, last: Boolean
 fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   val ctx = LocalContext.current
   val key = progressKey(s.item, s.season, s.episode)
-  var error by remember { mutableStateOf<String?>(null) }
+  var error by remember { mutableStateOf<PlayError?>(null) }
+  var played by remember { mutableStateOf(false) } // it really played: only then is a position worth saving or sending
   var controls by remember { mutableStateOf(false) }
   var view by remember { mutableStateOf<PlayerView?>(null) }
   val player = remember {
@@ -491,10 +527,22 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     }
   }
   val resumeAt = remember { store.watch(key)?.takeIf { it.started && it.percent }?.fraction } // from Trakt: a percentage, seek once the length is known
+  // How long this should run, in minutes: a "file" much shorter is a debrid service's "not ready yet" clip, not the episode.
+  var expected by remember { mutableIntStateOf(0) }
+  LaunchedEffect(Unit) {
+    expected = withContext(Dispatchers.IO) {
+      runCatching {
+        val t = Tmdb(store.tmdb)
+        if (s.season != null) t.season(s.item.id, s.season).optJSONArray("episodes")?.objects()?.find { it.optInt("episode_number") == s.episode }?.optInt("runtime") ?: 0
+        else t.preview(s.item)?.optInt("runtime") ?: 0
+      }.getOrDefault(0)
+    }
+  }
   var finishedSent by remember { mutableStateOf(store.watch(key)?.finished == true) }
   fun progress() = if (player.duration > 0) player.currentPosition * 100f / player.duration else 0f
   fun save() {
-    if (player.duration <= 0) return
+    // A source that never played says nothing about where you are: saving its 0:00 would wipe your real place.
+    if (!played || player.duration <= 0) return
     store.saveWatch(s.item, s.season, s.episode, player.currentPosition, player.duration)
     if (!finishedSent && player.currentPosition >= player.duration * 0.9) {
       finishedSent = true
@@ -639,16 +687,35 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     var remembered = false
     var scrobbling = false
     val listener = object : Player.Listener {
-      override fun onPlayerError(e: PlaybackException) { error = "Couldn't play this source (${e.errorCodeName}). Press Back and choose another." }
+      override fun onPlayerError(e: PlaybackException) {
+        error = playError(e)
+        if (!played) Attempts.lastFailed = true // the list marks it and can move on to the next one
+        view?.hideController()
+        view?.useController = false
+      }
       override fun onPlaybackStateChanged(state: Int) {
         if (state == Player.STATE_READY) {
+          // A clip of a minute or two standing in for a 45-minute episode: the debrid service's "not ready yet" video.
+          val d = player.duration
+          if (!played && d > 0 && (d < 120_000 || (expected >= 10 && d < expected * 60_000L / 5))) {
+            player.playWhenReady = false
+            player.stop()
+            error = PlayError("This source sent a holding clip", "Not the episode: a short message video from the addon. Usually your debrid service hasn't got the file yet; sometimes the addon needs setting up again. Another source should play.", "PLACEHOLDER_CLIP")
+            Attempts.lastFailed = true
+            view?.hideController()
+            view?.useController = false
+            return
+          }
           if (!seeked && resumeAt != null && player.duration > 0) { seeked = true; player.seekTo((player.duration * resumeAt).toLong()) }
-          // It plays: remember this source (and its kind, for the next episode).
-          if (!remembered && s.signature.isNotEmpty()) { remembered = true; store.rememberSource(s.item, s.signature) }
-          // Trakt "now watching" starts once, when the video is actually ready.
-          if (!scrobbling && player.duration > 0) { scrobbling = true; Trakt.scrobble(store, "start", s.item, s.season, s.episode, progress()) }
         }
         if (state == Player.STATE_ENDED && !dismissed) playNext()
+      }
+      // Frames are actually moving: only now does this source count as working.
+      override fun onIsPlayingChanged(isPlaying: Boolean) {
+        if (!isPlaying || played || error != null) return
+        played = true
+        if (!remembered && s.signature.isNotEmpty()) { remembered = true; store.rememberSource(s.item, s.signature) }
+        if (!scrobbling && player.duration > 0) { scrobbling = true; Trakt.scrobble(store, "start", s.item, s.season, s.episode, progress()) }
       }
       // Pause and resume by you (not every buffering stall, which would flood Trakt) update "now watching".
       override fun onPlayWhenReadyChanged(playWhenReady: Boolean, reason: Int) {
@@ -661,7 +728,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     onDispose {
       lifecycle.removeObserver(observer)
       save()
-      if (player.duration > 0) Trakt.scrobble(store, "stop", s.item, s.season, s.episode, progress()) // 80%+ records the play
+      if (scrobbling && player.duration > 0) Trakt.scrobble(store, "stop", s.item, s.season, s.episode, progress()) // 80%+ records the play
       if (s.season == null && progress() >= 90f && Thumbs.of(store, s.item) == 0 && store.profile.kids == null) nav.ui.rate = s.item // how was it?
       player.release()
     }
@@ -670,6 +737,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   BackHandler(upNext && !dismissed) { dismissed = true; view?.requestFocus() } // Back on Up Next keeps watching
   BackHandler(skip != null && !upNext) { skip?.let { skipped += it }; skip = null; view?.requestFocus() } // Back: no thanks
   BackHandler(timing) { timing = false; view?.requestFocus() }
+  BackHandler(error != null) { nav.back() } // one Back from an error: straight to the list
 
   Box(Modifier.fillMaxSize().background(Color.Black)) {
     AndroidView(
@@ -695,6 +763,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
             // the first time. Take it back (unless Skip, Up Next or subtitle timing has it).
             if (v != View.VISIBLE && skip == null && !upNext && !timing) post { requestFocus() }
           })
+          zyloFocus(this)
           findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
             setPlayedColor(Z.Red.toArgb())
             setScrubberColor(Z.Red.toArgb())
@@ -717,13 +786,73 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
     if (pauseScreen && !controls && !upNext && !timing) PauseScreen(s, synopsis, (player.duration - player.currentPosition).coerceAtLeast(0))
     val n = next
     if (upNext && !dismissed && n != null) UpNextCard(s.item, n, countdown, Modifier.align(Alignment.BottomEnd), ::playNext) { dismissed = true; view?.requestFocus() }
-    error?.let {
-      Text(it, Modifier.align(Alignment.Center).background(Z.Elevated, Z.Medium).padding(24.dp), style = MaterialTheme.typography.bodyLarge)
-    }
+    // The last frame (often the addon's own message slate) is dimmed right back behind the panel.
+    if (error != null) Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.94f)))
+    error?.let { e -> PlayErrorPanel(e, Modifier.align(Alignment.Center), canTryNext = !played,
+      tryNext = { Attempts.tryNext = true; nav.back() }, choose = { Attempts.tryNext = false; nav.back() }) }
   }
 }
 
 private const val UP_NEXT_SECONDS = 10
+
+/** Why a source wouldn't play, in words, plus the player's own code for anyone who wants it. */
+class PlayError(val headline: String, val detail: String, val code: String)
+
+fun playError(e: PlaybackException): PlayError {
+  val code = e.errorCodeName
+  val (headline, detail) = when (e.errorCode) {
+    PlaybackException.ERROR_CODE_DECODING_FAILED, PlaybackException.ERROR_CODE_DECODER_INIT_FAILED, PlaybackException.ERROR_CODE_DECODER_QUERY_FAILED,
+    PlaybackException.ERROR_CODE_DECODING_FORMAT_UNSUPPORTED, PlaybackException.ERROR_CODE_DECODING_FORMAT_EXCEEDS_CAPABILITIES, PlaybackException.ERROR_CODE_AUDIO_TRACK_INIT_FAILED ->
+      "This TV can't play this file" to "Its video or audio format isn't one this TV can decode. Sources marked H.264 or x264 usually work."
+    PlaybackException.ERROR_CODE_IO_BAD_HTTP_STATUS, PlaybackException.ERROR_CODE_IO_FILE_NOT_FOUND, PlaybackException.ERROR_CODE_IO_NO_PERMISSION ->
+      "The link didn't work" to "It may have expired, or the server refused it. Another source, or this one again later, should play."
+    PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_FAILED, PlaybackException.ERROR_CODE_IO_NETWORK_CONNECTION_TIMEOUT, PlaybackException.ERROR_CODE_TIMEOUT ->
+      "The connection dropped" to "Check the TV's internet connection, then try again or pick another source."
+    PlaybackException.ERROR_CODE_PARSING_CONTAINER_MALFORMED, PlaybackException.ERROR_CODE_PARSING_MANIFEST_MALFORMED,
+    PlaybackException.ERROR_CODE_PARSING_CONTAINER_UNSUPPORTED, PlaybackException.ERROR_CODE_PARSING_MANIFEST_UNSUPPORTED ->
+      "This file can't be read" to "It's damaged, or packed in a way the player doesn't support."
+    else -> "This source wouldn't play" to "Another source will usually work."
+  }
+  return PlayError(headline, detail, code)
+}
+
+@Composable
+private fun PlayErrorPanel(e: PlayError, modifier: Modifier, canTryNext: Boolean, tryNext: () -> Unit, choose: () -> Unit) {
+  val first = remember { FocusRequester() }
+  LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
+  Column(modifier.width(620.dp).background(Z.Surface, Z.Large).padding(28.dp)) {
+    Text(e.headline, style = MaterialTheme.typography.headlineSmall)
+    Text(e.detail, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
+    Row(Modifier.padding(top = 22.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+      if (canTryNext) {
+        ZButton("Try Next Source", tryNext, Modifier.focusRequester(first), primary = true)
+        ZButton("Choose Source", choose)
+      } else ZButton("Choose Source", choose, Modifier.focusRequester(first), primary = true)
+    }
+    Text(e.code, Modifier.padding(top = 16.dp), style = MaterialTheme.typography.labelSmall, color = Z.Muted)
+  }
+}
+
+/**
+ * Media3's controls draw focus as the platform's default highlight (a lime square on Google TV). Zylo's own instead:
+ * a lighter graphite panel with a white edge, the same as every other focused control.
+ */
+fun zyloFocus(root: View) {
+  val d = root.resources.displayMetrics.density
+  fun focusBg() = android.graphics.drawable.StateListDrawable().apply {
+    val on = android.graphics.drawable.GradientDrawable().apply {
+      cornerRadius = 10 * d; setColor(Z.Focus.toArgb()); setStroke((2 * d).toInt(), Z.Text.toArgb())
+    }
+    addState(intArrayOf(android.R.attr.state_focused), on)
+    addState(intArrayOf(android.R.attr.state_pressed), on)
+    addState(intArrayOf(), android.graphics.drawable.ColorDrawable(android.graphics.Color.TRANSPARENT))
+  }
+  fun walk(v: View) {
+    if (v is android.view.ViewGroup) for (i in 0 until v.childCount) walk(v.getChildAt(i))
+    else if (v.isFocusable && (v is android.widget.ImageButton || v is android.widget.Button || v is android.widget.ImageView)) v.background = focusBg()
+  }
+  walk(root)
+}
 
 /** Play picks a source by itself once at least this many are found (Settings > Playback); 0 = never, you choose. */
 object AutoSource {

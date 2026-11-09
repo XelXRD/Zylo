@@ -185,7 +185,7 @@ private fun Result(store: Store, type: String, answers: List<Answer>, nav: Nav, 
   var rolls by rememberSaveable { mutableIntStateOf(0) }
   var spinning by remember { mutableStateOf(true) }
   LaunchedEffect(Unit) {
-    runCatching { withContext(Dispatchers.IO) { quizDeck(store, t, type, answers) } }.onSuccess { deck = it }.onFailure { error = it.message ?: "Couldn't reach TMDB." }
+    runCatching { withContext(Dispatchers.IO) { quizDeck(store, t, type, answers) } }.onSuccess { deck = it }.onFailure { error = plainError(it, "TMDB") }
   }
   val d = deck
   if (d == null || d.isEmpty()) {

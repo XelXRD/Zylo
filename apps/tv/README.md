@@ -41,9 +41,10 @@ Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSk
 - **One search** for films, series, anime, your live channels, the TV guide and today's fixtures.
 
 ### Playing
-- **Sources** from Stremio addons, Syncler Express packages, Plex and Jellyfin, played through TorBox, Real-Debrid or Premiumize. Choose Source shows only what Zylo actually knows about each one.
+- **Sources** from Stremio addons, Syncler Express packages, Plex and Jellyfin, played through TorBox, Real-Debrid or Premiumize. Choose Source shows only what Zylo actually knows about each one, and leaves out files that are plainly for another title (addons sometimes return another show's S01E01).
 - **Pick a source for me:** Play picks the best once 1, 3, 5, 10 or 20 sources are found, or never (you always choose). Remembers what played well and prefers the same kind next time. Quality cap (4K / 1080p / 720p).
 - **Player:** Media3, controls on OK, Back returns to Choose Source to try another.
+- **When a source won't play:** a plain reason (format this TV can't decode, link expired, connection dropped, or a debrid "holding clip" instead of the episode) with **Try Next Source** and **Choose Source**. Failed sources are marked Unavailable, and nothing is saved or sent to Trakt unless the video actually played, so your place is never lost.
 - **Skip Intro, Skip Recap and Skip Credits** from IntroDB (and AniSkip for anime).
 - **Up Next** with a countdown; the next episode's sources are found during the last few minutes so it starts at once.
 - **Pause screen:** paused for a few seconds, the picture dims and shows what you're watching.
@@ -79,12 +80,13 @@ Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSk
 
 ### Everything else
 - **Guided setup** on first launch: TMDB, accounts, debrid, addons, Live TV.
+- **Typing:** one Zylo dialog for every key, PIN, link and name: keys are masked (with Show), TMDB keys are checked for length, and any key can be sent from your phone with a QR code.
 - **Add addons from your phone:** scan a QR code and paste the link (long links break when typed on a TV).
 - **Updates** checked when Zylo opens, downloaded and installed from this repository.
 - **Background activity** shown in the top bar (channels, guide, Trakt, update).
 - **Back** goes up to the top bar on the main pages, and one step back everywhere else.
 
-Design tokens (colours, type scale, radii, timings) are in `Theme.kt` (`object Z`). Font: Inter. The mark and wordmark are Alex's artwork (`res/drawable/zylo_mark.xml`, `zylo_wordmark.xml`).
+Design tokens (colours, type scale, radii, timings) are in `Theme.kt` (`object Z`); `DESIGN.md` describes the visual system and its rules, and `PRODUCT.md` who Zylo is for and what it must keep true. Font: Inter. The mark and wordmark are Alex's artwork (`res/drawable/zylo_mark.xml`, `zylo_wordmark.xml`).
 
 ## Build
 

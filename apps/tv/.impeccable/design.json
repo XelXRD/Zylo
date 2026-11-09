@@ -1,0 +1,359 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-09T21:10:42.393111+00:00",
+  "title": "Design System: Zylo for Android TV",
+  "extensions": {
+    "colorMeta": {
+      "zylo-red": {
+        "role": "primary",
+        "displayName": "Zylo Red",
+        "canonical": "#BD1422",
+        "tonalRamp": [
+          "#2A0508",
+          "#4A0A10",
+          "#6E0E17",
+          "#93111E",
+          "#BD1422",
+          "#D9444F",
+          "#EC8A90",
+          "#F8D2D4"
+        ]
+      },
+      "zylo-red-focus": {
+        "role": "primary",
+        "displayName": "Zylo Red, lit",
+        "canonical": "#D41A29"
+      },
+      "screening-room": {
+        "role": "neutral",
+        "displayName": "Screening Room",
+        "canonical": "#101114",
+        "tonalRamp": [
+          "#07080A",
+          "#101114",
+          "#191A1E",
+          "#222329",
+          "#292A31",
+          "#3A3B45",
+          "#73747D",
+          "#F5F5F5"
+        ]
+      },
+      "house-dark": {
+        "role": "neutral",
+        "displayName": "House Dark",
+        "canonical": "#191A1E",
+        "tonalRamp": [
+          "#07080A",
+          "#101114",
+          "#191A1E",
+          "#222329",
+          "#292A31",
+          "#3A3B45",
+          "#73747D",
+          "#F5F5F5"
+        ]
+      },
+      "seat-graphite": {
+        "role": "neutral",
+        "displayName": "Seat Graphite",
+        "canonical": "#222329",
+        "tonalRamp": [
+          "#07080A",
+          "#101114",
+          "#191A1E",
+          "#222329",
+          "#292A31",
+          "#3A3B45",
+          "#73747D",
+          "#F5F5F5"
+        ]
+      },
+      "raised-graphite": {
+        "role": "neutral",
+        "displayName": "Raised Graphite",
+        "canonical": "#292A31",
+        "tonalRamp": [
+          "#07080A",
+          "#101114",
+          "#191A1E",
+          "#222329",
+          "#292A31",
+          "#3A3B45",
+          "#73747D",
+          "#F5F5F5"
+        ]
+      },
+      "focus-graphite": {
+        "role": "neutral",
+        "displayName": "Focus Graphite",
+        "canonical": "#3A3B45",
+        "tonalRamp": [
+          "#07080A",
+          "#101114",
+          "#191A1E",
+          "#222329",
+          "#292A31",
+          "#3A3B45",
+          "#73747D",
+          "#F5F5F5"
+        ]
+      },
+      "hairline": {
+        "role": "neutral",
+        "displayName": "Hairline",
+        "canonical": "#34353D"
+      },
+      "screen-white": {
+        "role": "neutral",
+        "displayName": "Screen White",
+        "canonical": "#F5F5F5"
+      },
+      "aisle-grey": {
+        "role": "neutral",
+        "displayName": "Aisle Grey",
+        "canonical": "#A4A5AB"
+      },
+      "dim-grey": {
+        "role": "neutral",
+        "displayName": "Dim Grey",
+        "canonical": "#73747D"
+      },
+      "success": {
+        "role": "status",
+        "displayName": "Success",
+        "canonical": "#36B37E"
+      },
+      "warning": {
+        "role": "status",
+        "displayName": "Warning",
+        "canonical": "#E5A83B"
+      },
+      "error": {
+        "role": "status",
+        "displayName": "Error",
+        "canonical": "#E05252"
+      },
+      "info": {
+        "role": "status",
+        "displayName": "Info",
+        "canonical": "#5799DB"
+      }
+    },
+    "typographyMeta": {
+      "display-large": {
+        "displayName": "Display Large",
+        "purpose": "Featured hero title when no title logo exists."
+      },
+      "display-medium": {
+        "displayName": "Display Medium",
+        "purpose": "Detail page title."
+      },
+      "display-small": {
+        "displayName": "Display Small",
+        "purpose": "Page headings."
+      },
+      "headline-small": {
+        "displayName": "Headline Small",
+        "purpose": "Panel and dialog headings."
+      },
+      "title-large": {
+        "displayName": "Title Large",
+        "purpose": "Row and section headings."
+      },
+      "body-small": {
+        "displayName": "Body Small",
+        "purpose": "One-line metadata joined with a spaced middle dot."
+      },
+      "label-large": {
+        "displayName": "Label Large",
+        "purpose": "Buttons and nav items."
+      }
+    },
+    "shadows": [
+      {
+        "name": "focus-lift",
+        "value": "0 0 18dp rgba(0,0,0,0.9)",
+        "purpose": "Focused cards only, with the 1.08 scale."
+      }
+    ],
+    "motion": [
+      {
+        "name": "ease-out",
+        "value": "cubic-bezier(0.23, 1, 0.32, 1)",
+        "purpose": "Things arriving or answering a press."
+      },
+      {
+        "name": "ease-in-out",
+        "value": "cubic-bezier(0.77, 0, 0.175, 1)",
+        "purpose": "Things changing shape on screen."
+      },
+      {
+        "name": "fast",
+        "value": "180ms",
+        "purpose": "Small state changes."
+      },
+      {
+        "name": "normal",
+        "value": "240ms",
+        "purpose": "Default UI transition."
+      },
+      {
+        "name": "press-scale",
+        "value": "0.96",
+        "purpose": "OK pressed: an instant squeeze."
+      },
+      {
+        "name": "preview-delay",
+        "value": "800ms",
+        "purpose": "Focus rest before a card expands into a preview."
+      },
+      {
+        "name": "hero-trailer-delay",
+        "value": "3000ms",
+        "purpose": "Rest on the Home hero before its trailer starts."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "tv-1080p",
+        "value": "960dp x 540dp"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary Button",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Play, Resume: the one primary action in a cluster.",
+      "html": "<button class=\"ds-btn-primary\"><svg width=\"18\" height=\"18\" viewBox=\"0 0 24 24\" fill=\"currentColor\"><path d=\"M8 5v14l11-7z\"/></svg>Play</button>",
+      "css": ".ds-btn-primary{display:inline-flex;align-items:center;gap:8px;background:#BD1422;color:#fff;border:2px solid transparent;border-radius:6px;padding:9px 18px;font-family:Inter,system-ui,sans-serif;font-size:13.5px;font-weight:500;letter-spacing:0.006em;transition:transform 180ms cubic-bezier(0.23,1,0.32,1),background 180ms;cursor:pointer}.ds-btn-primary:hover,.ds-btn-primary:focus-visible{background:#D41A29;border-color:#fff;outline:none;transform:scale(1.05)}.ds-btn-primary:active{transform:scale(0.96)}"
+    },
+    {
+      "name": "Secondary Button",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "Trailer, My List, Choose Source: translucent until focused, then white.",
+      "html": "<button class=\"ds-btn-secondary\">Choose Source</button>",
+      "css": ".ds-btn-secondary{background:rgba(255,255,255,0.12);color:#F5F5F5;border:none;border-radius:6px;padding:9px 18px;font-family:Inter,system-ui,sans-serif;font-size:13.5px;font-weight:500;letter-spacing:0.006em;transition:transform 180ms cubic-bezier(0.23,1,0.32,1),background 180ms,color 180ms;cursor:pointer}.ds-btn-secondary:hover,.ds-btn-secondary:focus-visible{background:#F5F5F5;color:#101114;outline:none;transform:scale(1.05)}.ds-btn-secondary:active{transform:scale(0.96)}"
+    },
+    {
+      "name": "Poster Card",
+      "kind": "card",
+      "refersTo": "poster-card",
+      "description": "2:3 artwork with a progress mark; lifts and gains a white edge on focus.",
+      "html": "<div class=\"ds-poster\" tabindex=\"0\"><span class=\"ds-poster-title\">Title</span><div class=\"ds-poster-track\"><div class=\"ds-poster-fill\"></div></div></div>",
+      "css": ".ds-poster{position:relative;width:124px;height:186px;border-radius:10px;overflow:hidden;background:linear-gradient(160deg,#3A3B45,#222329);display:flex;align-items:center;justify-content:center;transition:transform 180ms cubic-bezier(0.23,1,0.32,1),box-shadow 180ms}.ds-poster-title{color:#73747D;font-family:Inter,system-ui,sans-serif;font-size:14px;font-weight:500}.ds-poster-track{position:absolute;left:0;right:0;bottom:0;height:3px;background:rgba(255,255,255,0.25)}.ds-poster-fill{width:40%;height:100%;background:#BD1422}.ds-poster:hover,.ds-poster:focus-visible{transform:scale(1.08);box-shadow:inset 0 0 0 2px rgba(255,255,255,0.92),0 0 18px rgba(0,0,0,0.9);outline:none}"
+    },
+    {
+      "name": "List Row",
+      "kind": "custom",
+      "refersTo": "list-surface",
+      "description": "Settings rows and tabs: Focus Graphite plus a white outline on focus.",
+      "html": "<div class=\"ds-row\" tabindex=\"0\">Debrid Services</div>",
+      "css": ".ds-row{width:320px;padding:12px 16px;border-radius:6px;color:#A4A5AB;font-family:Inter,system-ui,sans-serif;font-size:15px;border:2px solid transparent;transition:background 180ms,color 180ms}.ds-row:hover,.ds-row:focus-visible{background:#3A3B45;color:#F5F5F5;border-color:#F5F5F5;outline:none}"
+    },
+    {
+      "name": "Top Navigation",
+      "kind": "nav",
+      "refersTo": "nav-item",
+      "description": "Floating section labels over a fade; red tick under the active section, white fill on focus.",
+      "html": "<nav class=\"ds-nav\"><a class=\"ds-nav-item is-active\" href=\"#\">Home</a><a class=\"ds-nav-item\" href=\"#\">Movies</a><a class=\"ds-nav-item\" href=\"#\">Series</a><a class=\"ds-nav-item\" href=\"#\">Discover</a></nav>",
+      "css": ".ds-nav{display:flex;gap:4px;padding:14px 38px 22px;background:linear-gradient(rgba(16,17,20,0.8),rgba(16,17,20,0.35),transparent)}.ds-nav-item{display:flex;flex-direction:column;align-items:center;padding:6px 12px;border-radius:6px;color:#A4A5AB;text-decoration:none;font-family:Inter,system-ui,sans-serif;font-size:13.5px;font-weight:500}.ds-nav-item::after{content:'';width:16px;height:2px;margin-top:3px;background:transparent}.ds-nav-item.is-active{color:#F5F5F5}.ds-nav-item.is-active::after{background:#BD1422}.ds-nav-item:hover,.ds-nav-item:focus-visible{background:#F5F5F5;color:#101114;outline:none}"
+    },
+    {
+      "name": "Search Field",
+      "kind": "input",
+      "refersTo": "search-field",
+      "description": "Graphite field; hairline stroke turns white on focus.",
+      "html": "<input class=\"ds-search\" placeholder=\"Films, series, anime\">",
+      "css": ".ds-search{width:420px;height:52px;padding:0 16px;border-radius:10px;background:#222329;border:2px solid #34353D;color:#F5F5F5;font-family:Inter,system-ui,sans-serif;font-size:17px}.ds-search::placeholder{color:#73747D}.ds-search:focus,.ds-search:focus-visible{border-color:#F5F5F5;outline:none}"
+    },
+    {
+      "name": "Status Chip",
+      "kind": "chip",
+      "refersTo": "status-chip",
+      "description": "State only: a tinted chip with a dot.",
+      "html": "<span class=\"ds-chip\"><i></i>Connected</span>",
+      "css": ".ds-chip{display:inline-flex;align-items:center;gap:6px;padding:4px 9px;border-radius:6px;background:rgba(54,179,126,0.14);color:#36B37E;font-family:Inter,system-ui,sans-serif;font-size:12px;font-weight:500;letter-spacing:0.01em}.ds-chip i{width:7px;height:7px;border-radius:50%;background:#36B37E}"
+    }
+  ],
+  "narrative": {
+    "northStar": "The Lights-Down Cinema",
+    "overview": "When the house lights go down, the screen is the only thing left in the room. Zylo works the same way. The interface is a dark auditorium of graphite surfaces sitting a few steps above black, and the film artwork (posters, backdrops, title logos and muted trailers) is the brightest thing on screen. Chrome falls back so the picture can lead. The top bar is a soft fade rather than a solid bar, the hero is a full-bleed backdrop scrimmed into the page, and cards are mostly artwork with almost no frame.\n\nZylo red works like the exit sign: small, always in the same places, and never the room itself. It marks the primary Play action, watch progress, the active section and selected items, and nothing else. Focus does the job of a cursor. Because a D-pad remote has no pointer, the focused element must be unmistakable from the sofa. That's done with white: a white outline, a white fill, or a lighter graphite panel with a white edge, plus a small scale-up on artwork. Motion is quick, firm and short, because a remote user makes the same focus move hundreds of times a session.\n\nThe system is calm and dense rather than spectacular. Discovery screens can bring their own mood (Deep Cuts' dossier monospace, Blind Date's wine-dark wash), but they do it inside the same dark room.",
+    "keyCharacteristics": [
+      "Near-black graphite surfaces in tonal steps, no light theme.",
+      "Artwork is the colour. UI colour is limited to one red and four status hues.",
+      "White is the focus language: outline, fill, or a lighter panel, never a coloured ring.",
+      "Inter for UI, with Inter Display for titles, tightly tracked at size.",
+      "Motion under 300 ms, with strong custom easing and full support for Reduce motion.",
+      "48dp overscan-safe side margin on every screen."
+    ],
+    "rules": [
+      {
+        "name": "The Exit Sign Rule",
+        "body": "Zylo red is rare and fixed in place: primary Play-type buttons, progress, the active-section tick and selection tints. It is never a background field, a card fill, a headline colour or a decorative accent. If two red things compete on one screen, one of them is wrong.",
+        "section": "colors"
+      },
+      {
+        "name": "The Artwork Is the Colour Rule",
+        "body": "The UI adds no hues of its own beyond red and status. Colour on screen should come from posters, backdrops and trailers.",
+        "section": "colors"
+      },
+      {
+        "name": "The Mood Wash Exception",
+        "body": "A discovery screen may set a near-black tinted atmosphere: Deep Cuts' vertical wash (`#07080A → #130A0C → #07080A`) or Blind Date's radial wine glow (`#3A0A12 → screening-room`). These washes stay below 25% lightness and never use Zylo Red itself.",
+        "section": "colors"
+      },
+      {
+        "name": "The Moodboard Palette",
+        "body": "Moodboard is the one place colour names a feeling: each mood has its own hue (Rainy Sunday `#3D5A80`, Neon Noir, Haunted Hours and the rest in `Explore.kt`), shown at 55% on its tile and as a 45% wash fading into Screening Room on its page. It doesn't spread to other screens.",
+        "section": "colors"
+      },
+      {
+        "name": "The Tracking Follows Size Rule",
+        "body": "Large type tightens (down to −2.5% at 38sp), and small labels open slightly (up to +1.5% at 11sp). Leading runs the other way: tight on titles, generous (1.5) on body. Pick a role from the type scale; never set a one-off size.",
+        "section": "typography"
+      },
+      {
+        "name": "The Title Logo First Rule",
+        "body": "When fanart.tv or TMDB has a title logo, show it in place of the typeset title on heroes and preview cards. Typeset Display is the fallback.",
+        "section": "typography"
+      },
+      {
+        "name": "The Flat at Rest Rule",
+        "body": "Surfaces are flat until focused. Lift, scale and glow are responses to focus, never decoration.",
+        "section": "elevation"
+      },
+      {
+        "name": "The Scrim, Not the Box Rule",
+        "body": "Text over artwork sits on a gradient into Screening Room or black (hero: horizontal 92% → 55% → clear at 75%, plus a vertical fade to solid; preview cards: clear at 30% → 92% black). Never put text in a solid box over artwork.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** keep every screen on Screening Room (`#101114`) and step up through the graphite surfaces for depth.",
+      "**Do** make focus unmistakable with white: a 2dp outline, a white fill, or Focus Graphite plus an outline. Pair cards with a 1.08 scale and the focus-lift glow.",
+      "**Do** keep a 48dp side margin and let rows bleed so focus scaling is never clipped.",
+      "**Do** pick text sizes from the type scale roles, with Inter Display at 20sp and above.",
+      "**Do** put text over artwork on a Screening Room or black gradient scrim.",
+      "**Do** route every animation duration through `ms()` so Reduce motion works.",
+      "**Do** show the title under artwork as a fallback, and use still skeletons in the shape of the content.",
+      "**Do** use `ask()` for any typed answer and `ConfirmButton` for anything that throws something away.",
+      "**Do** say what went wrong and what to do next (`plainError()`); never show a raw exception message."
+    ],
+    "donts": [
+      "**Don't** use Zylo Red as a background, card fill, headline colour or decoration (the Exit Sign Rule).",
+      "**Don't** fill a focused surface with white when the text inside is white. Use Focus Graphite and an outline instead.",
+      "**Don't** add drop shadows to resting surfaces.",
+      "**Don't** introduce new UI hues. Colour comes from artwork, and status colours mean state.",
+      "**Don't** use shimmer on loading states.",
+      "**Don't** animate a card shrinking inside a scrolling row, or let any UI motion run past 300ms.",
+      "**Don't** use emoji or Unicode symbols as icons. Use the Material icon set (the thumbs-down is the thumbs-up turned over), or no icon.",
+      "**Don't** use Android's stock dialogs or toasts; they bring Roboto, pill buttons and an orange focus ring into the room.",
+      "**Don't** let YouTube's own interface (title, channel badge, share, suggestions, captions) appear anywhere in Zylo.",
+      "**Don't** redraw or recolour the Zylo mark and wordmark. Use Alex's artwork (`zylo_mark.xml`, `zylo_wordmark.xml`), with the wordmark tinted only to the text colour."
+    ]
+  }
+}

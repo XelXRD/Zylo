@@ -33,6 +33,7 @@ import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.platform.LocalDensity
@@ -116,7 +117,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
 
 @OptIn(androidx.compose.foundation.ExperimentalFoundationApi::class)
 @Composable
-fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boolean = false, title: String? = null, extras: (@Composable () -> Unit)? = null) {
+fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boolean = false, title: String? = null, rowsFirst: Boolean = true, extras: (@Composable () -> Unit)? = null) {
   val key = store.tmdb
   LaunchedEffect(key) { if (s.loadedFor != key) s.load(Tmdb(key), key) }
   // The app stays open for days on a TV: new hero titles every 4 hours.
@@ -145,6 +146,9 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   val featured = if (hero) s.heroItems.getOrNull(s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))) else null
   // Focus in the hero keeps the page at the very top, so the hero is never cut off.
   LaunchedEffect(s.heroFocused, watching.size) { if (s.heroFocused) s.list.animateScrollToItem(0) }
+  // Up in the top bar: the page goes back to the top too, so it shows the hero (or the page title), not the faded
+  // band left above a row that was centred. Down returns to the card you left, which scrolls it back into place.
+  LaunchedEffect(nav.ui.navFocused) { if (nav.ui.navFocused && s.list.firstVisibleItemIndex + s.list.firstVisibleItemScrollOffset > 0) s.list.animateScrollToItem(0) }
   val density = LocalDensity.current
   // The hero's artwork sits behind the whole page and fades away as the rows scroll up over it.
   val artAlpha by remember {
@@ -157,6 +161,9 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
     if (featured != null) HeroBackdrop(store, s, featured, Modifier.fillMaxSize().alpha(artAlpha))
     // The focused row moves to the middle of the screen (Alex: a focal point, never cut off at the bottom). In the hero
     // the page stays at the top. Rows supply their own sideways behaviour (PivotRow).
+    // The top item fades out over [over] of scrolling, so nothing of it is left to show through under the top bar.
+    fun firstAlpha(over: androidx.compose.ui.unit.Dp) =
+      if (s.list.firstVisibleItemIndex > 0) 0f else 1f - (s.list.firstVisibleItemScrollOffset / with(density) { over.toPx() }).coerceIn(0f, 1f)
     val centre = remember(s) {
       object : BringIntoViewSpec {
         override fun calculateScrollDistance(offset: Float, size: Float, containerSize: Float) = if (s.heroFocused) 0f else offset - (containerSize - size) / 2f
@@ -164,14 +171,16 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
     }
     CompositionLocalProvider(LocalBringIntoViewSpec provides centre) {
     LazyColumn(Modifier.fillMaxSize(), state = s.list, contentPadding = PaddingValues(top = if (hero) 0.dp else 84.dp, bottom = 56.dp)) {
-      if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 14.dp), style = MaterialTheme.typography.displaySmall) }
+      if (title != null) item("title") { Text(title, Modifier.padding(start = Z.Pad, bottom = 14.dp).graphicsLayer { alpha = firstAlpha(26.dp) }, style = MaterialTheme.typography.displaySmall) }
       if (extras != null) item("extras") { extras() }
-      if (featured != null) item("hero") { HeroInfo(store, s, featured, nav) }
+      if (featured != null) item("hero") { Box(Modifier.graphicsLayer { alpha = firstAlpha(170.dp) }) { HeroInfo(store, s, featured, nav) } }
       if (watching.isNotEmpty()) item("continue") { ContinueRow(store, watching, s, nav) }
       if (hero) item("live") { LiveHome(store, s.focus, nav) }
-      items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = !hero && name == rows.first().first) }
+      items(rows, key = { it.first }) { (name, items) -> PosterRow(store, name, items, s, nav, default = rowsFirst && !hero && name == rows.first().first) }
     }
     }
+    val scrolled by remember { derivedStateOf { s.list.firstVisibleItemIndex > 0 || s.list.firstVisibleItemScrollOffset > with(density) { 24.dp.toPx() } } }
+    NavShade(scrolled)
   }
 }
 
@@ -294,7 +303,11 @@ private fun SaveTo(store: Store, item: Item, close: () -> Unit) = androidx.compo
     ZSurface({ if (on != null) toggle() }, modifier.fillMaxWidth(), container = Z.Card) {
       Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(label, Modifier.weight(1f), style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        Text(when (on) { null -> "…"; true -> "✓ Saved"; false -> "+ Add" }, style = MaterialTheme.typography.labelLarge)
+        when (on) {
+          null -> Text("…", style = MaterialTheme.typography.labelLarge)
+          true -> StatusChip("Saved", Z.Success)
+          false -> Text("Add", style = MaterialTheme.typography.labelLarge)
+        }
       }
     }
   Column(Modifier.width(520.dp).background(Z.Surface, Z.Large).padding(24.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -563,7 +576,7 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
     Text(title, Modifier.padding(horizontal = Z.Pad), style = MaterialTheme.typography.displaySmall)
     LazyRow(Modifier.focusRequester(b.chips).focusRestorer(), contentPadding = PaddingValues(horizontal = Z.Pad, vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
       // Can't decide? A few questions, then a pick (Quiz.kt).
-      item { Chip("✦ Help Me Choose", false) { nav.push(Screen.HelpMe(if (b.anime) "anime" else b.type)) } }
+      item { Chip("Help Me Choose", false) { nav.push(Screen.HelpMe(if (b.anime) "anime" else b.type)) } }
       item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
       itemsIndexed(listOf("Popular", "Top Rated", "New Releases")) { i, label -> Chip(label, b.sort == i) { pick(i, b.genre) } }
       item { Box(Modifier.padding(horizontal = 8.dp).width(1.dp).height(26.dp).background(Z.Border)) }
@@ -582,12 +595,11 @@ fun BrowsePage(store: Store, b: BrowseState, nav: Nav, title: String, restore: B
 fun Chip(label: String, selected: Boolean, onClick: () -> Unit) = Surface(
   onClick,
   shape = ClickableSurfaceDefaults.shape(Z.Small),
-  // Selected is a quiet red outline, not a red fill: red marks the one key action, not every chosen filter.
+  // Selected is a quiet red tint, not an outline (an outline reads as focus) and not a fill (red marks the one key action).
   colors = ClickableSurfaceDefaults.colors(
-    containerColor = if (selected) Color.White.copy(alpha = 0.08f) else Z.Card, contentColor = if (selected) Z.Text else Z.Text2,
+    containerColor = if (selected) Z.Red.copy(alpha = 0.18f) else Z.Card, contentColor = if (selected) Z.Text else Z.Text2,
     focusedContainerColor = Z.Text, focusedContentColor = Z.Bg,
   ),
-  border = ClickableSurfaceDefaults.border(border = if (selected) Border(androidx.compose.foundation.BorderStroke(1.5.dp, Z.Red), shape = Z.Small) else Border.None),
   scale = ClickableSurfaceDefaults.scale(focusedScale = 1f, pressedScale = Z.Press),
 ) { Text(label, Modifier.padding(horizontal = 14.dp, vertical = 7.dp), style = MaterialTheme.typography.labelLarge) }
 
@@ -632,7 +644,7 @@ fun MyListPage(store: Store, nav: Nav, focus: FocusMemory, restore: Boolean) {
   var error by remember(source.id) { mutableStateOf<String?>(null) }
   LaunchedEffect(source.id) {
     if (source.id == "mine") return@LaunchedEffect
-    runCatching { withContext(Dispatchers.IO) { source.load() } }.onSuccess { items = it; listCache[source.id] = it }.onFailure { error = it.message }
+    runCatching { withContext(Dispatchers.IO) { source.load() } }.onSuccess { items = it; listCache[source.id] = it }.onFailure { error = plainError(it, "the list") }
   }
   RestoreFocus(focus, items?.isNotEmpty() == true && restore)
   Column(Modifier.fillMaxSize().padding(top = 76.dp)) {

@@ -167,7 +167,7 @@ class Store(private val open: (String) -> SharedPreferences) {
 
   companion object {
     private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "anime_dub", "thumbs", "outbox", "synclog", "xc_favs", "reminders")
-    val AVATARS = listOf(0xFFBD1422, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
+    val AVATARS = listOf(0xFF9A4155, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
 
     private fun profilesIn(g: SharedPreferences): List<Profile> =
       JSONArray(g.getString("profiles", "[]")).objects().map { Profile(it.getString("id"), it.optString("name"), it.optInt("color", AVATARS[0]), if (it.has("kids")) it.optInt("kids") else null) }
@@ -350,10 +350,13 @@ class Tmdb(private val key: String) {
       )
     }
 
-    /** YouTube key of the best trailer: trailers before teasers, official first. */
+    /** Videos TMDB files as trailers that aren't one: countdowns, reactions, recaps, spots and the like. */
+    private val NOT_A_TRAILER = Regex("countdown|reaction|recap|featurette|behind the scenes|clip|interview|review|breakdown|explained|tv spot|promo|sneak peek|first look|announcement", RegexOption.IGNORE_CASE)
+
+    /** YouTube key of the best trailer: a real trailer before a teaser, "Official Trailer" first, then official uploads. */
     fun trailer(d: JSONObject?): String? = d?.optJSONObject("videos")?.optJSONArray("results")?.objects()
-      ?.filter { it.optString("site") == "YouTube" && it.str("key") != null && it.optString("type") in setOf("Trailer", "Teaser") }
-      ?.sortedWith(compareBy({ it.optString("type") != "Trailer" }, { !it.optBoolean("official") }))
+      ?.filter { it.optString("site") == "YouTube" && it.str("key") != null && it.optString("type") in setOf("Trailer", "Teaser") && !NOT_A_TRAILER.containsMatchIn(it.optString("name")) }
+      ?.sortedWith(compareBy({ it.optString("type") != "Trailer" }, { !it.optString("name").contains("official trailer", true) }, { !it.optBoolean("official") }))
       ?.firstOrNull()?.str("key")
 
     /** UK age rating, else US. */
@@ -433,9 +436,8 @@ fun moodRows(store: Store): List<RowSpec> {
   )
 }
 
+// Genre rows under Discover's modes. Trending and top-rated live on Home, so they aren't repeated here.
 val DISCOVER_ROWS = listOf(
-  RowSpec("Trending This Week", "/trending/all/week", null),
-  RowSpec("Top Rated Series", "/tv/top_rated", "tv"),
   RowSpec("Action", "/discover/movie?with_genres=28", "movie"),
   RowSpec("Comedy", "/discover/movie?with_genres=35", "movie"),
   RowSpec("Sci-Fi", "/discover/movie?with_genres=878", "movie"),

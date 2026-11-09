@@ -27,6 +27,7 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
@@ -198,9 +199,8 @@ fun MoodboardPage(store: Store, nav: Nav) {
           val it = MOODS[i]
           ZSurface({ mood = it }, Modifier.then(if (i == 0) Modifier.focusRequester(first) else Modifier).height(150.dp), container = Color(it.colour).copy(alpha = 0.55f)) {
             Column(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.45f)))).padding(14.dp), verticalArrangement = Arrangement.Bottom) {
-              Text(it.emoji, style = MaterialTheme.typography.headlineMedium)
-              Text(it.name, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-              Text(it.line, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              Text(it.name, style = MaterialTheme.typography.titleMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
+              Text(it.line, Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text.copy(alpha = 0.78f), maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
           }
         }
@@ -212,7 +212,7 @@ fun MoodboardPage(store: Store, nav: Nav) {
     Box(Modifier.fillMaxSize().background(Brush.verticalGradient(listOf(Color(m.colour).copy(alpha = 0.45f), Z.Bg, Z.Bg)))) {
       Shelves(store, shelves, nav) {
         Column(Modifier.padding(horizontal = Z.Pad)) {
-          Text("${m.emoji}  ${m.name}", style = MaterialTheme.typography.displaySmall)
+          Text(m.name, style = MaterialTheme.typography.displaySmall)
           Text(m.line, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
         }
       }
@@ -634,37 +634,88 @@ fun BlindDatePage(store: Store, nav: Nav) {
 
 // --- Discover's Explore row ------------------------------------------------------------------------
 
-class Mode(val emoji: String, val name: String, val line: String, val go: (Nav) -> Unit)
+/** One way into discovery. [line] fits a tile in two lines; [pitch] is the fuller sentence when it's in the spotlight. */
+class Mode(val name: String, val line: String, val pitch: String, val go: (Nav) -> Unit)
 
-@Composable
-fun ExploreRow(store: Store, nav: Nav) {
+private class ModeGroup(val name: String, val modes: List<Mode>)
+
+private fun modeGroups(store: Store): List<ModeGroup> {
   val kids = store.profile.kids != null
-  val modes = listOfNotNull(
-    Mode("🍿", "Movie Night Match", "Everyone swipes, one film wins") { it.push(Screen.MovieNight) },
-    Mode("🕳️", "Rabbit Hole", "Films, people, genres: follow the web") { n -> n.push(Screen.RabbitStart) },
-    Mode("🗝️", "Deep Cuts", "Things almost nobody has seen") { it.push(Screen.DeepCuts) },
-    Mode("🧭", "Franchise Journeys", "Every film and series, in order") { it.push(Screen.Franchises) },
-    Mode("🎞️", "Double Feature", "Two films that belong together") { it.push(Screen.DoubleFeature) },
-    Mode("🎨", "Moodboard", "Pick a feeling, not a genre") { it.push(Screen.Moodboard) },
-    Mode("🏆", "Watch Challenges", "Curated lists to complete") { it.push(Screen.Challenges) },
-    Mode("⏳", "Time Machine", "Go back to any year") { it.push(Screen.TimeMachine) },
-    Mode("💌", "Blind Date", "Commit before you see it") { it.push(Screen.BlindDate) },
-    Mode("📅", "Calendar", "What's out in the next four weeks") { it.push(Screen.Calendar) },
-    Mode("✦", "Your ${Calendar.getInstance().get(Calendar.YEAR)} Wrapped", "Your year, from Trakt") { it.push(Screen.Wrapped) }.takeIf { Trakt.connected(store) && !kids },
+  return listOf(
+    ModeGroup("Decide together", listOf(
+      Mode("Movie Night Match", "Everyone swipes on their phone; one film wins.",
+        "Everyone scans a code and swipes on their phone. The first film or series you all say yes to wins.") { it.push(Screen.MovieNight) },
+      Mode("Help Me Choose", "A quick quiz, or This or That until one is left.",
+        "Five questions and a reveal, or two titles at a time until only one is left.") { it.push(Screen.HelpMe("movie")) },
+      Mode("Blind Date", "A film from clues alone. Commit, then see it.",
+        "A film picked for you with only clues to go on. Commit to it, then it's revealed.") { it.push(Screen.BlindDate) },
+      Mode("Double Feature", "Two films that belong together, and why.",
+        "Two films that belong together: same director, original and remake, light then dark. Each pair comes with the reason.") { it.push(Screen.DoubleFeature) },
+    )),
+    ModeGroup("Go deeper", listOf(
+      Mode("Rabbit Hole", "Follow films, people and themes as far as they go.",
+        "Jump from a film to its director, cast, composer, genres and themes, and on from each of those. Back retraces the trail.") { it.push(Screen.RabbitStart) },
+      Mode("Deep Cuts", "Things almost nobody has seen.",
+        "Case files on the overlooked: acclaimed but unseen, tiny but brilliant, world cinema, forgotten classics, cancelled series.") { it.push(Screen.DeepCuts) },
+      Mode("Franchise Journeys", "Every film and series in a universe, in order.",
+        "Every film and series in a universe, in recommended, story or release order, with the spin-offs and what's coming.") { it.push(Screen.Franchises) },
+      Mode("Moodboard", "Pick a feeling, not a genre.",
+        "Pick a feeling, not a genre: Rainy Sunday, Late-Night Paranoia, Existential Sci-Fi and more.") { it.push(Screen.Moodboard) },
+      Mode("Time Machine", "Go back to any year from 1950.",
+        "Any year from 1950: its biggest films, TV, anime, faces, music and news, and the gems it hid.") { it.push(Screen.TimeMachine) },
+    )),
+    ModeGroup("Keep track", listOfNotNull(
+      Mode("Watch Challenges", "Curated lists that tick themselves off.",
+        "Curated lists to complete, ticked off automatically from everything you watch, here or on Trakt.") { it.push(Screen.Challenges) },
+      Mode("Calendar", "What's out in the next four weeks.",
+        "New episodes and films over the next four weeks, with reminders on the day.") { it.push(Screen.Calendar) },
+      Mode("Your ${Calendar.getInstance().get(Calendar.YEAR)} Wrapped", "Your year, from Trakt.",
+        "Your year from Trakt: hours watched, films and episodes, your biggest binge, top genres and busiest month.") { it.push(Screen.Wrapped) }
+        .takeIf { Trakt.connected(store) && !kids },
+    )),
   )
-  PivotRow {
-    LazyRow(Modifier.padding(bottom = 16.dp), contentPadding = PaddingValues(start = Z.Pad, end = 400.dp, top = 6.dp, bottom = 6.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-      items(modes, key = { it.name }) { m ->
-        ZSurface({ m.go(nav) }, Modifier.width(196.dp).height(112.dp), container = Z.Card) {
-          Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
-            Text(m.emoji, style = MaterialTheme.typography.headlineSmall)
-            Column {
-              Text(m.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-              Text(m.line, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+}
+
+/**
+ * The top of Discover: one mode in the spotlight (a different one each day) over real artwork, then every mode, grouped
+ * by what you're in the mood to do. Rabbit Hole in the spotlight starts from the last thing you watched.
+ */
+@Composable
+fun DiscoverFront(store: Store, nav: Nav, s: RowsState) {
+  val groups = remember { modeGroups(store) }
+  val all = groups.flatMap { it.modes }
+  val day = remember { Calendar.getInstance().get(Calendar.DAY_OF_YEAR) }
+  val featured = all[day % all.size]
+  val last = remember { store.watches().maxByOrNull { it.at }?.item?.takeIf { it.backdrop != null } }
+  val from = last?.takeIf { featured.name == "Rabbit Hole" }
+  val art = from?.backdrop ?: s.rows.flatMap { it.second }.filter { it.backdrop != null }.let { l -> l.getOrNull(day % l.size.coerceAtLeast(1)) }?.backdrop
+  Column {
+    Box(Modifier.padding(horizontal = Z.Pad).fillMaxWidth().height(236.dp).clip(Z.Large).background(Z.Card)) {
+      if (art != null) AsyncImage(img(art, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+      // Atmosphere, not a recommendation: the artwork stays well back behind the words.
+      Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.97f), 0.45f to Z.Bg.copy(alpha = 0.85f), 1f to Z.Bg.copy(alpha = 0.45f))))
+      Column(Modifier.align(Alignment.CenterStart).padding(horizontal = 32.dp).widthIn(max = 520.dp)) {
+        Text(featured.name, style = MaterialTheme.typography.displaySmall)
+        Text(featured.pitch, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
+        ZButton(if (from != null) "Start from ${from.title}" else "Start", { if (from != null) nav.push(Screen.Rabbit(from)) else featured.go(nav) },
+          Modifier.padding(top = 18.dp).focusMemory(s.focus, "spotlight", default = true), primary = true)
+      }
+    }
+    groups.forEach { g ->
+      Text(g.name, Modifier.padding(start = Z.Pad, top = 26.dp, bottom = 2.dp), style = MaterialTheme.typography.titleLarge)
+      PivotRow {
+        LazyRow(contentPadding = PaddingValues(start = Z.Pad, end = 400.dp, top = 10.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          items(g.modes, key = { it.name }) { m ->
+            ZSurface({ m.go(nav) }, Modifier.focusMemory(s.focus, "mode/${m.name}").width(236.dp).height(108.dp), container = Z.Card) {
+              Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp)) {
+                Text(m.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text(m.line, Modifier.padding(top = 3.dp), style = MaterialTheme.typography.bodySmall, color = LocalContentColor.current.copy(alpha = 0.8f), maxLines = 2, overflow = TextOverflow.Ellipsis)
+              }
             }
           }
         }
       }
     }
+    Text("By genre", Modifier.padding(start = Z.Pad, top = 26.dp), style = MaterialTheme.typography.headlineSmall)
   }
 }

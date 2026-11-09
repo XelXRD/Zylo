@@ -96,7 +96,7 @@ fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
   LaunchedEffect(Unit) {
     if (s.events == null || System.currentTimeMillis() - s.loadedAt > 10 * 60_000L) {
       runCatching { withContext(Dispatchers.IO) { Sports.schedule() } }.onSuccess { s.events = it; s.loadedAt = System.currentTimeMillis(); s.error = null }
-        .onFailure { s.error = it.message }
+        .onFailure { s.error = plainError(it, "ESPN") }
     }
   }
   LaunchedEffect(live.all) { // the channels saved on the TV (Live TV loads them once a day), indexed once

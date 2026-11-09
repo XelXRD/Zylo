@@ -136,7 +136,34 @@ fun isAnime(d: JSONObject?) = d != null && d.optString("original_language") == "
 
 fun overCap(s: Source, cap: String) = qualityIndex(s.quality) < QUALITIES.indexOf(cap).coerceAtLeast(0)
 
-class Found(val sources: List<Source>, val errors: List<String>, val waiting: Int)
+class Found(val sources: List<Source>, val errors: List<String>, val waiting: Int, val otherTitles: Int = 0)
+
+private val TITLE_END = Regex("\\b(s\\d{1,2}\\s?e\\d{1,4}|s\\d{1,2}|\\d{1,2}x\\d{2,3}|(19|20)\\d{2}|2160p|1080p|720p|576p|480p|4k|uhd|complete|season|series|episode|ep\\d+)\\b")
+private val SMALL_WORDS = setOf("the", "a", "an", "of", "and", "in", "on", "to", "for", "la", "le", "les", "el", "der", "die", "das")
+private fun words(s: String) = s.lowercase().replace(Regex("[^\\p{L}\\p{N}]+"), " ").trim()
+
+/** The title a release name starts with ("Twin.Peaks.S01E01.2160p…" → "twin peaks"), or null when it doesn't say. */
+fun releaseTitle(name: String): String? {
+  val w = words(name)
+  val end = TITLE_END.find(w)?.range?.first ?: return null
+  return w.substring(0, end).trim().takeIf { it.isNotEmpty() }
+}
+
+/**
+ * Whether a file is plainly for some other title. Addons match on episode numbers too, so "S01E01" of a different show
+ * can turn up. Only the file's own leading title counts, against every name TMDB knows the title by; anything unclear
+ * (no title in the name, very short titles) is kept.
+ */
+fun otherTitle(src: Source, names: List<String>): Boolean {
+  if (src.library != null) return false
+  val file = releaseTitle(src.filename ?: return false) ?: return false
+  val flat = file.replace(" ", "")
+  return names.none { n ->
+    val w = words(n)
+    val key = w.split(' ').filter { it.length >= 3 && it !in SMALL_WORDS || it.all(Char::isDigit) }
+    key.isEmpty() || w.replace(" ", "").let { it.isNotEmpty() && (flat.contains(it) || it.contains(flat)) } || key.any { k -> file.split(' ').contains(k) }
+  }
+}
 
 /**
  * Every place this video can play from: your media servers (Plex, Jellyfin) and every addon that serves streams.
@@ -147,20 +174,28 @@ suspend fun findSources(store: Store, item: Item, season: Int?, episode: Int?, v
   val addons = store.addons.filter { it.supports("stream", stype, videoId) }.map { a ->
     async(Dispatchers.IO) {
       runCatching { getJson("${a.base}/stream/$stype/${enc(videoId)}.json").optJSONArray("streams")?.objects()?.mapNotNull { source(it, a.name) }.orEmpty() }
-        .fold({ it to null }, { emptyList<Source>() to "${a.name}: ${it.message}" })
+        .fold({ it to null }, { emptyList<Source>() to "${a.name}: " + plainError(it, a.name) })
     }
   }
   val servers = Library.connected(store).map { server ->
-    async(Dispatchers.IO) { runCatching { server.find(item, season, episode) }.fold({ it to null }, { emptyList<Source>() to "${server.name}: ${it.message}" }) }
+    async(Dispatchers.IO) { runCatching { server.find(item, season, episode) }.fold({ it to null }, { emptyList<Source>() to "${server.name}: " + plainError(it, server.name) }) }
   }
   // Syncler Express packages: torrent-site searches, played through the debrid services.
   val syncler = async(Dispatchers.IO) {
     Syncler.sources(store, Query(item.title, item.year, videoId.substringBefore(':').takeIf { it.startsWith("tt") }, season, episode))
   }
   val results = (servers + addons + syncler).awaitAll()
-  val all = withDebrid(store, results.flatMap { it.first })
-  val dubs = store.animeDubs && isAnime(Tmdb(store.tmdb).preview(item))
-  Found(rank(all, store.maxQuality, store.sourcePref(item), dubs), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null })
+  val everything = withDebrid(store, results.flatMap { it.first })
+  val details = Tmdb(store.tmdb).preview(item)
+  // Every name the title goes by: its own, the original, and TMDB's alternatives (anime fansubs use romaji, for instance).
+  val names = (listOf(item.title, details?.optString("original_title").orEmpty(), details?.optString("original_name").orEmpty()) +
+    (details?.optJSONObject("alternative_titles")?.let { it.optJSONArray("titles") ?: it.optJSONArray("results") }?.objects()?.map { it.optString("title") } ?: emptyList()))
+    .filter { it.isNotBlank() }.distinct()
+  val other = everything.filter { otherTitle(it, names) }
+  // If every file looks wrong, the matcher is what's wrong: show them all.
+  val all = if (other.size < everything.size) everything - other.toSet() else everything
+  val dubs = store.animeDubs && isAnime(details)
+  Found(rank(all, store.maxQuality, store.sourcePref(item), dubs), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null }, everything.size - all.size)
 }
 
 // --- Subtitles (the addon "subtitles" resource) -------------------------------------------------

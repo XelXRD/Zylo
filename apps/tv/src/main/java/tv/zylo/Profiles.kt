@@ -27,7 +27,8 @@ import kotlinx.coroutines.delay
 
 /** A round avatar: the profile's initial on its colour. */
 @Composable
-fun Avatar(p: Profile, size: Dp) = Box(Modifier.size(size).background(Color(p.color), CircleShape), contentAlignment = Alignment.Center) {
+// Profiles made before the palette changed may still be Zylo red; they show in the rose that replaced it.
+fun Avatar(p: Profile, size: Dp) = Box(Modifier.size(size).background(Color(if (p.color == 0xFFBD1422.toInt()) 0xFF9A4155.toInt() else p.color), CircleShape), contentAlignment = Alignment.Center) {
   Text(p.name.take(1).uppercase(), style = TextStyle(fontFamily = InterDisplay, fontWeight = FontWeight.SemiBold, fontSize = (size.value * 0.42f).sp), color = Color.White)
 }
 
@@ -139,7 +140,7 @@ fun ProfilesSettings(store: Store) {
             }
           })
           if (p.id != store.profileId) ZButton("Switch", { switchTo(ctx as? Activity, store, p.id) })
-          if (p.id != "main" && p.id != store.profileId) ZButton("Remove", { store.deleteProfile(p.id); profiles = store.profiles; toast(ctx, "Removed ${p.name}") })
+          if (p.id != "main" && p.id != store.profileId) ConfirmButton("Remove", { store.deleteProfile(p.id); profiles = store.profiles; toast(ctx, "Removed ${p.name}") })
         }
       }
     }

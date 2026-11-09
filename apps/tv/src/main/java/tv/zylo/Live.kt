@@ -245,7 +245,7 @@ fun LivePage(store: Store, s: LiveState, nav: Nav, restore: Boolean) {
       if (saved == null || System.currentTimeMillis() - saved.first > 86_400_000L || saved.third.isEmpty()) {
         runCatching { withContext(Dispatchers.IO) { ChannelCache.fetch(x) } }
           .onSuccess { (cats, chans) -> s.categories = cats; s.all = chans; s.error = null }
-          .onFailure { if (s.all.isEmpty()) s.error = "Couldn't load your channels: ${it.message}" }
+          .onFailure { if (s.all.isEmpty()) s.error = "Couldn't load your channels. " + plainError(it, "your Live TV provider") }
       }
       s.loading = false
     }

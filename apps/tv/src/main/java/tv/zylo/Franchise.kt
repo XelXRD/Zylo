@@ -160,12 +160,9 @@ fun FranchisesPage(store: Store, nav: Nav) {
             if (fr.name.startsWith("Find another")) ask(ctx, "Which franchise?", "") { q -> if (q.isNotBlank()) chosen = Franchise(q.trim(), "🔎", "", collections = listOf(q.trim()), searches = listOf("tv:${q.trim()}")) }
             else chosen = fr
           }, Modifier.then(if (i == 0) Modifier.focusRequester(first) else Modifier).height(120.dp), container = Z.Card) {
-            Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
-              Text(fr.emoji, style = MaterialTheme.typography.headlineSmall)
-              Column {
-                Text(fr.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(fr.line, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-              }
+            Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.Bottom) {
+              Text(fr.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              Text(fr.line, Modifier.padding(top = 2.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
             }
           }
         }
@@ -186,7 +183,7 @@ private fun JourneyPage(store: Store, f: Franchise, nav: Nav) {
   RestoreFocus(focus, list?.isNotEmpty() == true)
   Column(Modifier.fillMaxSize().padding(top = 32.dp)) {
     Column(Modifier.padding(horizontal = Z.Pad)) {
-      Text("${f.emoji}  ${f.name}", style = MaterialTheme.typography.displaySmall)
+      Text(f.name, style = MaterialTheme.typography.displaySmall)
       val seen = list?.count { seenBefore(store, it.item) } ?: 0
       MetaLine(listOfNotNull(list?.let { "${it.size} films and series" }, list?.let { "You've seen $seen" },
         list?.count { it.date.isEmpty() || it.date > today }?.takeIf { it > 0 }?.let { "$it coming" }), Modifier.padding(top = 4.dp))
@@ -283,7 +280,7 @@ fun ChallengesPage(store: Store, nav: Nav) {
           val done = list?.count { seenBefore(store, it) } ?: 0
           ZSurface({ open = ch }, Modifier.then(if (i == 0) Modifier.focusRequester(first) else Modifier).height(150.dp), container = Z.Card) {
             Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
-              Row { Text(ch.emoji, style = MaterialTheme.typography.headlineSmall); Spacer(Modifier.weight(1f)); if (list != null && done == list.size) Text("🏆", style = MaterialTheme.typography.headlineSmall) }
+              Row { Spacer(Modifier.weight(1f)); if (list != null && list.isNotEmpty() && done == list.size) StatusChip("Complete", Z.Success) }
               Column {
                 Text(ch.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
                 if (list == null) Text(ch.line, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
@@ -306,7 +303,7 @@ fun ChallengesPage(store: Store, nav: Nav) {
     val done = l?.count { seenBefore(store, it) } ?: 0
     Column(Modifier.fillMaxSize().padding(top = 32.dp)) {
       Column(Modifier.padding(horizontal = Z.Pad)) {
-        Text("${c.emoji}  ${c.name}", style = MaterialTheme.typography.displaySmall)
+        Text(c.name, style = MaterialTheme.typography.displaySmall)
         if (l != null && l.isNotEmpty()) {
           Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
             ProgressBar(done.toFloat() / l.size, Modifier.width(320.dp))

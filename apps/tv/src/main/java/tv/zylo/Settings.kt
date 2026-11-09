@@ -13,6 +13,7 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Check
 import androidx.compose.runtime.*
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
@@ -93,14 +94,21 @@ fun SetupScreen(store: Store, done: () -> Unit) {
   var panel by remember { mutableStateOf<(@Composable () -> Unit)?>(null) }
   val steps = listOf("Your TMDB key", "Accounts", "Debrid", "Addons", "Live TV")
   val next = remember { FocusRequester() }
-  LaunchedEffect(step) { delay(120); runCatching { next.requestFocus() } }
+  val connect = remember { FocusRequester() }
+  var hasKey by remember { mutableStateOf(store.tmdb.isNotBlank()) }
+  // Without a TMDB key the only useful move is Connect, so focus starts there; once a key is saved, on Next.
+  LaunchedEffect(step, hasKey) { delay(120); runCatching { if (step == 0 && !hasKey) connect.requestFocus() else next.requestFocus() } }
   androidx.activity.compose.BackHandler(step > 0 && panel == null) { step-- }
   Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad, vertical = 32.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
       Logo(28.dp)
       Spacer(Modifier.width(24.dp))
+      // Progress, not tabs: done steps carry a tick, the current one is bright, the rest wait.
       steps.forEachIndexed { i, name ->
-        Text("${i + 1}. $name", Modifier.padding(end = 18.dp), style = MaterialTheme.typography.labelLarge, color = if (i == step) Z.Text else Z.Muted)
+        Row(Modifier.padding(end = 18.dp), verticalAlignment = Alignment.CenterVertically) {
+          if (i < step) { Glyph(androidx.compose.material.icons.Icons.Filled.Check, 14.dp, Z.Success); Spacer(Modifier.width(5.dp)) }
+          Text(if (i < step) name else "${i + 1}. $name", style = MaterialTheme.typography.labelLarge, color = when { i == step -> Z.Text; i < step -> Z.Text2; else -> Z.Muted })
+        }
       }
     }
     Box(Modifier.weight(1f).fillMaxWidth().padding(top = 24.dp)) {
@@ -108,9 +116,10 @@ fun SetupScreen(store: Store, done: () -> Unit) {
       when (step) {
         0 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
           Header("Welcome to Zylo", "Start with a TMDB key: it's free and gives Zylo its film and TV details and artwork. Sign up at themoviedb.org, then go to Settings > API and copy the 32-character API key. The Google TV app on your phone works as a keyboard.")
-          ServiceCard(store, "tmdb", "TMDB", "Film and TV details, artwork and trailers. Required.", "TM", { store.tmdb }, { store.tmdb = it })
+          ServiceCard(store, "tmdb", "TMDB", "Film and TV details, artwork and trailers. Required.", "TM", { store.tmdb }, { store.tmdb = it },
+            connect = Modifier.focusRequester(connect), saved = { hasKey = store.tmdb.isNotBlank() })
         }
-        1 -> Column(verticalArrangement = Arrangement.spacedBy(12.dp)) {
+        1 -> Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
           Header("Accounts", "Optional. Trakt keeps your watchlist, history and progress in step; AniList or MyAnimeList track anime.")
           TraktCard(store) { id -> panel = { TraktConnect(store, id) { panel = null } } }
           Anime.NAMES.forEach { (t, name) -> AnimeCard(store, t, name) { url -> panel = { PasteConnect(store, t, name, url) { panel = null } } } }
@@ -120,16 +129,16 @@ fun SetupScreen(store: Store, done: () -> Unit) {
         else -> LiveTvSettings(store)
       }
     }
-    if (panel == null) Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+    if (panel == null) Row(Modifier.padding(top = 16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
       if (step > 0) ZButton("Back", { step-- })
       val last = step == steps.lastIndex
-      ZButton(if (last) "Finish" else if (step == 0) "Next" else "Next (or skip)", {
+      ZButton(if (last) "Finish" else "Next", {
         when {
           step == 0 && store.tmdb.isBlank() -> toast(ctx, "Add your TMDB key first: Zylo needs it for everything else.")
           last -> done()
           else -> step++
         }
-      }, Modifier.focusRequester(next), primary = true)
+      }, Modifier.focusRequester(next), primary = step > 0 || hasKey)
     }
   }
 }
@@ -157,7 +166,7 @@ fun SettingsGate(store: Store, nav: Nav, content: @Composable () -> Unit) {
 @Composable
 private fun Header(title: String, text: String) = Column(Modifier.padding(bottom = 8.dp)) {
   Text(title, style = MaterialTheme.typography.displaySmall)
-  Text(text, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
+  Text(text, Modifier.padding(top = 6.dp).widthIn(max = 600.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2)
 }
 
 @Composable
@@ -171,18 +180,18 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     store.maxQuality = cap
   }
   var lang by remember { mutableStateOf(store.subLang) }
-  Choice("Subtitles", "Turned on automatically in this language (each profile has its own). You can always pick others in the player.",
-    if (lang.isEmpty()) "Off" else languageName(lang)) {
-    lang = SUB_LANGS[(SUB_LANGS.indexOf(lang) + 1) % SUB_LANGS.size]
-    store.subLang = lang
+  ListChoice("Subtitles", "Turned on automatically in this language (each profile has its own). You can always pick others in the player.",
+    SUB_LANGS.map { it to (if (it.isEmpty()) "Off" else languageName(it)) }, lang) {
+    lang = it
+    store.subLang = it
   }
   var audio by remember { mutableStateOf(store.str("audiolang")) }
-  Choice("Audio language", "Played in this language whenever the file has it (each profile has its own).", when (audio) {
-    "" -> "As the TV (${languageName(java.util.Locale.getDefault().language.ifEmpty { "en" })})"; "file" -> "The file's default"; else -> languageName(audio)
-  }) {
-    val all = listOf("") + SUB_LANGS.drop(1) + "file"
-    audio = all[(all.indexOf(audio) + 1) % all.size]
-    store.put("audiolang", audio)
+  ListChoice("Audio language", "Played in this language whenever the file has it (each profile has its own).",
+    (listOf("") + SUB_LANGS.drop(1) + "file").map { it to when (it) {
+      "" -> "As the TV (${languageName(java.util.Locale.getDefault().language.ifEmpty { "en" })})"; "file" -> "The file's default"; else -> languageName(it)
+    } }, audio) {
+    audio = it
+    store.put("audiolang", it)
   }
   var dubs by remember { mutableStateOf(store.animeDubs) }
   Choice("Anime audio", "Dubbed: English-dubbed and dual-audio releases first, in your audio language. Original: Japanese audio with subtitles.", if (dubs) "Prefer dubs" else "Original + subtitles") {
@@ -214,6 +223,43 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
 
 private val SUB_LANGS = listOf("", "en", "es", "fr", "de", "it", "pt", "nl", "pl", "sv", "da", "no", "fi", "ja", "ko", "zh", "ar", "hi", "tr", "ru")
 
+/**
+ * A setting with many values (languages): OK opens the whole list, with the current one focused, instead of stepping
+ * through twenty values one press at a time.
+ */
+@Composable
+private fun ListChoice(title: String, text: String, options: List<Pair<String, String>>, selected: String, pick: (String) -> Unit) {
+  var open by remember { mutableStateOf(false) }
+  val label = options.firstOrNull { it.first == selected }?.second ?: options.first().second
+  ZSurface({ open = true }, Modifier.fillMaxWidth(0.8f), container = Z.Card) {
+    Row(Modifier.padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+      Column(Modifier.weight(1f)) {
+        Text(title, style = MaterialTheme.typography.titleMedium)
+        Text(text, style = MaterialTheme.typography.bodySmall, color = LocalContentColor.current.copy(alpha = 0.75f))
+      }
+      Spacer(Modifier.width(16.dp))
+      Text(label, style = MaterialTheme.typography.labelLarge)
+    }
+  }
+  if (open) androidx.compose.ui.window.Dialog(onDismissRequest = { open = false }) {
+    val current = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(80); runCatching { current.requestFocus() } }
+    Column(Modifier.width(420.dp).heightIn(max = 460.dp).background(Z.Surface, Z.Large).padding(vertical = 20.dp)) {
+      Text(title, Modifier.padding(horizontal = 24.dp), style = MaterialTheme.typography.headlineSmall, color = Z.Text)
+      LazyColumn(Modifier.padding(top = 12.dp), contentPadding = PaddingValues(horizontal = 16.dp, vertical = 4.dp), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        items(options, key = { it.first.ifEmpty { "_" } }) { (key, name) ->
+          ZSurface({ pick(key); open = false }, Modifier.fillMaxWidth().then(if (key == selected) Modifier.focusRequester(current) else Modifier), selected = key == selected) {
+            Row(Modifier.padding(horizontal = 14.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+              Text(name, Modifier.weight(1f), style = MaterialTheme.typography.bodyLarge)
+              if (key == selected) Glyph(androidx.compose.material.icons.Icons.Filled.Check, 18.dp)
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
 /** A setting with a few values: OK steps to the next one. */
 @Composable
 private fun Choice(title: String, text: String, value: String, next: () -> Unit) = ZSurface(next, Modifier.fillMaxWidth(0.8f), container = Z.Card) {
@@ -239,7 +285,10 @@ private fun Toggle(title: String, text: String, on: Boolean, flip: () -> Unit) =
 }
 
 @Composable
-private fun ServiceCard(store: Store, id: String, name: String, text: String, tile: String, key: () -> String, setKey: (String) -> Unit) {
+private fun ServiceCard(
+  store: Store, id: String, name: String, text: String, tile: String, key: () -> String, setKey: (String) -> Unit,
+  connect: Modifier = Modifier, saved: () -> Unit = {},
+) {
   val ctx = LocalContext.current
   val scope = rememberCoroutineScope()
   var tick by remember { mutableIntStateOf(0) }
@@ -249,7 +298,7 @@ private fun ServiceCard(store: Store, id: String, name: String, text: String, ti
   fun test(k: String) = scope.launch {
     checking = true
     val r = withContext(Dispatchers.IO) { runCatching { testService(id, k) } }
-    store.setStatus(id, if (r.isSuccess) "ok" else "fail:${r.exceptionOrNull()?.message ?: "it didn't work."}")
+    store.setStatus(id, if (r.isSuccess) "ok" else "fail:" + plainError(r.exceptionOrNull(), name))
     checking = false
     tick++
   }
@@ -263,34 +312,47 @@ private fun ServiceCard(store: Store, id: String, name: String, text: String, ti
   }
   AccountRow(tile, name, failure ?: text, failure != null, label, color) {
       ZButton(if (current.isEmpty()) "Connect" else "Change Key", {
-        ask(ctx, "$name API key", current) {
+        ask(ctx, "$name API key", current, secret = true, hint = KEY_HINTS[id].orEmpty(), phone = "Paste your $name API key. It goes straight to the TV.",
+          check = { k -> if (id == "tmdb" && k.isNotEmpty() && k.length != 32) "TMDB API keys are 32 characters; this one is ${k.length}." else null }) {
           setKey(it)
           store.setStatus(id, "")
           tick++
+          saved()
           if (it.isNotBlank()) test(it.trim())
         }
-      }, primary = current.isEmpty())
+      }, connect, primary = current.isEmpty() && id == "tmdb")
       if (current.isNotEmpty()) {
         ZButton("Test", { test(current) })
-        ZButton("Disconnect", { setKey(""); store.setStatus(id, ""); tick++ })
+        ConfirmButton("Disconnect", { setKey(""); store.setStatus(id, ""); tick++ })
       }
   }
 }
 
+/** Where each key comes from, under the dialog's title. */
+private val KEY_HINTS = mapOf(
+  "tmdb" to "32 characters, from themoviedb.org › Settings › API.",
+  "fanart" to "Your personal API key, from fanart.tv › your profile.",
+  "torbox" to "From torbox.app › Settings.",
+  "realdebrid" to "From real-debrid.com/apitoken.",
+  "premiumize" to "From premiumize.me › Account.",
+)
+
 /** The shared look of every integration: icon tile, name, description, honest status, actions. */
 @Composable
+// The description (or what went wrong) runs the full width under the name, so the buttons never squeeze it to a few words.
 private fun AccountRow(tile: String, name: String, text: String, warn: Boolean, status: String, color: androidx.compose.ui.graphics.Color, actions: @Composable RowScope.() -> Unit) =
-  Row(Modifier.fillMaxWidth().background(Z.Card, Z.Medium).padding(16.dp), verticalAlignment = Alignment.CenterVertically) {
-    Tile(tile, 44.dp)
-    Spacer(Modifier.width(16.dp))
-    Column(Modifier.weight(1f)) {
-      Text(name, style = MaterialTheme.typography.titleMedium)
-      Text(text, style = MaterialTheme.typography.bodySmall, color = if (warn) Z.Warning else Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+  Column(Modifier.fillMaxWidth().background(Z.Card, Z.Medium).padding(16.dp)) {
+    Row(verticalAlignment = Alignment.CenterVertically) {
+      Tile(tile, 44.dp)
+      Spacer(Modifier.width(16.dp))
+      Text(name, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
+      Spacer(Modifier.width(12.dp))
+      StatusChip(status, color)
+      Spacer(Modifier.width(16.dp))
+      Row(horizontalArrangement = Arrangement.spacedBy(8.dp), content = actions)
     }
-    Spacer(Modifier.width(12.dp))
-    StatusChip(status, color)
-    Spacer(Modifier.width(16.dp))
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp), content = actions)
+    Text(text, Modifier.padding(start = 60.dp, top = 6.dp).widthIn(max = 640.dp), style = MaterialTheme.typography.bodySmall,
+      color = if (warn) Z.Warning else Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
   }
 
 // --- Integrations ------------------------------------------------------------------------------------
@@ -356,13 +418,13 @@ private fun TraktCard(store: Store, connect: (String) -> Unit) {
     }
   }
   AccountRow("TR", "Trakt", text, failure != null, label, color) {
-    if (!connected && clientId.isEmpty()) ZButton("Connect", { enterClientId() }, primary = true)
+    if (!connected && clientId.isEmpty()) ZButton("Connect", { enterClientId() }, primary = false)
     else if (!connected) {
       ZButton("Sign In", { store.setStatus("trakt", ""); tick++; connect(clientId) }, primary = true)
       ZButton("Change Client ID", { enterClientId() })
     } else {
       ZButton("Sync Now", { sync() })
-      ZButton("Disconnect", { Trakt.disconnect(store); store.setStatus("trakt", ""); tick++ })
+      ConfirmButton("Disconnect", { Trakt.disconnect(store); store.setStatus("trakt", ""); tick++ })
     }
   }
 }
@@ -382,8 +444,8 @@ private fun AnimeCard(store: Store, t: String, name: String, connect: (String) -
         store.put("${t}_client", id.trim())
         connect(if (t == "anilist") Anime.anilistUrl(id.trim()) else Anime.malUrl(store, id.trim()))
       }
-    }, primary = true)
-    else ZButton("Disconnect", { Anime.disconnect(store, t); tick++ })
+    }, primary = false)
+    else ConfirmButton("Disconnect", { Anime.disconnect(store, t); tick++ })
   }
 }
 
@@ -402,8 +464,8 @@ private fun MediaServers(store: Store, open: ((@Composable (close: () -> Unit) -
     Header("Media Servers", "Play films and episodes from your own server. They're listed first in Choose Source as Personal Library.")
     AccountRow("PX", "Plex", if (plex != null) "Connected to ${plex.name}." else "Sign in with a code at plex.tv/link; Zylo finds your server.",
       false, if (plex != null) "Connected" else "Not connected", if (plex != null) Z.Success else Z.Muted) {
-      if (plex == null) ZButton("Connect", { open { close -> PlexConnect(store) { close(); tick++ } } }, primary = true)
-      else ZButton("Disconnect", { Plex.disconnect(store); tick++ })
+      if (plex == null) ZButton("Connect", { open { close -> PlexConnect(store) { close(); tick++ } } }, primary = false)
+      else ConfirmButton("Disconnect", { Plex.disconnect(store); tick++ })
     }
     AccountRow("JF", "Jellyfin", message ?: if (jellyfin != null) "Connected to ${jellyfin.name}." else "Your server's address, username and password.",
       message != null, when { busy -> "Checking…"; jellyfin != null -> "Connected"; else -> "Not connected" }, when { busy -> Z.Info; jellyfin != null -> Z.Success; else -> Z.Muted }) {
@@ -416,15 +478,15 @@ private fun MediaServers(store: Store, open: ((@Composable (close: () -> Unit) -
               scope.launch {
                 busy = true
                 message = null
-                withContext(Dispatchers.IO) { runCatching { Jellyfin.connect(store, address, user, password) } }.onFailure { message = it.message }
+                withContext(Dispatchers.IO) { runCatching { Jellyfin.connect(store, address, user, password) } }.onFailure { message = plainError(it, "Jellyfin") }
                 busy = false
                 tick++
               }
             }
           }
         }
-      }, primary = true)
-      else ZButton("Disconnect", { Jellyfin.disconnect(store); message = null; tick++ })
+      }, primary = false)
+      else ConfirmButton("Disconnect", { Jellyfin.disconnect(store); message = null; tick++ })
     }
   }
 }
@@ -442,7 +504,7 @@ private fun LiveTvSettings(store: Store) {
   fun connect(server: String, user: String, pass: String) = scope.launch {
     busy = true
     message = null
-    withContext(Dispatchers.IO) { runCatching { Xtream.connect(store, server, user, pass) } }.onFailure { message = it.message }
+    withContext(Dispatchers.IO) { runCatching { Xtream.connect(store, server, user, pass) } }.onFailure { message = plainError(it, "the Live TV server") }
     busy = false
     tick++
   }
@@ -465,8 +527,8 @@ private fun LiveTvSettings(store: Store) {
           if (user != null && pass != null) connect(server, user, pass)
           else ask(ctx, "Username", "") { u -> ask(ctx, "Password", "", secret = true) { p -> connect(server, u, p) } }
         }
-      }, primary = true)
-      else ZButton("Disconnect", { Xtream.disconnect(store); message = null; tick++ })
+      }, primary = false)
+      else ConfirmButton("Disconnect", { Xtream.disconnect(store); message = null; tick++ })
     }
     Text("Live TV appears in the top bar. It isn't shown on kids profiles.", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
     if (x != null) {
@@ -508,7 +570,7 @@ private fun BetterGuide(store: Store) {
       if (busy || Epg.busy) return@ZButton
       busy = true; Epg.busy = true
       scope.launch {
-        status = withContext(Dispatchers.IO) { runCatching { Epg.refresh(store, Epg.sources(store), ChannelCache.load()?.third) }.getOrElse { "Couldn't update: ${it.message}" } }
+        status = withContext(Dispatchers.IO) { runCatching { Epg.refresh(store, Epg.sources(store), ChannelCache.load()?.third) }.getOrElse { "Couldn't update. " + plainError(it, "the guide") } }
         Epg.busy = false; busy = false
       }
     }, primary = true)
@@ -528,7 +590,7 @@ private fun PlexConnect(store: Store, close: () -> Unit) {
   LaunchedEffect(Unit) {
     delay(80); runCatching { cancel.requestFocus() }
     val cid = Library.deviceId(store)
-    val pin = withContext(Dispatchers.IO) { runCatching { Plex.pin(cid) } }.getOrElse { message = "Couldn't reach Plex: ${it.message}"; return@LaunchedEffect }
+    val pin = withContext(Dispatchers.IO) { runCatching { Plex.pin(cid) } }.getOrElse { message = plainError(it, "Plex"); return@LaunchedEffect }
     code = pin.code
     message = "Waiting for you to enter the code on plex.tv/link…"
     val end = System.currentTimeMillis() + 10 * 60_000
@@ -672,7 +734,7 @@ private fun PasteConnect(store: Store, t: String, name: String, url: String, clo
             message = "Checking…"
             withContext(Dispatchers.IO) { runCatching { if (t == "anilist") Anime.anilistConnect(store, text) else Anime.malConnect(store, text) } }
               .onSuccess { toast(ctx, "$name connected"); close() }
-              .onFailure { message = "That didn't work: ${it.message}" }
+              .onFailure { message = plainError(it, "the service") }
           }
         }
       }, Modifier.focusRequester(paste), primary = true)
@@ -746,7 +808,7 @@ private fun Addons(store: Store) {
           MetaLine(listOf("Torrents play through your debrid service"), color = Z.Muted)
         }
         Spacer(Modifier.width(16.dp))
-        ZButton("Remove", { store.syncler = store.syncler.filter { it.url != p.url }; packs = store.syncler })
+        ConfirmButton("Remove", { store.syncler = store.syncler.filter { it.url != p.url }; packs = store.syncler })
       }
     }
     if (addons.isEmpty() && packs.isEmpty()) Text("No addons yet.", Modifier.padding(top = 16.dp), color = Z.Text2)
@@ -763,7 +825,7 @@ private fun Addons(store: Store) {
           Spacer(Modifier.width(12.dp))
           StatusChip("Installed", Z.Success)
           Spacer(Modifier.width(16.dp))
-          ZButton("Remove", { store.addons = store.addons.filter { it.url != a.url }; addons = store.addons })
+          ConfirmButton("Remove", { store.addons = store.addons.filter { it.url != a.url }; addons = store.addons })
         }
       }
     }
@@ -791,15 +853,3 @@ private fun About(store: Store) = Column(Modifier.verticalScroll(rememberScrollS
   }
 }
 
-/** Native text dialog: the TV keyboard (and the Google TV phone app's keyboard) works best with a plain EditText. */
-fun ask(ctx: Context, title: String, current: String, secret: Boolean = false, pin: Boolean = false, done: (String) -> Unit) {
-  val input = EditText(ctx).apply {
-    setText(current); setSingleLine(); setSelectAllOnFocus(true)
-    if (secret) inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_PASSWORD
-    if (pin) { inputType = android.text.InputType.TYPE_CLASS_NUMBER or android.text.InputType.TYPE_NUMBER_VARIATION_PASSWORD; filters = arrayOf(android.text.InputFilter.LengthFilter(4)) }
-  }
-  AlertDialog.Builder(ctx, android.R.style.Theme_DeviceDefault_Dialog_Alert).setTitle(title).setView(input)
-    .setPositiveButton("Save") { _, _ -> done(input.text.toString()) }.setNegativeButton("Cancel", null).show()
-}
-
-fun toast(ctx: Context, text: String) = Toast.makeText(ctx, text, Toast.LENGTH_LONG).show()
