@@ -50,7 +50,7 @@ fun SettingsScreen(store: Store) {
     // Left from a page always lands on that page's own entry: landing on the nearest one switched pages under you.
     Column(Modifier.width(250.dp).fillMaxHeight().background(Z.Surface).padding(horizontal = 18.dp, vertical = 32.dp)
       .focusProperties { @Suppress("DEPRECATION") enter = { first } }.focusGroup()) {
-      Box(Modifier.padding(start = 12.dp, bottom = 28.dp)) { Logo(20.dp) }
+      Box(Modifier.padding(start = 12.dp, bottom = 28.dp)) { Logo(28.dp) }
       Text("Settings", Modifier.padding(start = 12.dp, bottom = 12.dp), style = MaterialTheme.typography.headlineSmall)
       SettingsPage.entries.forEach { p ->
         // Moving through the sidebar shows each page; Right goes into it.
@@ -97,7 +97,7 @@ fun SetupScreen(store: Store, done: () -> Unit) {
   androidx.activity.compose.BackHandler(step > 0 && panel == null) { step-- }
   Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad, vertical = 32.dp)) {
     Row(verticalAlignment = Alignment.CenterVertically) {
-      Logo(22.dp)
+      Logo(28.dp)
       Spacer(Modifier.width(24.dp))
       steps.forEachIndexed { i, name ->
         Text("${i + 1}. $name", Modifier.padding(end = 18.dp), style = MaterialTheme.typography.labelLarge, color = if (i == step) Z.Text else Z.Muted)

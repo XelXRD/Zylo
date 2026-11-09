@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Zylo mark, from Alex's logo artwork (zylo.svg). -->
+<vector xmlns:android="http://schemas.android.com/apk/res/android" xmlns:aapt="http://schemas.android.com/aapt"
+  android:width="194.22dp" android:height="129.48dp" android:viewportWidth="194.22" android:viewportHeight="129.48">
+  <group android:translateX="-156.69" android:translateY="-89.46">
+    <path android:pathData="M286.17,132.62l-86.32,86.32h-43.16c0-12.35,5.18-23.48,13.48-31.29.05-.1.12-.14.17-.17.24-.29.5-.55.77-.82l54.05-54.05h61.03Z">
+      <aapt:attr name="android:fillColor">
+        <gradient android:type="linear" android:startX="220.13" android:startY="133.55" android:endX="221.75" android:endY="186.23"><item android:offset="0" android:color="#470000"/><item android:offset="0.09" android:color="#630000"/><item android:offset="0.23" android:color="#8e0000"/><item android:offset="0.39" android:color="#b20101"/><item android:offset="0.54" android:color="#cd0101"/><item android:offset="0.69" android:color="#e10101"/><item android:offset="0.84" android:color="#ed0101"/><item android:offset="1" android:color="#f10202"/></gradient>
+      </aapt:attr>
+    </path>
+    <path android:pathData="M350.91,175.78c0,23.83-19.33,43.16-43.16,43.16h-107.9l43.16-43.16h107.9Z">
+      <aapt:attr name="android:fillColor">
+        <gradient android:type="linear" android:startX="242.99" android:startY="172.05" android:endX="317.24" android:endY="230.07"><item android:offset="0" android:color="#470000"/><item android:offset="0.09" android:color="#630000"/><item android:offset="0.23" android:color="#8e0000"/><item android:offset="0.39" android:color="#b20101"/><item android:offset="0.54" android:color="#cd0101"/><item android:offset="0.69" android:color="#e10101"/><item android:offset="0.84" android:color="#ed0101"/><item android:offset="1" android:color="#f10202"/></gradient>
+      </aapt:attr>
+    </path>
+    <path android:pathData="M330.84,89.46h-130.99c-23.83,0-43.16,19.33-43.16,43.16h129.48l-21.58,21.58,27.5.12c14.53.07,28.46-5.68,38.7-15.95l7.48-7.48c3.26-3.26,6.19-6.88,8.54-10.84,2.16-3.6,4.1-7.84,4.1-11.37v-19.23h-20.07Z">
+      <aapt:attr name="android:fillColor">
+        <gradient android:type="linear" android:startX="346.25" android:startY="132.19" android:endX="224.45" android:endY="104.32"><item android:offset="0" android:color="#470000"/><item android:offset="0.09" android:color="#630000"/><item android:offset="0.23" android:color="#8e0000"/><item android:offset="0.39" android:color="#b20101"/><item android:offset="0.54" android:color="#cd0101"/><item android:offset="0.69" android:color="#e10101"/><item android:offset="0.84" android:color="#ed0101"/><item android:offset="1" android:color="#f10202"/></gradient>
+      </aapt:attr>
+    </path>
+  </group>
+</vector>

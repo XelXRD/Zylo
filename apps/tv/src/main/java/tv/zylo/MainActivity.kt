@@ -245,7 +245,7 @@ fun TopNav(ui: UiState, nav: Nav) {
       .focusGroup(),
     verticalAlignment = Alignment.CenterVertically,
   ) {
-    Box(Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) { Logo(20.dp) } // not a button
+    Box(Modifier.padding(horizontal = 12.dp, vertical = 7.dp)) { Logo(28.dp) } // not a button
     Spacer(Modifier.width(20.dp))
     Section.entries.filter { it != Section.Live || ui.profile.kids == null }.forEach { s -> // no live channels on a kids profile
       val selected = ui.section == s

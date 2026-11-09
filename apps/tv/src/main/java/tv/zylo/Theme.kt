@@ -162,31 +162,23 @@ fun Modifier.bleed(by: Dp) = layout { m, c ->
 
 // --- Brand ----------------------------------------------------------------------------------
 
-private val LogoRed = Color(0xFFE3121E)
-private val LogoShade = Color(0xFF8E0B14)
 
 /**
  * The Zylo Z, redrawn as a vector from the concept image (the bitmap there is only ~75px wide).
  * ponytail: swap for the original artwork file when Alex has it.
  */
 @Composable
-fun ZMark(modifier: Modifier = Modifier) = Canvas(modifier.aspectRatio(1.45f)) {
-  fun poly(color: Color, vararg p: Float) = drawPath(Path().apply {
-    moveTo(p[0] * size.width, p[1] * size.height)
-    for (i in 2 until p.size step 2) lineTo(p[i] * size.width, p[i + 1] * size.height)
-    close()
-  }, color)
-  poly(LogoShade, 0.56f, 0.30f, 0.87f, 0.30f, 0.45f, 0.70f, 0.14f, 0.70f) // the folded diagonal
-  poly(LogoRed, 0.13f, 0f, 1f, 0f, 0.87f, 0.30f, 0f, 0.30f)
-  poly(LogoRed, 0.14f, 0.70f, 1f, 0.70f, 0.87f, 1f, 0f, 1f)
-}
+fun ZMark(modifier: Modifier = Modifier) =
+  Image(androidx.compose.ui.res.painterResource(R.drawable.zylo_mark), "Zylo", modifier.aspectRatio(1.5f)) // Alex's mark (res/drawable/zylo_mark.xml)
 
 @Composable
 fun Logo(height: Dp = 22.dp, wordmark: Boolean = true, color: Color = Z.Text) = Row(verticalAlignment = Alignment.CenterVertically) {
   ZMark(Modifier.height(height))
   if (wordmark) {
-    Spacer(Modifier.width(height * 0.4f))
-    Text("Zylo", style = TextStyle(fontFamily = Inter, fontWeight = FontWeight.SemiBold, fontSize = (height.value * 0.95f).sp), color = color)
+    // Alex's outlined wordmark, in the artwork's proportions: 0.53 × the mark's height apart, 0.38 × as tall.
+    Spacer(Modifier.width(height * 0.53f))
+    Image(androidx.compose.ui.res.painterResource(R.drawable.zylo_wordmark), null, Modifier.height(height * 0.384f).aspectRatio(340.53f / 49.75f),
+      colorFilter = ColorFilter.tint(color))
   }
 }
 

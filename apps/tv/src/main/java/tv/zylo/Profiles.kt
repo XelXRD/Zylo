@@ -69,7 +69,7 @@ fun ProfilesPage(store: Store, nav: Nav) {
   // Back can't skip the PIN when Zylo opens on a profile that has one.
   androidx.activity.compose.BackHandler(!Pins.unlocked && Pins.of(store, store.profileId).isNotEmpty()) {}
   Column(Modifier.fillMaxSize(), horizontalAlignment = Alignment.CenterHorizontally, verticalArrangement = Arrangement.Center) {
-    Logo(22.dp)
+    Logo(30.dp)
     Text("Who's watching?", Modifier.padding(top = 28.dp, bottom = 36.dp), style = MaterialTheme.typography.displaySmall)
     Row(horizontalArrangement = Arrangement.spacedBy(28.dp)) {
       profiles.forEach { p ->
