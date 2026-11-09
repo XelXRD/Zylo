@@ -1,6 +1,35 @@
+<p align="center"><img src="assets/zylo-banner.png" alt="Zylo" width="640"></p>
+
 # Zylo
 
 Media hub for Android TV: films, series, anime and live TV. Built for the NVIDIA Shield and a D-pad remote; no server needed.
+
+## Connecting your services
+
+Everything is set up on the TV, under **Settings** (the gear in the top bar). A new install walks you through the main ones. Typing is easiest with the Google TV app's keyboard on your phone, and anything long (addon links) can be sent from your phone instead.
+
+| Service | Needed? | Where in Zylo | Where to get it |
+| --- | --- | --- | --- |
+| **TMDB** | Yes: all film and TV details, artwork and trailers | Settings › Integrations › TMDB | Free account at [themoviedb.org](https://www.themoviedb.org/signup) › Settings › API › create a key, then copy the 32-character **API Key** |
+| **fanart.tv** | Optional: title logos and clean artwork | Settings › Integrations › fanart.tv | Free account at [fanart.tv](https://fanart.tv) › your profile › API key (personal key) |
+| **Trakt** | Optional: history, progress, watchlist, lists, ratings, Calendar, Wrapped | Settings › Integrations › Trakt | Create an app at [trakt.tv › Settings › Your API Apps](https://trakt.tv/oauth/applications) (Redirect URI: `urn:ietf:wg:oauth:2.0:oob`), paste its **Client ID** (not the secret), then sign in with the code shown at [trakt.tv/activate](https://trakt.tv/activate). Each profile signs in separately. |
+| **AniList** | Optional: anime progress and lists | Settings › Integrations › AniList | Create a client at [anilist.co › Settings › Developer](https://anilist.co/settings/developer) with redirect URL `https://anilist.co/api/v2/oauth/pin`, paste the **Client ID**, scan the QR code on your phone and paste back the token it shows |
+| **MyAnimeList** | Optional: anime progress and lists | Settings › Integrations › MyAnimeList | Create an app at [myanimelist.net/apiconfig](https://myanimelist.net/apiconfig) (type: *other*, any redirect URL such as `http://localhost`), paste the **Client ID**, scan the QR code and paste back the address the page lands on |
+| **TorBox** | One debrid service to play torrent sources | Settings › Debrid Services | API key from [torbox.app/settings](https://torbox.app/settings) |
+| **Real-Debrid** | As above | Settings › Debrid Services | API token from [real-debrid.com/apitoken](https://real-debrid.com/apitoken) |
+| **Premiumize** | As above | Settings › Debrid Services | API key from [premiumize.me/account](https://www.premiumize.me/account) |
+| **Stremio addons** | For sources and subtitles | Settings › Addons › Add from Phone (scan the QR code and paste) or type the link | Configure the addon on its own website (Torrentio, Comet, MediaFusion, OpenSubtitles…), then copy its install link (the one ending in `manifest.json`) |
+| **Syncler packages** | Optional, more sources | Settings › Addons, same as above | A Syncler Express package or vendor link |
+| **Plex** | Optional: your own library as a source | Settings › Media Servers › Plex | Sign in with the code shown at [plex.tv/link](https://plex.tv/link); your server is found automatically |
+| **Jellyfin** | Optional: your own library as a source | Settings › Media Servers › Jellyfin | Your server's address, username and password |
+| **Live TV (Xtream Codes)** | Optional | Settings › Live TV | The server address, username and password from your provider (or paste their M3U link and Zylo reads them from it) |
+| **Better TV guide** | Optional | Settings › Live TV › Better Guide | Nothing to sign up for: choose your regions from the free [epgshare01](https://epgshare01.online) guides |
+
+Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSkip), Time Machine's music and news (Wikipedia), updates (this repository).
+
+**Profiles and PINs:** Settings › Profiles. Each profile has its own history, lists and sign-ins; set a kids profile's rating limit, and give grown-up profiles a 4-digit PIN.
+
+**Your keys stay on the TV.** Zylo has no server: keys and sign-ins are stored in the app and only sent to the service they belong to.
 
 ## Features
 

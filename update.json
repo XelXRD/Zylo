@@ -1,5 +1,5 @@
 {
-  "version": "0.26.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.26.0.apk",
-  "notes": "What's new in 0.26.0\n\n• Up and Down between rows on Home and Discover keep your place: from the 5th title, you land on the 5th title of the next row.\n• Discover has a new Explore row:\n  – Rabbit Hole, now a web: jump between films, directors, actors, composers, genres, franchises and themes.\n  – Deep Cuts: case files of things almost nobody has seen. A new dig every visit.\n  – Franchise Journeys: Marvel, Star Wars, Alien, Predator, DC, Middle-earth, Dragon Ball and more, in recommended, story or release order, with what's coming next.\n  – Double Feature: two films that belong together, with a name and the reason why.\n  – Moodboard: choose a feeling (Rainy Sunday, Late-Night Paranoia, Existential Sci-Fi…), not a genre.\n  – Watch Challenges: curated lists that tick themselves off as you watch (Trakt included).\n  – Time Machine: pick any year from 1950 for its biggest films, TV, anime, faces, music and hidden gems.\n  – Blind Date: a film picked for you with only clues. Commit, then it's revealed.\n• Movies, Series and Anime: Pick for Me is now Help Me Choose, with Pick for Me and the new This or That game, which learns what you're drawn to."
+  "version": "0.26.1",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.26.1.apk",
+  "notes": "What's new in 0.26.1\n\n• The new Zylo logo: in the top bar, Settings, profiles and setup, and on the Shield's home screen (app icon and banner)."
 }
