@@ -27,6 +27,9 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.ui.graphics.graphicsLayer
 import androidx.tv.material3.LocalContentColor
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
@@ -387,18 +390,36 @@ fun ThisOrThatPage(store: Store, type: String, nav: Nav) {
   }
   val g = game ?: return Loading(if (tick == -1) "Couldn't load titles to choose between." else null)
   val left = remember { FocusRequester() }
+  // A pick plays out before the next round: the one you passed on drains to grey and falls away.
+  var loser by remember { mutableStateOf<Int?>(null) }
+  var challengerWon by remember { mutableStateOf(false) }
+  val reduce = LocalReduceMotion.current
+  LaunchedEffect(loser) {
+    val l = loser ?: return@LaunchedEffect
+    if (!reduce) delay(650)
+    challengerWon = l == 0
+    g.pick(keepChamp = l == 1)
+    loser = null
+    tick++
+  }
   LaunchedEffect(tick) { delay(80); runCatching { left.requestFocus() } }
   key(tick) {
     if (g.done) {
       val w = g.champ.first
       val drawn = g.drawnTo(genres)
+      // The winner's backdrop comes up out of grey, then its name arrives.
+      val light = rememberLight(true, rise = true, wait = 150, length = 1600)
+      val words = remember { Animatable(if (reduce) 1f else 0f) }
+      LaunchedEffect(Unit) { if (!reduce) { delay(500); words.animateTo(1f, tween(700, easing = Z.EaseOut)) } }
       Box(Modifier.fillMaxSize()) {
-        AsyncImage(img(w.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        AsyncImage(img(w.backdrop, "w1280"), null, Modifier.fillMaxSize().graphicsLayer { val z = 1.06f - 0.06f * light; scaleX = z; scaleY = z },
+          contentScale = ContentScale.Crop, colorFilter = lightFilter(light))
         Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(listOf(Z.Bg, Z.Bg.copy(alpha = 0.55f), Color.Transparent))))
-        Column(Modifier.align(Alignment.CenterStart).padding(start = Z.Pad * 2).fillMaxWidth(0.5f)) {
+        Column(Modifier.align(Alignment.CenterStart).padding(start = Z.Pad * 2).fillMaxWidth(0.5f)
+          .graphicsLayer { alpha = words.value; translationY = (1 - words.value) * 28.dp.toPx() }) {
           Text("YOUR WINNER", style = MaterialTheme.typography.labelLarge, color = Z.Red)
           Text(w.title, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.displayMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-          MetaLine(listOf(w.year, "★ %.1f".format(w.rating)), Modifier.padding(top = 6.dp))
+          MetaLine(listOf(w.year, "★ %.1f".format(w.rating), "Still standing after ${g.round - 1} rounds"), Modifier.padding(top = 6.dp))
           if (drawn.isNotEmpty()) Text("You kept choosing ${drawn.joinToString(", ")}.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
           Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ZButton("Play", { nav.play(w) }, Modifier.focusRequester(left), primary = true)
@@ -413,14 +434,35 @@ fun ThisOrThatPage(store: Store, type: String, nav: Nav) {
         Row(verticalAlignment = Alignment.CenterVertically) {
           Text("THIS OR THAT", style = MaterialTheme.typography.labelLarge, color = Z.Red)
           Spacer(Modifier.weight(1f))
-          Text("Round ${g.round} of 8", style = MaterialTheme.typography.labelLarge, color = Z.Text2)
+          Text("Round ${g.round} of 8", Modifier.padding(end = 12.dp), style = MaterialTheme.typography.labelLarge, color = Z.Text2)
+          // One segment per round: played rounds in red, this one white.
+          Row(horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+            repeat(8) { n -> Box(Modifier.width(22.dp).height(4.dp).background(when { n < g.round - 1 -> Z.Red; n == g.round - 1 -> Z.Text; else -> Z.Text.copy(alpha = 0.22f) }, Z.Small)) }
+          }
         }
         Text("Which would you rather watch?", Modifier.padding(top = 6.dp, bottom = 18.dp), style = MaterialTheme.typography.headlineSmall)
         Row(Modifier.weight(1f), horizontalArrangement = Arrangement.spacedBy(24.dp)) {
           listOf(g.champ.first to true, c.first to false).forEachIndexed { i, (item, champ) ->
-            ZCard({ g.pick(champ); tick++ }, Modifier.weight(1f).fillMaxHeight().then(if (i == 0) Modifier.focusRequester(left) else Modifier)) {
+            // Arriving: the new challenger slides in from the right; a challenger that just won crosses to the left.
+            val enter = remember { Animatable(if (reduce || (i == 0 && !challengerWon && g.round > 1)) 1f else 0f) }
+            LaunchedEffect(Unit) { enter.animateTo(1f, tween(if (reduce) 0 else 520, easing = Z.EaseOut)) }
+            val fall = remember { Animatable(0f) }
+            val out = loser == i
+            LaunchedEffect(out) { if (out) fall.animateTo(1f, tween(if (reduce) 0 else 620, easing = Z.EaseInOut)) }
+            val light = 1f - (fall.value * 1.8f).coerceAtMost(1f)
+            ZCard({ if (loser == null) loser = 1 - i }, Modifier.weight(1f).fillMaxHeight()
+              .then(if (i == 0) Modifier.focusRequester(left) else Modifier)
+              .graphicsLayer {
+                val e = enter.value; val f = fall.value
+                val from = if (i == 1) 160.dp.toPx() else if (challengerWon) size.width + 24.dp.toPx() else 0f
+                translationX = (1 - e) * from
+                alpha = (if (i == 1) e else 1f) * (1f - ((f - 0.45f) / 0.55f).coerceIn(0f, 1f))
+                translationY = f * f * 90.dp.toPx()
+                rotationZ = f * if (i == 0) -3f else 3f
+                val s = 1f - 0.06f * f; scaleX = s; scaleY = s
+              }) {
               Box(Modifier.fillMaxSize()) {
-                AsyncImage(img(item.backdrop, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+                AsyncImage(img(item.backdrop, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, colorFilter = lightFilter(light))
                 Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.92f)))).padding(18.dp)) {
                   Text(item.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
                   MetaLine(listOf(item.year, "★ %.1f".format(item.rating)))

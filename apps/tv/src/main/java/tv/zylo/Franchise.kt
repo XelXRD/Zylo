@@ -15,6 +15,9 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
+import androidx.compose.ui.focus.onFocusChanged
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -267,26 +270,40 @@ fun ChallengesPage(store: Store, nav: Nav) {
   var open by remember { mutableStateOf<Challenge?>(null) }
   val c = open
   androidx.activity.compose.BackHandler(c != null) { open = null }
+  // Every challenge's list, so each tile can show its posters. Lists are fixed once built (see Challenges.items).
+  var lists by remember { mutableStateOf(CHALLENGES.associate { it.id to Challenges.cached(store, it) }) }
+  LaunchedEffect(Unit) {
+    CHALLENGES.filter { lists[it.id] == null }.forEach { ch ->
+      val got = withContext(Dispatchers.IO) { runCatching { Challenges.items(store, ch) }.getOrNull() }?.takeIf { it.isNotEmpty() }
+      if (got != null) lists = lists + (ch.id to got)
+    }
+  }
   if (c == null) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
+    val seen = remember(lists) { lists.mapValues { (_, l) -> l.orEmpty().filter { seenBefore(store, it) }.map { it.key }.toSet() } }
     Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad, vertical = 36.dp)) {
       Text("Watch Challenges", style = MaterialTheme.typography.displaySmall)
-      Text("Curated lists to complete. Anything you watch (here or on Trakt) ticks itself off.", Modifier.padding(top = 6.dp, bottom = 20.dp),
-        style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
-      LazyVerticalGrid(GridCells.Fixed(4), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
+      val finished = CHALLENGES.count { ch -> lists[ch.id]?.let { it.isNotEmpty() && seen[ch.id]?.size == it.size } == true }
+      Text(
+        "Every poster starts in grey. Watch it, here or on Trakt, and it lights up." + if (finished > 0) "  $finished of ${CHALLENGES.size} complete." else "",
+        Modifier.padding(top = 6.dp, bottom = 20.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2,
+      )
+      LazyVerticalGrid(GridCells.Fixed(4), contentPadding = PaddingValues(bottom = 36.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
         itemsIndexed(CHALLENGES) { i, ch ->
-          val list = remember { Challenges.cached(store, ch) }
-          val done = list?.count { seenBefore(store, it) } ?: 0
-          ZSurface({ open = ch }, Modifier.then(if (i == 0) Modifier.focusRequester(first) else Modifier).height(150.dp), container = Z.Card) {
-            Column(Modifier.fillMaxSize().padding(14.dp), verticalArrangement = Arrangement.SpaceBetween) {
-              Row { Spacer(Modifier.weight(1f)); if (list != null && list.isNotEmpty() && done == list.size) StatusChip("Complete", Z.Success) }
-              Column {
+          val list = lists[ch.id]
+          val lit = seen[ch.id].orEmpty()
+          val fresh = remember(list) { list?.let { Lights.fresh(store, "tile:${ch.id}", lit) }.orEmpty() }
+          ZSurface({ open = ch }, Modifier.then(if (i == 0) Modifier.focusRequester(first) else Modifier).height(200.dp), container = Z.Card) {
+            Column(Modifier.fillMaxSize()) {
+              if (list == null) Box(Modifier.fillMaxWidth().height(116.dp).background(Z.Elevated))
+              else Mosaic(list, lit, fresh, Modifier.fillMaxWidth().height(116.dp))
+              Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.SpaceBetween) {
                 Text(ch.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                if (list == null) Text(ch.line, style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                else {
-                  ProgressBar(done.toFloat() / list.size.coerceAtLeast(1), Modifier.padding(top = 6.dp))
-                  Text("$done of ${list.size}", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.labelMedium, color = Z.Text2)
+                when {
+                  list == null -> Text(ch.line, style = MaterialTheme.typography.bodySmall, color = Z.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                  lit.size == list.size -> StatusChip("Complete", Z.Success)
+                  else -> Text("${lit.size} of ${list.size} lit", style = MaterialTheme.typography.labelMedium, color = Z.Text2)
                 }
               }
             }
@@ -295,38 +312,65 @@ fun ChallengesPage(store: Store, nav: Nav) {
       }
     }
   } else {
-    var list by remember(c) { mutableStateOf<List<Item>?>(null) }
-    LaunchedEffect(c) { list = withContext(Dispatchers.IO) { runCatching { Challenges.items(store, c) }.getOrDefault(emptyList()) } }
+    val l = lists[c.id]
+    LaunchedEffect(c) { if (l == null) lists = lists + (c.id to withContext(Dispatchers.IO) { runCatching { Challenges.items(store, c) }.getOrDefault(emptyList()) }) }
     val focus = remember(c) { FocusMemory() }
-    RestoreFocus(focus, list?.isNotEmpty() == true)
-    val l = list
-    val done = l?.count { seenBefore(store, it) } ?: 0
-    Column(Modifier.fillMaxSize().padding(top = 32.dp)) {
-      Column(Modifier.padding(horizontal = Z.Pad)) {
-        Text(c.name, style = MaterialTheme.typography.displaySmall)
-        if (l != null && l.isNotEmpty()) {
-          Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            ProgressBar(done.toFloat() / l.size, Modifier.width(320.dp))
-            Text(if (done == l.size) "  🏆 Complete!" else "  $done of ${l.size} watched", style = MaterialTheme.typography.titleSmall, color = if (done == l.size) Z.Red else Z.Text2)
+    RestoreFocus(focus, l?.isNotEmpty() == true)
+    val lit = remember(l) { l.orEmpty().filter { seenBefore(store, it) }.map { it.key }.toSet() }
+    val fresh = remember(l) { if (l == null) emptySet() else Lights.fresh(store, "page:${c.id}", lit) }
+    val order = l.orEmpty().map { it.key }.filter { it in fresh }
+    val complete = l != null && l.isNotEmpty() && lit.size == l.size
+    var ceremony by remember(l) { mutableStateOf(false) }
+    val celebrate = remember(l) { l != null && Lights.firstTime(store, "done:${c.id}", complete) }
+    // The bar catches up as each new stamp lands; the ceremony starts once they all have.
+    val bar = remember(l) { Animatable(((lit.size - fresh.size).toFloat() / (l?.size ?: 1).coerceAtLeast(1))) }
+    val reduce = LocalReduceMotion.current
+    LaunchedEffect(l) {
+      if (l.isNullOrEmpty()) return@LaunchedEffect
+      if (fresh.isNotEmpty() && !reduce) delay(500L + fresh.size * 260)
+      bar.animateTo(lit.size.toFloat() / l.size, tween(if (reduce) 0 else 900, easing = Z.EaseOut))
+      if (celebrate) { if (!reduce) delay(250); ceremony = true }
+    }
+    Box(Modifier.fillMaxSize()) {
+      Column(Modifier.fillMaxSize().padding(top = 32.dp)) {
+        Column(Modifier.padding(horizontal = Z.Pad)) {
+          Text(c.name, style = MaterialTheme.typography.displaySmall)
+          if (l != null && l.isNotEmpty()) {
+            Row(Modifier.padding(top = 10.dp), verticalAlignment = Alignment.CenterVertically) {
+              ProgressBar(bar.value, Modifier.width(320.dp))
+              Spacer(Modifier.width(14.dp))
+              if (complete) StatusChip("Complete", Z.Success)
+              else Text("${lit.size} of ${l.size} watched", style = MaterialTheme.typography.titleSmall, color = Z.Text2)
+            }
           }
         }
-      }
-      when {
-        l == null -> Loading(null)
-        l.isEmpty() -> Text("Couldn't build this challenge right now.", Modifier.padding(Z.Pad), color = Z.Text2)
-        else -> LazyVerticalGrid(GridCells.Fixed(6), contentPadding = PaddingValues(start = Z.Pad, end = Z.Pad, top = 18.dp, bottom = 48.dp),
-          horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
-          itemsIndexed(l, key = { _, it -> it.key }) { i, item ->
-            Column {
-              Box {
-                PosterCard(store, item, Modifier.focusMemory(focus, item.key, i == 0)) { nav.push(Screen.Title(item)) }
-                if (seenBefore(store, item)) Text("✓", Modifier.align(Alignment.TopEnd).padding(6.dp).background(Z.Red, Z.Small).padding(horizontal = 7.dp, vertical = 2.dp), style = MaterialTheme.typography.labelLarge)
+        when {
+          l == null -> Loading(null)
+          l.isEmpty() -> Text("Couldn't build this challenge right now.", Modifier.padding(Z.Pad), color = Z.Text2)
+          else -> LazyVerticalGrid(GridCells.Fixed(6), contentPadding = PaddingValues(start = Z.Pad, end = Z.Pad, top = 18.dp, bottom = 48.dp),
+            horizontalArrangement = Arrangement.spacedBy(18.dp), verticalArrangement = Arrangement.spacedBy(20.dp)) {
+            itemsIndexed(l, key = { _, it -> it.key }) { i, item ->
+              val on = item.key in lit
+              val k = order.indexOf(item.key)
+              val wait = 500 + k.coerceAtLeast(0) * 260
+              var focused by remember { mutableStateOf(false) }
+              // Unwatched posters glimpse a little colour while focused.
+              val light = rememberLight(on, k >= 0, wait, 800)
+              Column {
+                ZCard({ nav.push(Screen.Title(item)) }, Modifier.focusMemory(focus, item.key, i == 0).onFocusChanged { focused = it.isFocused }.aspectRatio(2f / 3f)) {
+                  Box(Modifier.fillMaxSize()) {
+                    LitArt(img(item.poster, "w342"), if (on) light else if (focused) 0.45f else 0f, title = item.title)
+                    if (on) SeenStamp(k >= 0, wait + 250)
+                    WatchMarks(store.latest(item)?.takeIf { !it.finished }, false)
+                  }
+                }
+                Text("${i + 1}. ${item.title}", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelMedium, color = if (on) Z.Text else Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
-              Text("${i + 1}. ${item.title}", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
           }
         }
       }
+      if (ceremony) Ceremony(c.name, l.orEmpty()) { ceremony = false }
     }
   }
 }

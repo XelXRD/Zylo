@@ -364,8 +364,8 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
     }
     if (!s.autoplay || autoTried || f.sources.isEmpty()) return@LaunchedEffect
     autoTried = true
-    // Play never picks a source above the quality cap on its own; those stay in the list to choose by hand.
-    val within = f.sources.filter { !overCap(it, cap) }
+    // Play never picks a source over the quality or size limit on its own; those stay in the list to choose by hand.
+    val within = f.sources.filter { !overLimit(it, store) }
     val need = AutoSource.min(store)
     if (need == 0) return@LaunchedEffect // Settings: always choose by hand
     if (within.isNotEmpty() && within.size < need) {
@@ -395,7 +395,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
     if (!Attempts.tryNext) return@LaunchedEffect
     Attempts.tryNext = false
     val from = f.sources.indexOf(bad).coerceAtLeast(-1)
-    val rest = (f.sources.drop(from + 1) + f.sources.take(from + 1)).filter { it !in failed && !overCap(it, cap) }
+    val rest = (f.sources.drop(from + 1) + f.sources.take(from + 1)).filter { it !in failed && !overLimit(it, store) }
     busy = true
     for (src in rest.take(4)) {
       if (start(src)) { busy = false; return@LaunchedEffect }
@@ -443,7 +443,7 @@ fun SourcesPage(store: Store, s: Screen.Sources, nav: Nav) {
         )
         else -> LazyColumn(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(6.dp), contentPadding = PaddingValues(vertical = 4.dp)) {
           itemsIndexed(f.sources) { i, src ->
-            SourceRow(src, best = i == 0, failed = src in failed, last = src.likeness(pref) == 0, overCap = overCap(src, cap), modifier = if (i == 0) Modifier.focusRequester(first) else Modifier) {
+            SourceRow(src, best = i == 0, failed = src in failed, last = src.likeness(pref) == 0, overCap = overLimit(src, store), modifier = if (i == 0) Modifier.focusRequester(first) else Modifier) {
               if (!busy) scope.launch {
                 busy = true
                 start(src)

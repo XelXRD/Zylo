@@ -42,7 +42,7 @@ Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSk
 
 ### Playing
 - **Sources** from Stremio addons, Syncler Express packages, Plex and Jellyfin, played through TorBox, Real-Debrid or Premiumize. Choose Source shows only what Zylo actually knows about each one, and leaves out files that are plainly for another title (addons sometimes return another show's S01E01).
-- **Pick a source for me:** Play picks the best once 1, 3, 5, 10 or 20 sources are found, or never (you always choose). Remembers what played well and prefers the same kind next time. Quality cap (4K / 1080p / 720p).
+- **Pick a source for me:** Play picks the best once 1, 3, 5, 10 or 20 sources are found, or never (you always choose). Remembers what played well and prefers the same kind next time. Quality cap (4K / 1080p / 720p) and file size cap (2 to 40 GB). Sort sources by best match, highest quality, largest or smallest.
 - **Player:** Media3, controls on OK, Back returns to Choose Source to try another.
 - **When a source won't play:** a plain reason (format this TV can't decode, link expired, connection dropped, or a debrid "holding clip" instead of the episode) with **Try Next Source** and **Choose Source**. Failed sources are marked Unavailable, and nothing is saved or sent to Trakt unless the video actually played, so your place is never lost.
 - **Skip Intro, Skip Recap and Skip Credits** from IntroDB (and AniSkip for anime).

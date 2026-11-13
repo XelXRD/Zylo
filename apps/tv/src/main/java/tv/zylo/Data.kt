@@ -7,6 +7,7 @@ import androidx.compose.runtime.mutableStateOf
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.runBlocking
 import kotlinx.coroutines.sync.Semaphore
 import kotlinx.coroutines.sync.withPermit
@@ -57,6 +58,43 @@ fun http(url: String, method: String = "GET", headers: Map<String, String> = emp
 }
 
 fun getJson(url: String, headers: Map<String, String> = emptyMap()) = JSONObject(http(url, headers = headers))
+
+/**
+ * TMDB's answers, kept on disk. A page opens from the last answer at once; one older than [FRESH] is fetched again
+ * behind the scenes, ready for next time. Only successful answers are kept, so a bad key or an outage is never cached.
+ */
+object TmdbDisk {
+  var dir: java.io.File? = null
+  private const val FRESH = 3 * 3_600_000L
+  private const val KEEP = 14 * 86_400_000L
+  private val refreshing = ConcurrentHashMap.newKeySet<String>()
+  private val io = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.SupervisorJob() + Dispatchers.IO)
+
+  private fun file(url: String) = dir?.let { d ->
+    java.io.File(d, java.security.MessageDigest.getInstance("SHA-1").digest(url.toByteArray()).joinToString("") { "%02x".format(it) })
+  }
+
+  private fun save(f: java.io.File, text: String) {
+    val tmp = java.io.File(f.path + ".tmp")
+    tmp.writeText(text)
+    if (!tmp.renameTo(f)) { f.delete(); tmp.renameTo(f) }
+  }
+
+  fun get(url: String, fetch: () -> String): String {
+    val f = file(url) ?: return fetch()
+    val kept = if (f.exists()) runCatching { f.readText() }.getOrNull() else null
+    if (kept != null) {
+      if (System.currentTimeMillis() - f.lastModified() > FRESH && refreshing.add(url)) io.launch {
+        try { runCatching { save(f, fetch()) } } finally { refreshing.remove(url) }
+      }
+      return kept
+    }
+    return fetch().also { text -> runCatching { save(f, text) } }
+  }
+
+  /** Answers nobody has asked for in [KEEP]. ponytail: age-based only; add a size cap if the folder ever grows large. */
+  fun prune() = dir?.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > KEEP }?.forEach { it.delete() }
+}
 fun enc(s: String): String = URLEncoder.encode(s, "UTF-8")
 fun form(vararg p: Pair<String, String>) = p.joinToString("&") { (k, v) -> "${enc(k)}=${enc(v)}" }.toByteArray()
 fun JSONObject.str(k: String) = optString(k).takeIf { it.isNotEmpty() && it != "null" }
@@ -166,7 +204,7 @@ class Store(private val open: (String) -> SharedPreferences) {
     g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color).apply { it.kids?.let { k -> put("kids", k) } } }).toString()).apply()
 
   companion object {
-    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "anime_dub", "thumbs", "outbox", "synclog", "xc_favs", "reminders")
+    private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "anime_dub", "thumbs", "outbox", "synclog", "xc_favs", "reminders", "lit:")
     val AVATARS = listOf(0xFF9A4155, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
 
     private fun profilesIn(g: SharedPreferences): List<Profile> =
@@ -205,6 +243,16 @@ class Store(private val open: (String) -> SharedPreferences) {
   var maxQuality: String
     get() = g.getString("maxQuality", "4K")!!
     set(v) = g.edit().putString("maxQuality", v).apply()
+
+  /** Largest file Play picks on its own, in GB; 0 = no limit. Bigger ones stay listed in Choose Source. */
+  var maxSizeGb: Int
+    get() = g.getInt("maxSizeGb", 0)
+    set(v) = g.edit().putInt("maxSizeGb", v).apply()
+
+  /** How Choose Source orders sources, and so which one Play tries first (see SourceSort). */
+  var sourceSort: String
+    get() = g.getString("sourceSort", SourceSort.BEST)!!
+    set(v) = g.edit().putString("sourceSort", v).apply()
 
   /** Preferred subtitle language (ISO 639-1, e.g. "en"); "" = subtitles off unless the file forces them. */
   /** Audio language: set in Settings, else the TV's language; null = the file's own default ("file"). */
@@ -289,7 +337,8 @@ class Tmdb(private val key: String) {
 
   fun get(path: String): JSONObject {
     val url = "https://api.themoviedb.org/3$path${if ('?' in path) '&' else '?'}language=en-GB" + if (v3) "&api_key=$key" else ""
-    return getJson(url, if (v3) emptyMap() else mapOf("Authorization" to "Bearer $key"))
+    val headers = if (v3) emptyMap() else mapOf("Authorization" to "Bearer $key")
+    return JSONObject(TmdbDisk.get(url + if (v3) "" else "#" + key.hashCode()) { http(url, headers = headers) })
   }
 
   fun list(path: String, type: String?) = safe(get(path).optJSONArray("results")?.objects()

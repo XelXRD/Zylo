@@ -135,6 +135,8 @@ class MainActivity : ComponentActivity() {
     Dom.app = applicationContext
     Epg.dir = filesDir
     ChannelCache.dir = filesDir
+    TmdbDisk.dir = java.io.File(cacheDir, "tmdb").apply { mkdirs() }
+    Trakt.io.launch { runCatching { TmdbDisk.prune() } }
     val ui = UiState(store)
     coil.Coil.setImageLoader(coil.ImageLoader.Builder(this).crossfade(220).build()) // artwork fades in rather than popping
     Trakt.io.launch {
@@ -207,6 +209,15 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
     else { ui.stayInNav = true; ui.section = Section.Home }
   }
   val restore = !ui.stayInNav
+  // Once Home is up, load the other browsing sections behind it, so switching to one is instant.
+  val homeReady = ui.home.rows.isNotEmpty()
+  LaunchedEffect(homeReady) {
+    if (!homeReady) return@LaunchedEffect
+    val key = store.tmdb
+    val t = Tmdb(key)
+    if (ui.discover.loadedFor != key) runCatching { ui.discover.load(t, key) }
+    ui.browse.values.forEach { b -> if (b.items.isEmpty()) runCatching { b.more(t) } }
+  }
   Box(Modifier.fillMaxSize()) {
     // focusRestorer: coming back down from the top bar returns to the card you left, even if it scrolled away.
     Box(Modifier.fillMaxSize().focusRequester(ui.content).focusRestorer().focusGroup()) { key(ui.section) {

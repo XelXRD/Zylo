@@ -27,6 +27,24 @@ class FeaturesTest {
     assertTrue(overCap(uhd, "1080p"))
   }
 
+  @Test fun sizeLimitAndSortOrders() {
+    val big = src("A", "4K").copy(size = "58.3 GB")
+    val mid = src("B", "1080p").copy(size = "4,2 GiB")
+    val small = src("C", "720p").copy(size = "700 MB")
+    val unknown = src("D", "1080p")
+    assertEquals(58.3, gbOf(big)!!, 0.001)
+    assertEquals(4.2, gbOf(mid)!!, 0.001)
+    assertEquals(0.684, gbOf(small)!!, 0.001)
+    assertNull(gbOf(unknown))
+    val all = listOf(mid, unknown, big, small)
+    // Over the size limit: last, whatever the sort. Unknown sizes are allowed.
+    assertEquals(big, rank(all, maxGb = 20).last())
+    assertTrue(overSize(big, 20) && !overSize(unknown, 20))
+    assertEquals(listOf(big, mid, small, unknown), rank(all, sort = "largest"))
+    assertEquals(listOf(small, mid, big, unknown), rank(all, sort = "smallest"))
+    assertEquals(listOf(big, mid, unknown, small), rank(all, sort = "quality"))
+  }
+
   private fun ep(n: Int, aired: String?, name: String = "E$n") = JSONObject().put("episode_number", n).put("name", name).apply { aired?.let { put("air_date", it) } }
 
   @Test fun nextEpisodeRollsOverAndStopsAtUnaired() {

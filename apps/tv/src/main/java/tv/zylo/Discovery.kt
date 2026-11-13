@@ -32,6 +32,28 @@ import androidx.compose.ui.layout.ContentScale
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.animation.AnimatedContent
+import androidx.compose.animation.fadeIn
+import androidx.compose.animation.fadeOut
+import androidx.compose.animation.slideInHorizontally
+import androidx.compose.animation.togetherWith
+import androidx.compose.animation.core.Animatable
+import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.LinearEasing
+import androidx.compose.animation.core.RepeatMode
+import androidx.compose.animation.core.infiniteRepeatable
+import androidx.compose.animation.core.rememberInfiniteTransition
+import androidx.compose.animation.core.animateFloat
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.text.SpanStyle
+import androidx.compose.ui.text.buildAnnotatedString
+import androidx.compose.ui.text.withStyle
+import androidx.compose.ui.unit.sp
+import androidx.compose.ui.unit.em
+import kotlin.math.roundToInt
 import androidx.tv.material3.MaterialTheme
 import androidx.tv.material3.Text
 import coil.compose.AsyncImage
@@ -325,6 +347,8 @@ fun EpisodeAlert(store: Store, nav: Nav) {
 class Wrapped(
   val year: Int, val hours: Int, val films: Int, val episodes: Int, val topGenres: List<String>, val topShow: Pair<String, Int>?,
   val binge: Pair<String, Int>?, val rewatch: Pair<String, Int>?, val busiestMonth: String?, val lateNight: Int,
+  /** TMDB "type:id" by title, and the year's titles most-watched first: the artwork behind each slide. */
+  val refs: Map<String, String> = emptyMap(), val art: List<String> = emptyList(),
 )
 
 object WrappedStats {
@@ -337,6 +361,8 @@ object WrappedStats {
     val days = HashMap<String, Int>()
     val months = HashMap<Int, Int>()
     var late = 0
+    val refs = HashMap<String, String>()
+    val plays = HashMap<String, Int>()
     history.forEach { h ->
       val at = parseIso(h.optString("watched_at"))
       val cal = Calendar.getInstance(tz).apply { timeInMillis = at }
@@ -348,6 +374,11 @@ object WrappedStats {
       val owner = if (movie) h.optJSONObject("movie") else h.optJSONObject("show")
       owner?.optJSONArray("genres")?.let { g -> (0 until g.length()).forEach { genres.merge(g.optString(it), 1, Int::plus) } }
       val title = owner?.optString("title").orEmpty()
+      owner?.optJSONObject("ids")?.optInt("tmdb")?.takeIf { it > 0 }?.let { id ->
+        val ref = (if (movie) "movie:" else "tv:") + id
+        refs[title] = ref
+        plays.merge(ref, 1, Int::plus)
+      }
       if (movie) films.merge(title, 1, Int::plus)
       else { shows.merge(title, 1, Int::plus); days.merge(ymd(at) + "|" + title, 1, Int::plus) }
     }
@@ -358,7 +389,7 @@ object WrappedStats {
       shows.maxByOrNull { it.value }?.toPair(),
       days.maxByOrNull { it.value }?.let { (k, v) -> k.substringAfter('|') to v }?.takeIf { it.second >= 3 },
       films.maxByOrNull { it.value }?.toPair()?.takeIf { it.second >= 2 },
-      monthName, late,
+      monthName, late, refs, plays.entries.sortedByDescending { it.value }.map { it.key },
     )
   }
 }
@@ -376,40 +407,115 @@ fun WrappedPage(store: Store, nav: Nav) {
     }
   }
   val wr = w ?: return Loading(error)
-  // One big number per slide; Left/Right (or OK) to move through them.
+  // Artwork for the year: posters for the wall, backdrops for slides about one title. Fills in as it arrives.
+  var pics by remember { mutableStateOf(emptyMap<String, Pair<String?, String?>>()) }
+  LaunchedEffect(wr) {
+    val t = Tmdb(store.tmdb)
+    val want = (listOfNotNull(wr.topShow, wr.binge, wr.rewatch).mapNotNull { wr.refs[it.first] } + wr.art.take(30)).distinct()
+    want.chunked(6).forEach { batch ->
+      val got = withContext(Dispatchers.IO) {
+        batch.mapNotNull { ref -> runCatching { t.get("/" + ref.replace(':', '/')).let { ref to (it.str("poster_path") to it.str("backdrop_path")) } }.getOrNull() }
+      }
+      pics = pics + got
+    }
+  }
+  fun backdrop(title: String?) = title?.let { wr.refs[it] }?.let { pics[it]?.second }
+  val wall = wr.art.mapNotNull { pics[it]?.first }
+  fun plural(v: Int, one: String, many: String) = if (v == 1) one else many
+  // One big number per slide, rolling up while the year's artwork lights behind it. Left/Right (or OK) to move.
   val slides = listOfNotNull(
-    Triple("YOUR $year IN ZYLO", "${wr.hours} hours", "of films and TV. That's ${"%.1f".format(wr.hours / 24f)} days."),
-    Triple("FILMS", "${wr.films}", "films watched" + (wr.rewatch?.let { ", and you watched ${it.first} ${it.second} times" } ?: "")),
-    Triple("EPISODES", "${wr.episodes}", "episodes" + (wr.topShow?.let { ", ${it.second} of them ${it.first}" } ?: "")),
-    wr.binge?.let { Triple("BIGGEST BINGE", "${it.second} episodes", "of ${it.first} in one day") },
-    wr.topGenres.takeIf { it.isNotEmpty() }?.let { Triple("YOUR GENRES", it.first(), it.drop(1).joinToString("  ·  ").ifEmpty { "your favourite" }) },
-    wr.busiestMonth?.let { Triple("BUSIEST MONTH", it, "when you watched the most") },
-    Triple("NIGHT OWL", "${wr.lateNight}", if (wr.lateNight == 0) "things watched after midnight. Sensible." else "things watched between midnight and 4 am"),
+    WrapSlide(wr.hours, plural(wr.hours, " hour", " hours"), "of films and TV in ${wr.year}. That's ${"%.1f".format(wr.hours / 24f)} days."),
+    WrapSlide(wr.films, plural(wr.films, " film", " films"),
+      wr.rewatch?.let { "including ${it.first}, ${it.second} times over. Your most rewatched." } ?: "watched this year.", backdrop(wr.rewatch?.first)),
+    WrapSlide(wr.episodes, plural(wr.episodes, " episode", " episodes"),
+      wr.topShow?.let { "and ${it.second} of them were ${it.first}." } ?: "of TV this year.", backdrop(wr.topShow?.first)),
+    wr.binge?.let { WrapSlide(it.second, " episodes", "of ${it.first} in a single day. Your biggest binge.", backdrop(it.first)) },
+    wr.topGenres.takeIf { it.isNotEmpty() }?.let { g ->
+      WrapSlide(null, g.first(), "was your genre this year" + g.drop(1).joinToString(" and ").let { r -> if (r.isEmpty()) "." else ", then $r." })
+    },
+    wr.busiestMonth?.let { WrapSlide(null, it, "was your busiest month.") },
+    WrapSlide(wr.lateNight, plural(wr.lateNight, " thing", " things"),
+      "watched between midnight and 4 am. " + if (wr.lateNight == 0) "Sensible." else "Night owl."),
   )
   var i by remember { mutableIntStateOf(0) }
+  var forward by remember { mutableStateOf(true) }
   val r = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(80); runCatching { r.requestFocus() } }
-  Box(Modifier.fillMaxSize().background(androidx.compose.ui.graphics.Brush.linearGradient(listOf(Z.Bg, Z.Red.copy(alpha = 0.35f), Z.Bg)))
+  val reduce = LocalReduceMotion.current
+  Box(Modifier.fillMaxSize().background(Z.Bg)
     .focusRequester(r).onPreviewKeyEvent { e ->
       if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
       when (e.key) {
-        Key.DirectionRight, Key.DirectionCenter, Key.Enter -> { if (i < slides.lastIndex) i++ else nav.back(); true }
-        Key.DirectionLeft -> { if (i > 0) i--; true }
+        Key.DirectionRight, Key.DirectionCenter, Key.Enter -> { forward = true; if (i < slides.lastIndex) i++ else nav.back(); true }
+        Key.DirectionLeft -> { forward = false; if (i > 0) i--; true }
         else -> false
       }
-    }.focusable(), contentAlignment = Alignment.CenterStart) {
-    val (label, big, small) = slides[i.coerceIn(0, slides.lastIndex)]
-    androidx.compose.animation.AnimatedContent(i, label = "slide") { _ ->
-      Column(Modifier.padding(horizontal = Z.Pad * 2)) {
-        Text(label, style = MaterialTheme.typography.titleMedium, color = Z.Red)
-        Text(big, Modifier.padding(top = 12.dp), style = MaterialTheme.typography.displayLarge)
-        Text(small, Modifier.padding(top = 10.dp).fillMaxWidth(0.7f), style = MaterialTheme.typography.headlineSmall, color = Z.Text2)
-      }
-    }
+    }.focusable()) {
+    AnimatedContent(i, label = "slide", transitionSpec = {
+      val d = if (forward) 1 else -1
+      (fadeIn(tween(if (reduce) 0 else 500, easing = Z.EaseOut)) + slideInHorizontally(tween(if (reduce) 0 else 600, easing = Z.EaseOut)) { d * it / 8 }) togetherWith
+        fadeOut(tween(if (reduce) 0 else 250))
+    }) { at -> WrapSlideView(slides[at.coerceIn(0, slides.lastIndex)], wall, at) }
     Row(Modifier.align(Alignment.BottomCenter).padding(bottom = 36.dp), horizontalArrangement = Arrangement.spacedBy(6.dp)) {
       slides.indices.forEach { n -> Box(Modifier.width(if (n == i) 22.dp else 8.dp).height(4.dp).background(if (n == i) Z.Text else Z.Text.copy(alpha = 0.3f), Z.Small)) }
     }
     Row(Modifier.align(Alignment.BottomEnd).padding(36.dp)) { Glyph(Icons.Filled.KeyboardArrowLeft, 22.dp, Z.Muted); Glyph(Icons.Filled.KeyboardArrowRight, 22.dp, Z.Muted) }
+  }
+}
+
+/** A Wrapped slide: a [count] that rolls up (or, when null, [unit] alone as a word), the line under it, and a backdrop. */
+class WrapSlide(val count: Int?, val unit: String, val line: String, val backdrop: String? = null)
+
+@Composable
+private fun WrapSlideView(s: WrapSlide, wall: List<String>, seed: Int) {
+  val reduce = LocalReduceMotion.current
+  val p = remember { Animatable(if (reduce) 1f else 0f) }
+  LaunchedEffect(Unit) { if (!reduce) { delay(250); p.animateTo(1f, tween(1500, easing = Z.EaseOut)) } }
+  Box(Modifier.fillMaxSize()) {
+    // The year's artwork, grey at first, lighting as the number climbs.
+    if (s.backdrop != null) AsyncImage(img(s.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, colorFilter = lightFilter(p.value))
+    else if (wall.isNotEmpty()) PosterWall(wall, seed, p.value)
+    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.95f), 0.45f to Z.Bg.copy(alpha = 0.62f), 0.8f to Color.Transparent)))
+    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.6f to Color.Transparent, 1f to Z.Bg)))
+    Column(Modifier.align(Alignment.CenterStart).padding(horizontal = Z.Pad * 2).fillMaxWidth(0.62f)) {
+      // Numbers at full size; a word (a genre, a month) a step down so "Science fiction" still fits.
+      val size = if (s.count != null) 96.sp else 64.sp
+      val big = MaterialTheme.typography.displayLarge.copy(fontSize = size, lineHeight = size * 1.05f, letterSpacing = (-0.03).em, fontFeatureSettings = "tnum")
+      val shown = s.count?.let { "%,d".format(Locale.UK, (it * p.value).roundToInt()) }
+      Text(
+        buildAnnotatedString {
+          append(shown ?: s.unit)
+          if (shown != null) withStyle(SpanStyle(fontSize = 40.sp, letterSpacing = (-0.02).em)) { append(s.unit) }
+        },
+        style = big, maxLines = 1, overflow = TextOverflow.Ellipsis,
+      )
+      Text(s.line, Modifier.padding(top = 14.dp).graphicsLayer { alpha = (p.value * 2.5f - 0.5f).coerceIn(0f, 1f) },
+        style = MaterialTheme.typography.headlineSmall, color = Z.Text2)
+    }
+  }
+}
+
+/** A tilted wall of the year's posters, drifting slowly sideways. Still with Reduce motion. */
+@Composable
+private fun PosterWall(posters: List<String>, seed: Int, light: Float) {
+  val reduce = LocalReduceMotion.current
+  val drift = if (reduce) 0.5f else rememberInfiniteTransition(label = "wall")
+    .animateFloat(0f, 1f, infiniteRepeatable(tween(40_000, easing = LinearEasing), RepeatMode.Reverse), label = "drift").value
+  val filter = lightFilter(light)
+  Box(Modifier.fillMaxSize().clipToBounds()) {
+    Column(
+      Modifier.align(Alignment.Center).wrapContentSize(unbounded = true).graphicsLayer { rotationZ = -9f; translationX = (drift - 0.5f) * 90.dp.toPx() },
+      verticalArrangement = Arrangement.spacedBy(12.dp),
+    ) {
+      repeat(5) { row ->
+        Row(horizontalArrangement = Arrangement.spacedBy(12.dp)) {
+          repeat(11) { col ->
+            AsyncImage(img(posters[(row * 11 + col + seed * 7) % posters.size], "w185"), null,
+              Modifier.width(118.dp).aspectRatio(2f / 3f).clip(Z.Medium), contentScale = ContentScale.Crop, colorFilter = filter)
+          }
+        }
+      }
+    }
   }
 }
 

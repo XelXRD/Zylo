@@ -336,6 +336,9 @@ The Home hero is a full-bleed backdrop behind horizontal and vertical Screening 
 - Durations: 180ms (fast) and 240ms (normal). UI motion stays under 300ms.
 - Every duration goes through Reduce motion, which brings it to 0, and focus scaling drops to 1.0 when it's on.
 
+### Lights Up (rewards)
+The game-like pages (Watch Challenges, Zylo Wrapped, This or That) share one reward language, in `Reward.kt`: artwork you haven't earned sits desaturated at 50% brightness, and earning it brings the colour up. In Challenges, posters light up once watched, a "Seen" stamp lands on a spring, and a finished challenge gets a one-time ceremony mosaic. In Wrapped, numbers count up while the year's artwork lights. In This or That, the title you passed on drains to grey and falls away. Only things that changed since your last visit light up in front of you (`Lights.fresh`). These reward moments are the one exception to the 300ms limit (up to about 1.6s). Focus movement never slows, and Reduce motion skips all of it.
+
 ## Do's and Don'ts
 
 ### Do:

@@ -113,20 +113,44 @@ val QUALITY_STEPS = QUALITIES.take(3) // the choices for Settings > Playback > M
 
 private fun qualityIndex(q: String?) = QUALITIES.indexOf(q).let { if (it < 0) 9 else it }
 
+/** The source's file size in GB, from the "1.4 GB" / "700 MB" the addon showed; null when it didn't say. */
+fun gbOf(s: Source): Double? = s.size?.let { Regex("""([\d.,]+)\s?(GB|MB|GiB|MiB)""", I).find(it) }?.let { m ->
+  val n = m.groupValues[1].replace(',', '.').toDoubleOrNull() ?: return null
+  if (m.groupValues[2].startsWith("M", ignoreCase = true)) n / 1024 else n
+}
+
+/** Settings > Playback > Maximum file size: the choices, in GB (0 = no limit). */
+val SIZE_STEPS = listOf(0, 2, 5, 10, 20, 40)
+fun sizeLabel(gb: Int) = if (gb == 0) "No limit" else "$gb GB"
+fun overSize(s: Source, maxGb: Int) = maxGb > 0 && (gbOf(s) ?: 0.0) > maxGb
+
+/** Settings > Playback > Sort sources. */
+object SourceSort {
+  const val BEST = "best"
+  val CHOICES = listOf(BEST to "Best match", "quality" to "Highest quality", "largest" to "Largest first", "smallest" to "Smallest first")
+  fun label(v: String) = CHOICES.firstOrNull { it.first == v }?.second ?: CHOICES[0].second
+}
+
 /**
- * Best first: anything above the quality cap goes last (still listed, never auto-played); then the source you last
- * played (or one like it); then your own media servers; then what's ready now (direct links, cached torrents);
- * then the best quality; then addon order.
+ * Order for Choose Source, and so for Play. Always first: under your quality and size limits (anything over stays
+ * listed, last, and is never auto-played), then dubs if you prefer them, then your own media servers, then what's
+ * ready now (direct links, cached torrents). Within that, [sort]: Best match puts the source you last played (or one
+ * like it) first, then the best quality; the others order by quality or by file size, unknown sizes last.
  */
-fun rank(all: List<Source>, cap: String = "4K", pref: JSONObject? = null, dubs: Boolean = false) = all.filter { it.url != null || it.debrid != null }
-  .sortedWith(compareBy(
-    { qualityIndex(it.quality) < QUALITIES.indexOf(cap).coerceAtLeast(0) },
-    { dubs && !isDub(it) }, // anime with "prefer dubs" on: English-dubbed / dual-audio releases first
-    { it.likeness(pref) },
-    { it.library == null },
-    { it.debrid != null && !it.cached },
-    { qualityIndex(it.quality) },
-  ))
+fun rank(all: List<Source>, cap: String = "4K", pref: JSONObject? = null, dubs: Boolean = false, sort: String = SourceSort.BEST, maxGb: Int = 0) =
+  all.filter { it.url != null || it.debrid != null }.sortedWith(
+    compareBy<Source>(
+      { overCap(it, cap) || overSize(it, maxGb) },
+      { dubs && !isDub(it) }, // anime with "prefer dubs" on: English-dubbed / dual-audio releases first
+    ).then(
+      if (sort == SourceSort.BEST) compareBy({ it.likeness(pref) }, { it.library == null }, { it.debrid != null && !it.cached }, { qualityIndex(it.quality) })
+      else compareBy<Source>({ it.library == null }, { it.debrid != null && !it.cached }).then(when (sort) {
+        "largest" -> compareBy({ -(gbOf(it) ?: -1.0) }, { qualityIndex(it.quality) })
+        "smallest" -> compareBy({ gbOf(it) ?: Double.MAX_VALUE }, { qualityIndex(it.quality) })
+        else -> compareBy({ qualityIndex(it.quality) }, { -(gbOf(it) ?: 0.0) })
+      }),
+    ),
+  )
 
 private val DUB = Regex("""\b(dub|dubbed|dual[ ._-]?audio|multi[ ._-]?audio|eng(lish)?[ ._-]?dub)\b""", RegexOption.IGNORE_CASE)
 fun isDub(s: Source) = DUB.containsMatchIn(listOfNotNull(s.label, s.detail, s.filename).joinToString(" "))
@@ -135,6 +159,9 @@ fun isDub(s: Source) = DUB.containsMatchIn(listOfNotNull(s.label, s.detail, s.fi
 fun isAnime(d: JSONObject?) = d != null && d.optString("original_language") == "ja" && d.optJSONArray("genres")?.objects()?.any { it.optInt("id") == 16 } == true
 
 fun overCap(s: Source, cap: String) = qualityIndex(s.quality) < QUALITIES.indexOf(cap).coerceAtLeast(0)
+
+/** Over either limit in Settings > Playback: listed in Choose Source, never picked by Play on its own. */
+fun overLimit(s: Source, store: Store) = overCap(s, store.maxQuality) || overSize(s, store.maxSizeGb)
 
 class Found(val sources: List<Source>, val errors: List<String>, val waiting: Int, val otherTitles: Int = 0)
 
@@ -195,7 +222,7 @@ suspend fun findSources(store: Store, item: Item, season: Int?, episode: Int?, v
   // If every file looks wrong, the matcher is what's wrong: show them all.
   val all = if (other.size < everything.size) everything - other.toSet() else everything
   val dubs = store.animeDubs && isAnime(details)
-  Found(rank(all, store.maxQuality, store.sourcePref(item), dubs), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null }, everything.size - all.size)
+  Found(rank(all, store.maxQuality, store.sourcePref(item), dubs, store.sourceSort, store.maxSizeGb), results.mapNotNull { it.second }, all.count { it.infoHash != null && it.debrid == null }, everything.size - all.size)
 }
 
 // --- Subtitles (the addon "subtitles" resource) -------------------------------------------------

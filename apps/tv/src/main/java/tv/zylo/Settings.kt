@@ -179,6 +179,16 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     cap = QUALITY_STEPS[(QUALITY_STEPS.indexOf(cap) + 1) % QUALITY_STEPS.size]
     store.maxQuality = cap
   }
+  var maxGb by remember { mutableIntStateOf(store.maxSizeGb) }
+  Choice("Maximum file size", "The biggest file Play picks on its own. Bigger ones stay in Choose Source, marked. Files that don't say their size are allowed.", sizeLabel(maxGb)) {
+    maxGb = SIZE_STEPS[(SIZE_STEPS.indexOf(maxGb) + 1) % SIZE_STEPS.size]
+    store.maxSizeGb = maxGb
+  }
+  var sort by remember { mutableStateOf(store.sourceSort) }
+  Choice("Sort sources", "The order in Choose Source, and so what Play tries first. Your own servers and sources ready to play always come first.", SourceSort.label(sort)) {
+    sort = SourceSort.CHOICES[(SourceSort.CHOICES.indexOfFirst { it.first == sort } + 1) % SourceSort.CHOICES.size].first
+    store.sourceSort = sort
+  }
   var lang by remember { mutableStateOf(store.subLang) }
   ListChoice("Subtitles", "Turned on automatically in this language (each profile has its own). You can always pick others in the player.",
     SUB_LANGS.map { it to (if (it.isEmpty()) "Off" else languageName(it)) }, lang) {
