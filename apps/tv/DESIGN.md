@@ -310,9 +310,9 @@ Firm, compact and remote-legible.
 - **Disconnect** and **Remove** are two-press (`ConfirmButton`): the first press turns the label into "Press again" for three seconds.
 
 ### Discover (signature)
-- A spotlight panel (236dp, large corners) features one mode a day over artwork kept well back behind a strong left scrim; Rabbit Hole in the spotlight starts from your last watched title. Its **Start** is the screen's one red button.
-- Below, every mode in three named rows (Decide together, Go deeper, Keep track): 236×108dp graphite tiles, name in Title Medium and a two-line description, text from the top so titles line up. No icons or emoji.
-- Genre rows follow under "By genre"; Home's trending rows aren't repeated.
+- A spotlight panel (236dp, large corners) features a random game each time Discover opens, over artwork kept well back behind a strong left scrim. It enters with a slow push-in on the artwork while the words rise (1.4s; still with Reduce motion). Rabbit Hole in the spotlight starts from your last watched title. Its **Start** is the screen's one red button. Scrolled under the top bar, its words and Start fade out and the artwork stays on, dimmed.
+- Below, every game in three named rows (Decide together, Go deeper, Keep track) as 260x146dp artwork tiles (`DiscoverTiles.kt`): real artwork from Discover's rows, reshuffled each visit, name and line over a bottom scrim. On focus each tile acts out its game once (0.65s): Movie Night Match's posters fan out, Help Me Choose's pair squares up around "or", Blind Date sharpens out of a blurred wine-dark wash, Double Feature's pair slides together, Rabbit Hole zooms in, Deep Cuts' redaction bar slides away, Franchise Journeys' pile lays out in order, Moodboard changes mood colour, Time Machine dials back to its year in that decade's tint, Calendar flicks through four weeks and settles on today, Watch Challenges shows your mosaic, Wrapped lights your recent posters. Reduce motion shows the end state at once.
+- Genre rows follow; Home's trending rows aren't repeated.
 
 ### Hero (signature)
 The Home hero is a full-bleed backdrop behind horizontal and vertical Screening Room scrims, with a title logo or Display Large title, a metadata line, Play and secondary buttons, and page dots (the active dot is Screen White and the rest are 30%). The trailer starts after 3s at rest. The set of hero titles changes every 4 hours.
