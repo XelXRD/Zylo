@@ -231,6 +231,12 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     pos = SubStyle.POSITIONS[(SubStyle.POSITIONS.indexOfFirst { it.first == pos } + 1) % SubStyle.POSITIONS.size].first
     store.put("sub_pos", pos)
   }
+  Group("Opening")
+  var intro by remember { mutableStateOf(store.introSound) }
+  Toggle("Opening sound", "Play Zylo's sound with the opening animation when the app starts. Reduce motion skips the animation and its sound.", intro) {
+    intro = !intro
+    store.introSound = intro
+  }
   Group("Accessibility")
   Toggle("Reduce motion", "Turn off card growth, fades and focus zoom.", store.reduceMotion) { store.reduceMotion = !store.reduceMotion }
 }

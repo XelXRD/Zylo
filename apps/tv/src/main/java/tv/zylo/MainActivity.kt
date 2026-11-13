@@ -124,6 +124,12 @@ class Nav(private val stack: SnapshotStateList<Screen>, private val store: Store
 }
 
 class MainActivity : ComponentActivity() {
+  // While the opening plays, any button skips it (and nothing reaches the app underneath).
+  override fun dispatchKeyEvent(event: android.view.KeyEvent): Boolean {
+    if (Intro.showing) { if (event.action == android.view.KeyEvent.ACTION_UP) Intro.skip(); return true }
+    return super.dispatchKeyEvent(event)
+  }
+
   override fun onCreate(savedInstanceState: Bundle?) {
     super.onCreate(savedInstanceState)
     val store = Store(this)
@@ -198,6 +204,9 @@ class MainActivity : ComponentActivity() {
         // Live TV reminders, over anything (switching from a film or another channel is the point).
         if (Xtream.from(store) != null && ui.profile.kids == null) ReminderAlert(store, ui, nav)
         AskHost() // Zylo's text dialog and notices, over everything
+        // The opening, over the app while it loads: cold start only (not a profile switch or a return from the background).
+        var intro by remember { mutableStateOf(savedInstanceState == null && !store.reduceMotion) }
+        if (intro) IntroScreen(store.introSound) { intro = false }
       }
     }
   }

@@ -234,6 +234,11 @@ class Store(private val open: (String) -> SharedPreferences) {
     get() = trailerSoundState.value
     set(v) { trailerSoundState.value = v; g.edit().putBoolean("trailerSound", v).apply() }
 
+  /** Zylo's sound with the opening animation (on a cold start). */
+  var introSound: Boolean
+    get() = g.getBoolean("introSound", true)
+    set(v) = g.edit().putBoolean("introSound", v).apply()
+
   private val reduceMotionState = mutableStateOf(g.getBoolean("reduceMotion", false))
   var reduceMotion: Boolean
     get() = reduceMotionState.value
