@@ -1,5 +1,5 @@
 {
-  "version": "0.28.1",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.28.1.apk",
-  "notes": "What's new in 0.28.1\n\n• Trailers: the sound now starts with the picture, instead of playing over a still image for the first few seconds.\n• The Home trailer fills the whole hero, with no black strip along the top."
+  "version": "0.29.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.29.0.apk",
+  "notes": "What's new in 0.29.0\n\n• Discover: every game now has real film artwork and acts itself out when you land on it. Blind Date comes into focus, Double Feature's pair slides together, Time Machine dials back the years, Movie Night Match fans out its posters, and more.\n• The spotlight at the top of Discover picks a different game every time you open it."
 }
