@@ -1,5 +1,5 @@
 {
-  "version": "0.27.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.27.0.apk",
-  "notes": "What's new in 0.27.0\n\n• Playback that recovers: if a source fails you get a plain reason, Try Next Source or Choose Source, and your place is never lost. Failed sources are marked Unavailable.\n• Choose Source hides files that are clearly for a different title.\n• Zylo's own dialogs for keys, PINs and links (with Show, and Send from Phone), and clear error messages instead of raw codes.\n• Discover: a daily spotlight, then every mode grouped with full descriptions.\n• Setup ticks off finished steps; Disconnect and Remove ask for a second press.\n• Cleaner trailer previews, Zylo-style player controls, and icons instead of emoji."
+  "version": "0.28.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.28.0.apk",
+  "notes": "What's new in 0.28.0\n\n• Faster browsing: Home, Discover, Movies, Series and Anime open from what was loaded last time and refresh in the background. Other sections load while you're on Home.\n• Settings > Playback: Maximum file size (2 to 40 GB) and Sort sources (best match, highest quality, largest or smallest).\n• Watch Challenges: posters light up as you watch them, a Seen stamp lands on each new one, and finishing a challenge gets its own moment.\n• Zylo Wrapped: numbers count up over your year's own artwork.\n• This or That: the one you pass on fades to grey and falls away.\n• Up and Down between rows go to the title directly below, not the one at the same number."
 }
