@@ -371,7 +371,8 @@ fun Trailer(
 // YouTube's own interface never shows inside Zylo. The player is drawn ~24% larger than the box and centred, so the
 // channel badge and watermark in the corners fall outside it; playback starts a few seconds in (past rating cards and
 // studio idents); Zylo only reports "playing" once the title bar YouTube shows at the start has gone, so the artwork stays
-// over it until then; and it stops a few seconds before the end, before the suggested-videos screen.
+// over it until then (silent, so sound never plays over a still picture); and it stops a few seconds before the end,
+// before the suggested-videos screen.
 private const val TRAILER_START = 4
 private const val TRAILER_SETTLE = 3.5
 private const val TRAILER_TAIL = 3
@@ -379,7 +380,7 @@ private const val TRAILER_TAIL = 3
 private fun trailerHtml(key: String, sound: Boolean, cover: Boolean) = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
 <style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}${
-  if (cover) "#p,iframe{position:fixed;left:-12vw;top:50%;width:124vw!important;height:69.75vw!important;transform:translateY(-50%);border:0;pointer-events:none}"
+  if (cover) "#p,iframe{position:fixed;left:50%;top:50%;width:max(124vw,220.4vh)!important;height:max(69.75vw,124vh)!important;transform:translate(-50%,-50%);border:0;pointer-events:none}"
   else "#p,iframe{position:fixed;top:-12%;left:-12%;width:124%!important;height:124%!important;border:0;pointer-events:none}"
 }</style>
 </head><body><div id="p"></div>
@@ -388,12 +389,14 @@ var player,shown=false,timer=null;
 function check(){
   if(!player||!player.getCurrentTime)return;
   var t=player.getCurrentTime(),d=player.getDuration();
-  if(!shown&&player.getPlayerState()==1&&t>=$TRAILER_START+$TRAILER_SETTLE){shown=true;Zylo.state(1)}
+  if(!shown&&player.getPlayerState()==1&&t>=$TRAILER_START+$TRAILER_SETTLE){shown=true;Zylo.state(1)${if (sound) ";soundUp()" else ""}}
   if(shown&&d>0&&d-t<=$TRAILER_TAIL){shown=false;clearInterval(timer);player.pauseVideo();Zylo.state(0)}
 }
-function onYouTubeIframeAPIReady(){player=new YT.Player('p',{width:'100%',height:'100%',videoId:'$key',playerVars:{autoplay:1,mute:${if (sound) 0 else 1},controls:0,rel:0,playsinline:1,iv_load_policy:3,disablekb:1,fs:0,cc_load_policy:0,start:$TRAILER_START,origin:'https://zylo.tv'},
-events:{onReady:function(e){${if (sound) "e.target.unMute();e.target.setVolume(100);" else "e.target.mute();"}nocc();e.target.playVideo();timer=setInterval(check,250)},
+function onYouTubeIframeAPIReady(){player=new YT.Player('p',{width:'100%',height:'100%',videoId:'$key',playerVars:{autoplay:1,mute:1,controls:0,rel:0,playsinline:1,iv_load_policy:3,disablekb:1,fs:0,cc_load_policy:0,start:$TRAILER_START,origin:'https://zylo.tv'},
+events:{onReady:function(e){e.target.mute();nocc();e.target.playVideo();timer=setInterval(check,250)},
 onStateChange:function(e){if(e.data==1)nocc();if(e.data==0){shown=false;Zylo.state(0)}else if(e.data==2&&shown){shown=false;Zylo.state(2)}}}})}
+// Silent while the artwork still covers the video; the sound comes up with the picture, over half a second.
+function soundUp(){var v=0;player.setVolume(0);player.unMute();var f=setInterval(function(){v+=10;player.setVolume(v);if(v>=100)clearInterval(f)},50)}
 function nocc(){try{player.unloadModule('captions');player.unloadModule('cc')}catch(x){}}
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>
 """
