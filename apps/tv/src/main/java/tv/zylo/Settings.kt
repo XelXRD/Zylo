@@ -171,9 +171,11 @@ private fun Header(title: String, text: String) = Column(Modifier.padding(bottom
 
 @Composable
 private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-  Header("Playback", "How browsing and previews behave.")
+  Header("Playback", "Previews while you browse, which source Play picks, subtitles and audio.")
+  Group("Previews")
   Toggle("Trailer previews", "Play a muted trailer when you rest on a title.", store.previews) { store.previews = !store.previews }
   Toggle("Trailer sound", "Play preview trailers with sound instead of muted.", store.trailerSound) { store.trailerSound = !store.trailerSound }
+  Group("Sources")
   var cap by remember { mutableStateOf(store.maxQuality) }
   Choice("Maximum quality", "The highest quality Play picks on its own. Higher sources stay in Choose Source.", cap) {
     cap = QUALITY_STEPS[(QUALITY_STEPS.indexOf(cap) + 1) % QUALITY_STEPS.size]
@@ -189,6 +191,12 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     sort = SourceSort.CHOICES[(SourceSort.CHOICES.indexOfFirst { it.first == sort } + 1) % SourceSort.CHOICES.size].first
     store.sourceSort = sort
   }
+  var autoSource by remember { mutableIntStateOf(AutoSource.min(store)) }
+  Choice("Pick a source for me", "Play chooses the best source once this many are found, so it has more to choose from. Off: you always choose from the list.", AutoSource.label(autoSource)) {
+    autoSource = AutoSource.CHOICES[(AutoSource.CHOICES.indexOf(autoSource) + 1) % AutoSource.CHOICES.size]
+    store.put("autosource", autoSource.toString())
+  }
+  Group("Subtitles and audio")
   var lang by remember { mutableStateOf(store.subLang) }
   ListChoice("Subtitles", "Turned on automatically in this language (each profile has its own). You can always pick others in the player.",
     SUB_LANGS.map { it to (if (it.isEmpty()) "Off" else languageName(it)) }, lang) {
@@ -208,11 +216,6 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     dubs = !dubs
     store.animeDubs = dubs
   }
-  var autoSource by remember { mutableIntStateOf(AutoSource.min(store)) }
-  Choice("Pick a source for me", "Play chooses the best source once this many are found, so it has more to choose from. Off: you always choose from the list.", AutoSource.label(autoSource)) {
-    autoSource = AutoSource.CHOICES[(AutoSource.CHOICES.indexOf(autoSource) + 1) % AutoSource.CHOICES.size]
-    store.put("autosource", autoSource.toString())
-  }
   var size by remember { mutableStateOf(SubStyle.size(store).first) }
   Choice("Subtitle size", "How big subtitles are in the player.", size) {
     size = SubStyle.SIZES[(SubStyle.SIZES.indexOfFirst { it.first == size } + 1) % SubStyle.SIZES.size].first
@@ -228,8 +231,13 @@ private fun Playback(store: Store) = Column(Modifier.verticalScroll(rememberScro
     pos = SubStyle.POSITIONS[(SubStyle.POSITIONS.indexOfFirst { it.first == pos } + 1) % SubStyle.POSITIONS.size].first
     store.put("sub_pos", pos)
   }
+  Group("Accessibility")
   Toggle("Reduce motion", "Turn off card growth, fades and focus zoom.", store.reduceMotion) { store.reduceMotion = !store.reduceMotion }
 }
+
+/** A small heading that groups the settings under it. */
+@Composable
+private fun Group(name: String) = Text(name, Modifier.padding(top = 18.dp, bottom = 2.dp), style = MaterialTheme.typography.titleMedium, color = Z.Text2)
 
 private val SUB_LANGS = listOf("", "en", "es", "fr", "de", "it", "pt", "nl", "pl", "sv", "da", "no", "fi", "ja", "ko", "zh", "ar", "hi", "tr", "ru")
 

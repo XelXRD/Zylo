@@ -18,6 +18,8 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.layout.onGloballyPositioned
+import androidx.compose.ui.layout.positionInRoot
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
@@ -120,7 +122,7 @@ fun deepCuts(store: Store): List<Shelf> {
     val got = runCatching { rawList(t, path, type) }.getOrDefault(emptyList()).filter { !seenBefore(store, it.first) }.shuffled().take(14)
     return got.map { it.first } to got.associate { it.first.key to caption(it.first, it.second) }
   }
-  val score = { _: Item, o: JSONObject -> "★ %.1f from just %,d ratings".format(o.optDouble("vote_average"), o.optInt("vote_count")) }
+  val score = { _: Item, o: JSONObject -> "Rated %.1f from just %,d ratings".format(o.optDouble("vote_average"), o.optInt("vote_count")) }
   val (acclaimed, c1) = pick("/discover/movie?vote_average.gte=7.6&vote_count.gte=150&vote_count.lte=900&sort_by=vote_average.desc&page=${page(6)}", "movie", score)
   val (whispers, c2) = pick("/discover/movie?vote_average.gte=8&vote_count.gte=25&vote_count.lte=150&sort_by=vote_average.desc&page=${page(6)}", "movie", score)
   val world = langs.flatMap { (code, name) ->
@@ -128,11 +130,11 @@ fun deepCuts(store: Store): List<Shelf> {
       .getOrDefault(emptyList()).filter { !seenBefore(store, it.first) }.shuffled().take(4).map { Triple(it.first, name, it.second) }
   }.shuffled()
   val (classics, c4) = pick("/discover/movie?primary_release_date.lte=1979-12-31&vote_average.gte=7.5&vote_count.gte=120&vote_count.lte=1500&sort_by=vote_average.desc&page=${page(6)}", "movie") { i, _ -> "From ${i.year}. Hardly anyone remembers." }
-  val (cancelled, c5) = pick("/discover/tv?with_status=4&vote_average.gte=7.4&vote_count.gte=40&sort_by=vote_average.desc&page=${page(3)}", "tv") { i, o -> "Cancelled. ★ %.1f".format(o.optDouble("vote_average")) }
+  val (cancelled, c5) = pick("/discover/tv?with_status=4&vote_average.gte=7.4&vote_count.gte=40&sort_by=vote_average.desc&page=${page(3)}", "tv") { i, o -> "Cancelled. Rated %.1f".format(o.optDouble("vote_average")) }
   return listOf(
     Shelf("CASE FILE 01  ·  Acclaimed, then ignored", "Critics loved them. Audiences never turned up.", acclaimed, c1),
     Shelf("CASE FILE 02  ·  Whispers", "Rated brilliantly by a few hundred people at most.", whispers, c2),
-    Shelf("CASE FILE 03  ·  Lost in translation", "The best of ${langs.joinToString(", ") { it.second }} cinema, this time.", world.map { it.first }, world.associate { it.first.key to "${it.second}  ·  ★ %.1f".format(it.third.optDouble("vote_average")) }),
+    Shelf("CASE FILE 03  ·  Lost in translation", "The best of ${langs.joinToString(", ") { it.second }} cinema, this time.", world.map { it.first }, world.associate { it.first.key to "${it.second}  ·  %.1f TMDB".format(it.third.optDouble("vote_average")) }),
     Shelf("CASE FILE 04  ·  Forgotten classics", "Before 1980, well made, barely remembered.", classics, c4),
     Shelf("CASE FILE 05  ·  Gone too soon", "Series that were cancelled anyway.", cancelled, c5),
   )
@@ -419,7 +421,7 @@ fun ThisOrThatPage(store: Store, type: String, nav: Nav) {
           .graphicsLayer { alpha = words.value; translationY = (1 - words.value) * 28.dp.toPx() }) {
           Text("YOUR WINNER", style = MaterialTheme.typography.labelLarge, color = Z.Red)
           Text(w.title, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.displayMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-          MetaLine(listOf(w.year, "★ %.1f".format(w.rating), "Still standing after ${g.round - 1} rounds"), Modifier.padding(top = 6.dp))
+          MetaLine(listOf(w.year, "%.1f TMDB".format(w.rating), "Still standing after ${g.round - 1} rounds"), Modifier.padding(top = 6.dp))
           if (drawn.isNotEmpty()) Text("You kept choosing ${drawn.joinToString(", ")}.", Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
           Row(Modifier.padding(top = 20.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
             ZButton("Play", { nav.play(w) }, Modifier.focusRequester(left), primary = true)
@@ -465,7 +467,7 @@ fun ThisOrThatPage(store: Store, type: String, nav: Nav) {
                 AsyncImage(img(item.backdrop, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop, colorFilter = lightFilter(light))
                 Column(Modifier.align(Alignment.BottomStart).fillMaxWidth().background(Brush.verticalGradient(listOf(Color.Transparent, Color.Black.copy(alpha = 0.92f)))).padding(18.dp)) {
                   Text(item.title, style = MaterialTheme.typography.headlineSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                  MetaLine(listOf(item.year, "★ %.1f".format(item.rating)))
+                  MetaLine(listOf(item.year, "%.1f TMDB".format(item.rating)))
                   Text(item.overview, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
                 }
               }
@@ -486,8 +488,8 @@ fun HelpMePage(type: String, nav: Nav) {
     Text("Help me choose", style = MaterialTheme.typography.displaySmall)
     Text("Two ways to find tonight's ${if (type == "movie") "film" else if (type == "anime") "anime" else "series"}.", Modifier.padding(top = 6.dp, bottom = 26.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2)
     Row(horizontalArrangement = Arrangement.spacedBy(20.dp)) {
-      listOf(Triple("✦  Pick for Me", "Answer five quick questions about mood, era and more. Zylo picks, and you can re-roll.", { nav.replace(Screen.Quiz(type)) }),
-        Triple("⚔  This or That", "Two at a time: keep the one you'd rather watch. It learns as you go until one is left.", { nav.replace(Screen.ThisOrThat(type)) }))
+      listOf(Triple("Pick for Me", "Answer five quick questions about mood, era and more. Zylo picks, and you can re-roll.", { nav.replace(Screen.Quiz(type)) }),
+        Triple("This or That", "Two at a time: keep the one you'd rather watch. It learns as you go until one is left.", { nav.replace(Screen.ThisOrThat(type)) }))
         .forEachIndexed { i, (name, line, go) ->
           ZSurface(go, Modifier.weight(1f).height(190.dp).then(if (i == 0) Modifier.focusRequester(first) else Modifier), container = Z.Card) {
             Column(Modifier.fillMaxSize().padding(24.dp), verticalArrangement = Arrangement.Center) {
@@ -615,7 +617,7 @@ fun blindDate(store: Store): BlindDate? {
       d.optJSONArray("production_countries")?.objects()?.firstOrNull()?.str("name")?.let { "Made in $it" },
       d.str("original_language")?.takeIf { it != "en" }?.let { "Not in English: ${languageName(it)}" },
       Tmdb.certification(d)?.let { "Rated $it" },
-      "★ %.1f from %,d ratings".format(d.optDouble("vote_average"), d.optInt("vote_count")),
+      "Rated %.1f from %,d ratings".format(d.optDouble("vote_average"), d.optInt("vote_count")),
       director?.let { dir -> runCatching { t.get("/person/${dir.optInt("id")}/movie_credits").optJSONArray("crew")?.objects()?.count { it.optString("job") == "Director" } }.getOrNull()?.let { "Its director has made $it films" } },
       d.optJSONObject("keywords")?.optJSONArray("keywords")?.objects()?.map { it.optString("name") }?.filter { k -> names.none { k.contains(it, true) } }?.shuffled()?.take(3)
         ?.takeIf { it.isNotEmpty() }?.let { "Themes: ${it.joinToString(", ")}" },
@@ -731,8 +733,16 @@ fun DiscoverFront(store: Store, nav: Nav, s: RowsState) {
   val last = remember { store.watches().maxByOrNull { it.at }?.item?.takeIf { it.backdrop != null } }
   val from = last?.takeIf { featured.name == "Rabbit Hole" }
   val art = from?.backdrop ?: s.rows.flatMap { it.second }.filter { it.backdrop != null }.let { l -> l.getOrNull(day % l.size.coerceAtLeast(1)) }?.backdrop
+  // As the spotlight slides under the top bar it fades as a whole, so its Start button never floats there on its own.
+  val density = androidx.compose.ui.platform.LocalDensity.current
+  var shown by remember { mutableFloatStateOf(1f) }
   Column {
-    Box(Modifier.padding(horizontal = Z.Pad).fillMaxWidth().height(236.dp).clip(Z.Large).background(Z.Card)) {
+    Box(Modifier.padding(horizontal = Z.Pad).fillMaxWidth().height(236.dp)
+      .onGloballyPositioned { c ->
+        val hidden = with(density) { 124.dp.toPx() } - c.positionInRoot().y // under the nav shade
+        shown = (1f - hidden / (c.size.height * 0.4f)).coerceIn(0f, 1f)
+      }
+      .graphicsLayer { alpha = shown }.clip(Z.Large).background(Z.Card)) {
       if (art != null) AsyncImage(img(art, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
       // Atmosphere, not a recommendation: the artwork stays well back behind the words.
       Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.97f), 0.45f to Z.Bg.copy(alpha = 0.85f), 1f to Z.Bg.copy(alpha = 0.45f))))
@@ -758,6 +768,5 @@ fun DiscoverFront(store: Store, nav: Nav, s: RowsState) {
         }
       }
     }
-    Text("By genre", Modifier.padding(start = Z.Pad, top = 26.dp), style = MaterialTheme.typography.headlineSmall)
   }
 }

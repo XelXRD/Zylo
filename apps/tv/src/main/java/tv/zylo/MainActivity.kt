@@ -24,6 +24,8 @@ import androidx.compose.runtime.snapshots.SnapshotStateList
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.ExperimentalComposeUiApi
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusProperties
@@ -270,9 +272,9 @@ fun TopNav(ui: UiState, nav: Nav) {
     }
     Spacer(Modifier.weight(1f))
     BusyChip()
-    NavIcon(Icons.Filled.Search, down) { nav.push(Screen.Search) }
-    NavIcon(Icons.Filled.Settings, down) { nav.push(Screen.Settings) }
-    NavSurface({ nav.push(Screen.Profiles) }, down) { Box(Modifier.padding(5.dp)) { Avatar(ui.profile, 28.dp) } }
+    NavIcon(Icons.Filled.Search, "Search", down) { nav.push(Screen.Search) }
+    NavIcon(Icons.Filled.Settings, "Settings", down) { nav.push(Screen.Settings) }
+    NavSurface({ nav.push(Screen.Profiles) }, down.semantics { contentDescription = "Profile: ${ui.profile.name}. Switch profile" }) { Box(Modifier.padding(5.dp)) { Avatar(ui.profile, 28.dp) } }
   }
 }
 
@@ -288,7 +290,7 @@ private fun NavSurface(onClick: () -> Unit, modifier: Modifier = Modifier, selec
 )
 
 @Composable
-private fun NavIcon(icon: ImageVector, modifier: Modifier, onClick: () -> Unit) = NavSurface(onClick, modifier) { Box(Modifier.padding(9.dp)) { Glyph(icon, 20.dp) } }
+private fun NavIcon(icon: ImageVector, label: String, modifier: Modifier, onClick: () -> Unit) = NavSurface(onClick, modifier, selected = true) { Box(Modifier.padding(9.dp)) { Glyph(icon, 20.dp, label = label) } }
 
 @Composable
 fun Welcome(nav: Nav) {

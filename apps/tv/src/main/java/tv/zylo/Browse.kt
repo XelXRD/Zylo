@@ -455,7 +455,7 @@ fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier,
           Box(Modifier.fillMaxSize().alpha(overlay).background(Brush.verticalGradient(0.3f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f))))
           Column(Modifier.align(Alignment.BottomStart).padding(12.dp).alpha(overlay)) {
             TitleLogo(look, item.title, MaterialTheme.typography.titleMedium.copy(color = Z.Text), 170.dp, 44.dp)
-            MetaLine(Tmdb.meta(item, d) + listOfNotNull(item.rating.takeIf { it > 0 }?.let { "★ %.1f".format(it) }), Modifier.padding(top = 3.dp))
+            MetaLine(listOfNotNull(item.rating.takeIf { it > 0 }?.let { "%.1f TMDB".format(it) }) + Tmdb.meta(item, d), Modifier.padding(top = 3.dp))
             Text(item.overview, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
           }
         }

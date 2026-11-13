@@ -193,7 +193,7 @@ fun PersonPage(store: Store, p: Screen.Person, nav: Nav) {
           items(list, key = { it.key }) { item ->
             Box {
               PosterCard(store, item, Modifier.focusMemory(focus, item.key, item == list.first())) { nav.push(Screen.Title(item)) }
-              if (seenBefore(store, item)) Text("✓ Seen", Modifier.align(Alignment.TopEnd).padding(6.dp).background(Z.Bg.copy(alpha = 0.85f), Z.Small).padding(horizontal = 6.dp, vertical = 2.dp),
+              if (seenBefore(store, item)) Text("Seen", Modifier.align(Alignment.TopEnd).padding(6.dp).background(Z.Bg.copy(alpha = 0.85f), Z.Small).padding(horizontal = 6.dp, vertical = 2.dp),
                 style = MaterialTheme.typography.labelSmall)
             }
           }

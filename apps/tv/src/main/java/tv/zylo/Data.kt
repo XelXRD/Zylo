@@ -318,10 +318,14 @@ class Store(private val open: (String) -> SharedPreferences) {
   fun watched(key: String) = watch(key)?.finished == true || key in traktWatched()
 
   private var traktCache: Set<String>? = null
+  private var showsCache: Set<String>? = null
   fun traktWatched(): Set<String> = traktCache ?: strings(JSONArray(p.getString("trakt_watched", "[]"))).toSet().also { traktCache = it }
+  /** Series with any episode watched on Trakt ("tv:123"), worked out once rather than per card. */
+  fun traktShows(): Set<String> = showsCache ?: traktWatched().filter { it.startsWith("tv:") }.map { it.split(':').take(2).joinToString(":") }.toSet().also { showsCache = it }
   fun setTraktWatched(keys: Set<String>) {
     put("trakt_watched", JSONArray(keys.toList()).toString())
     traktCache = keys
+    showsCache = null
   }
 
   fun forget(key: String) {

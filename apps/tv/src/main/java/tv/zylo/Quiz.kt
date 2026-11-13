@@ -105,7 +105,7 @@ fun media(type: String) = if (type == "anime") "tv" else type
 
 /** Whether this title's been watched, here or on Trakt (for a series: any episode). */
 fun seenBefore(store: Store, item: Item) =
-  if (item.type == "movie") store.watched("movie:${item.id}") else ("tv:${item.id}:").let { p -> store.traktWatched().any { it.startsWith(p) } || store.continueWatching().any { it.item.key == item.key } }
+  if (item.type == "movie") store.watched("movie:${item.id}") else "tv:${item.id}" in store.traktShows() || store.latest(item)?.let { it.finished || it.started } == true
 
 /** The shortlist: a random spread of pages of matches, shuffled, filtered by new/rewatch. */
 fun quizDeck(store: Store, t: Tmdb, type: String, answers: List<Answer>, rnd: Random = Random): List<Item> {
@@ -231,7 +231,7 @@ private fun Result(store: Store, type: String, answers: List<Answer>, nav: Nav, 
         else TitleLogo(look, item.title, MaterialTheme.typography.displaySmall, 380.dp, 110.dp)
       }
       if (!spinning) {
-        MetaLine(listOfNotNull(item.year.ifEmpty { null }, item.rating.takeIf { it > 0 }?.let { "★ %.1f".format(it) }, Tmdb.certification(details ?: org.json.JSONObject()),
+        MetaLine(listOfNotNull(item.year.ifEmpty { null }, item.rating.takeIf { it > 0 }?.let { "%.1f TMDB".format(it) }, Tmdb.certification(details ?: org.json.JSONObject()),
           if (seenBefore(store, item)) "You've seen this" else null), Modifier.padding(top = 12.dp))
         Text(item.overview, Modifier.padding(top = 10.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 4, overflow = TextOverflow.Ellipsis)
         // Why it matched: the answers given (skipping the "any" ones).

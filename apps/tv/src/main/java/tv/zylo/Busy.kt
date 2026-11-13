@@ -37,6 +37,8 @@ fun BusyChip() {
 
 @Composable
 private fun Pulse() {
+  // Reduce motion: a steady dot.
+  if (LocalReduceMotion.current) return Box(Modifier.size(8.dp).background(Z.Red, CircleShape))
   val t = androidx.compose.animation.core.rememberInfiniteTransition(label = "busy")
   val a by t.animateFloat(0.3f, 1f, androidx.compose.animation.core.infiniteRepeatable(androidx.compose.animation.core.tween(700), androidx.compose.animation.core.RepeatMode.Reverse), label = "pulse")
   Box(Modifier.size(8.dp).background(Z.Red.copy(alpha = a), CircleShape))

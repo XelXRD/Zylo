@@ -13,6 +13,7 @@ import androidx.compose.foundation.lazy.itemsIndexed
 import androidx.compose.foundation.lazy.rememberLazyListState
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.KeyboardArrowDown
+import androidx.compose.material.icons.filled.Star
 import androidx.compose.runtime.*
 import androidx.compose.runtime.snapshots.SnapshotStateMap
 import androidx.compose.ui.Alignment
@@ -219,7 +220,7 @@ fun bestGuide(x: Xtream, c: Channel): List<Programme> {
 }
 
 private val ALL = Category("", "All Channels")
-private val FAVS = Category("fav", "★ Favourites")
+private val FAVS = Category("fav", "Favourites")
 private fun hm(t: Long) = SimpleDateFormat("HH:mm", Locale.UK).format(Date(t))
 private fun day(t: Long) = SimpleDateFormat("yyyyMMdd", Locale.UK).format(Date(t))
 
@@ -460,7 +461,7 @@ private fun Guide(store: Store, x: Xtream, s: LiveState, nav: Nav, windowStart: 
                 if (c.logo != null) AsyncImage(c.logo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
               }
               Spacer(Modifier.width(10.dp))
-              if (fav) Text("★ ", style = MaterialTheme.typography.titleSmall, color = Z.Warning)
+              if (fav) Box(Modifier.padding(end = 6.dp)) { Glyph(androidx.compose.material.icons.Icons.Filled.Star, 14.dp, Z.Text, "Favourite") }
               Text(c.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }
           }

@@ -27,6 +27,8 @@ import androidx.compose.ui.focus.FocusRequester
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.onFocusChanged
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.graphics.ColorFilter
 import androidx.compose.ui.graphics.Path
 import androidx.compose.ui.graphics.vector.ImageVector
@@ -53,7 +55,7 @@ object Z {
   val Focus = Color(0xFF3A3B45) // a focused panel: lighter than Elevated, with a white outline
   val Text = Color(0xFFF5F5F5)
   val Text2 = Color(0xFFA4A5AB)
-  val Muted = Color(0xFF73747D)
+  val Muted = Color(0xFF7F8088) // 4.8:1 on Bg, so hints pass at small sizes
   val Border = Color(0xFF34353D)
   val Success = Color(0xFF36B37E)
   val Warning = Color(0xFFE5A83B)
@@ -199,7 +201,8 @@ fun Logo(height: Dp = 22.dp, wordmark: Boolean = true, color: Color = Z.Text) = 
 // --- Components -------------------------------------------------------------------------------
 
 @Composable
-fun Glyph(icon: ImageVector, size: Dp = 18.dp, tint: Color = LocalContentColor.current) = Image(icon, null, Modifier.size(size), colorFilter = ColorFilter.tint(tint))
+/** A Material icon. Give it a [label] when it stands alone (TalkBack reads it); leave it null when text beside it says the same. */
+fun Glyph(icon: ImageVector, size: Dp = 18.dp, tint: Color = LocalContentColor.current, label: String? = null) = Image(icon, label, Modifier.size(size), colorFilter = ColorFilter.tint(tint))
 
 /** Primary: Zylo red. Secondary: translucent dark, turns white on focus. */
 @Composable
@@ -316,12 +319,15 @@ fun MetaLine(parts: List<String>, modifier: Modifier = Modifier, color: Color = 
 
 /** Poster card for grids: artwork, progress bar when part-watched, tick when watched. */
 @Composable
-fun PosterCard(store: Store, item: Item, modifier: Modifier = Modifier, onClick: () -> Unit) = ZCard(onClick, modifier.aspectRatio(2f / 3f)) {
+fun PosterCard(store: Store, item: Item, modifier: Modifier = Modifier, onClick: () -> Unit) = ZCard(onClick, modifier.aspectRatio(2f / 3f).semantics { contentDescription = posterLabel(store, item) }) {
   Box(Modifier.fillMaxSize()) {
     Artwork(img(item.poster, "w342"), item.title)
     Marks(store, item)
   }
 }
+
+/** What TalkBack says for a poster: the title, its year, and whether it's been watched. */
+fun posterLabel(store: Store, item: Item) = listOfNotNull(item.title, item.year.ifEmpty { null }, "Watched".takeIf { seenBefore(store, item) }).joinToString(", ")
 
 /** Artwork with the title underneath, so a missing or slow image never leaves a blank card. */
 @Composable

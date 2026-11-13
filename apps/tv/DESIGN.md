@@ -12,7 +12,7 @@ colors:
   hairline: "#34353D"
   screen-white: "#F5F5F5"
   aisle-grey: "#A4A5AB"
-  dim-grey: "#73747D"
+  dim-grey: "#7F8088"
   success: "#36B37E"
   warning: "#E5A83B"
   error: "#E05252"

@@ -216,7 +216,7 @@ private fun JourneyPage(store: Store, f: Franchise, nav: Nav) {
               }
               when {
                 coming -> Text(if (s.date.isEmpty()) "Coming" else "Coming ${s.date}", Modifier.background(Z.Red, Z.Small).padding(horizontal = 8.dp, vertical = 3.dp), style = MaterialTheme.typography.labelMedium)
-                seen -> Text("✓ Seen", style = MaterialTheme.typography.labelLarge, color = Z.Text2)
+                seen -> Text("Seen", style = MaterialTheme.typography.labelLarge, color = Z.Text2)
               }
             }
           }
@@ -303,7 +303,7 @@ fun ChallengesPage(store: Store, nav: Nav) {
                 when {
                   list == null -> Text(ch.line, style = MaterialTheme.typography.bodySmall, color = Z.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
                   lit.size == list.size -> StatusChip("Complete", Z.Success)
-                  else -> Text("${lit.size} of ${list.size} lit", style = MaterialTheme.typography.labelMedium, color = Z.Text2)
+                  else -> Text("${lit.size} of ${list.size} watched", style = MaterialTheme.typography.labelMedium, color = Z.Text2)
                 }
               }
             }
@@ -364,7 +364,7 @@ fun ChallengesPage(store: Store, nav: Nav) {
                     WatchMarks(store.latest(item)?.takeIf { !it.finished }, false)
                   }
                 }
-                Text("${i + 1}. ${item.title}", Modifier.padding(top = 6.dp), style = MaterialTheme.typography.labelMedium, color = if (on) Z.Text else Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                Text("${i + 1}. ${item.title}", Modifier.padding(top = 16.dp), style = MaterialTheme.typography.labelMedium, color = if (on) Z.Text else Z.Text2, maxLines = 1, overflow = TextOverflow.Ellipsis)
               }
             }
           }
