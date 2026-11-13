@@ -318,7 +318,7 @@ Firm, compact and remote-legible.
 The Home hero is a full-bleed backdrop behind horizontal and vertical Screening Room scrims, with a title logo or Display Large title, a metadata line, Play and secondary buttons, and page dots (the active dot is Screen White and the rest are 30%). The trailer starts after 3s at rest. The set of hero titles changes every 4 hours.
 
 ### Trailers
-- Trailers are YouTube embeds, but YouTube's interface never shows: the player is drawn 24% larger than its box so corner badges fall outside, starts 4s in (past rating cards), stays under the artwork until 3.5s of playback (YouTube's title bar has gone), drops captions, and hands back to the artwork 3s before the end. Countdowns, reactions, recaps, featurettes and similar aren't used as trailers.
+- Trailers are YouTube embeds, but YouTube's interface never shows: the player is drawn 24% larger than its box so corner badges fall outside, starts 4s in (past rating cards), stays under the artwork, silent, until 3.5s of playback (YouTube's title bar has gone), then the sound fades up with the picture, drops captions, and hands back to the artwork 3s before the end. Countdowns, reactions, recaps, featurettes and similar aren't used as trailers.
 
 ### Player
 - Controls take Zylo's focus (Focus Graphite with a 2dp white edge, 10dp corners), never Media3's default highlight.
