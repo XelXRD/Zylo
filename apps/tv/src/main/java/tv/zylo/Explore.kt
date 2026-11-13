@@ -505,7 +505,7 @@ fun HelpMePage(type: String, nav: Nav) {
 // --- Time Machine ---------------------------------------------------------------------------------
 
 /** A decade's look: accent colour and a line. */
-private fun decadeLook(year: Int) = when (year / 10 * 10) {
+fun decadeLook(year: Int) = when (year / 10 * 10) {
   1950 -> 0xFFB08D57 to "Technicolor and drive-ins"
   1960 -> 0xFFE07A5F to "Swinging, spaced-out and new wave"
   1970 -> 0xFFD2691E to "Grain, flares and the New Hollywood"
@@ -721,19 +721,26 @@ private fun modeGroups(store: Store): List<ModeGroup> {
 }
 
 /**
- * The top of Discover: one mode in the spotlight (a different one each day) over real artwork, then every mode, grouped
+ * The top of Discover: one mode in the spotlight (a different one each visit) over real artwork, then every mode, grouped
  * by what you're in the mood to do. Rabbit Hole in the spotlight starts from the last thing you watched.
  */
 @Composable
 fun DiscoverFront(store: Store, nav: Nav, s: RowsState) {
   val groups = remember { modeGroups(store) }
   val all = groups.flatMap { it.modes }
-  val day = remember { Calendar.getInstance().get(Calendar.DAY_OF_YEAR) }
-  val featured = all[day % all.size]
+  // A different game in the spotlight every time you open Discover, and fresh artwork behind every tile.
+  val featured = remember { all.random() }
+  val seed = remember { kotlin.random.Random.nextInt(1000) }
+  val pool = remember(s.rows.size) { s.rows.flatMap { it.second }.filter { it.backdrop != null && it.poster != null }.distinctBy { it.key }.shuffled(kotlin.random.Random(seed)) }
   val last = remember { store.watches().maxByOrNull { it.at }?.item?.takeIf { it.backdrop != null } }
   val from = last?.takeIf { featured.name == "Rabbit Hole" }
-  val art = from?.backdrop ?: s.rows.flatMap { it.second }.filter { it.backdrop != null }.let { l -> l.getOrNull(day % l.size.coerceAtLeast(1)) }?.backdrop
-  // As the spotlight slides under the top bar it fades as a whole, so its Start button never floats there on its own.
+  val art = from?.backdrop ?: pool.firstOrNull()?.backdrop
+  // Entrance: the artwork settles from a slow push-in while the words rise into place. Still with Reduce motion.
+  val reduce = LocalReduceMotion.current
+  val enter = remember { androidx.compose.animation.core.Animatable(if (reduce) 1f else 0f) }
+  LaunchedEffect(Unit) { enter.animateTo(1f, tween(if (reduce) 0 else 1400, easing = Z.EaseOut)) }
+  // As the spotlight slides under the top bar its words and Start button fade out (so Start never floats there on its
+  // own) while the artwork stays on, dimmed, as atmosphere.
   val density = androidx.compose.ui.platform.LocalDensity.current
   var shown by remember { mutableFloatStateOf(1f) }
   Column {
@@ -742,11 +749,12 @@ fun DiscoverFront(store: Store, nav: Nav, s: RowsState) {
         val hidden = with(density) { 124.dp.toPx() } - c.positionInRoot().y // under the nav shade
         shown = (1f - hidden / (c.size.height * 0.4f)).coerceIn(0f, 1f)
       }
-      .graphicsLayer { alpha = shown }.clip(Z.Large).background(Z.Card)) {
-      if (art != null) AsyncImage(img(art, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+      .graphicsLayer { alpha = 0.35f + 0.65f * shown }.clip(Z.Large).background(Z.Card)) {
+      if (art != null) AsyncImage(img(art, "w1280"), null, Modifier.fillMaxSize().graphicsLayer { val z = 1.12f - 0.12f * enter.value; scaleX = z; scaleY = z }, contentScale = ContentScale.Crop)
       // Atmosphere, not a recommendation: the artwork stays well back behind the words.
       Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.97f), 0.45f to Z.Bg.copy(alpha = 0.85f), 1f to Z.Bg.copy(alpha = 0.45f))))
-      Column(Modifier.align(Alignment.CenterStart).padding(horizontal = 32.dp).widthIn(max = 520.dp)) {
+      Column(Modifier.align(Alignment.CenterStart).padding(horizontal = 32.dp).widthIn(max = 520.dp)
+        .graphicsLayer { val t = ((enter.value - 0.15f) / 0.6f).coerceIn(0f, 1f); alpha = t * shown; translationY = (1 - t) * 20.dp.toPx() }) {
         Text(featured.name, style = MaterialTheme.typography.displaySmall)
         Text(featured.pitch, Modifier.padding(top = 8.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2, maxLines = 3, overflow = TextOverflow.Ellipsis)
         ZButton(if (from != null) "Start from ${from.title}" else "Start", { if (from != null) nav.push(Screen.Rabbit(from)) else featured.go(nav) },
@@ -758,12 +766,7 @@ fun DiscoverFront(store: Store, nav: Nav, s: RowsState) {
       PivotRow {
         LazyRow(contentPadding = PaddingValues(start = Z.Pad, end = 400.dp, top = 10.dp, bottom = 10.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
           items(g.modes, key = { it.name }) { m ->
-            ZSurface({ m.go(nav) }, Modifier.focusMemory(s.focus, "mode/${m.name}").width(236.dp).height(108.dp), container = Z.Card) {
-              Column(Modifier.fillMaxSize().padding(horizontal = 16.dp, vertical = 16.dp)) {
-                Text(m.name, style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                Text(m.line, Modifier.padding(top = 3.dp), style = MaterialTheme.typography.bodySmall, color = LocalContentColor.current.copy(alpha = 0.8f), maxLines = 2, overflow = TextOverflow.Ellipsis)
-              }
-            }
+            ModeTile(store, m, pool, seed + g.modes.indexOf(m) * 3, Modifier.focusMemory(s.focus, "mode/${m.name}")) { m.go(nav) }
           }
         }
       }
