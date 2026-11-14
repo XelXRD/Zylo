@@ -1,5 +1,5 @@
 {
-  "version": "0.30.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.30.0.apk",
-  "notes": "What's new in 0.30.0\n\n• A new opening: when Zylo starts, the house lights go down, a projector beam reaches across and the Z lights up, with its own sound. It plays while the app loads, so it never adds waiting, and any button skips it.\n• Turn the sound off in Settings > Playback > Opening sound. With Reduce motion on, there's no opening at all."
+  "version": "0.31.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.31.0.apk",
+  "notes": "What's new in 0.31.0 — Watch Challenges rotate\n\n• Finished challenges now move to a new \"Completed\" section at the bottom of Watch Challenges, and a new challenge takes their place in the same spot.\n• Eight challenges are on the go at once.\n• Six new built-in challenges: The David Fincher Files, Denis Villeneuve in Order, The Wes Anderson Collection, Best of the 70s, Best of the 90s and Ten Animated Greats.\n• When Zylo's own challenges run low, new ones come from Trakt's most popular public lists (6–20 titles). Only a Trakt Client ID is needed, not a sign-in.\n• Trakt lists that have nothing playable (only episodes, or nothing a kids profile's rating allows) are skipped automatically.\n• Each profile now has its own active and completed challenges.\n• If you were working on Best of the 80s or Around the World, they're now further down the queue and will come back when a slot opens. Your progress on them is kept."
 }
