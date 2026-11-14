@@ -13,8 +13,8 @@ android {
     applicationId = "tv.zylo"
     minSdk = 24
     targetSdk = 36
-    versionCode = 42
-    versionName = "0.30.0"
+    versionCode = 43
+    versionName = "0.31.0"
     // Where Zylo looks for updates: a public GitHub repo's releases ("owner/repo") or a JSON file link. Empty: no checks.
     buildConfigField("String", "UPDATE_FEED", "\"${project.findProperty("zylo.updates") ?: ""}\"")
   }
