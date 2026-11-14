@@ -2,7 +2,7 @@
 
 # Zylo
 
-Media hub for Android TV: films, series, anime and live TV. Built for the Android TV devices and a D-pad remote; no server needed.
+Media hub for Android TV: films, series, anime and live TV. Built for Android TV devices and a D-pad remote; no server needed.
 
 ## Connecting your services
 
