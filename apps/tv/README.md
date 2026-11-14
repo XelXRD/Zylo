@@ -60,7 +60,7 @@ Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSk
 - **Double Feature:** two films that belong together (same director, original and remake, two sides of a subject, light then dark), with a name and the reason.
 - **Moodboard:** pick a feeling (Rainy Sunday, Late-Night Paranoia, Nostalgic Childhood, Dystopian Future, Psychological Mind Games, Summer Adventure, Existential Sci-Fi and more), not a genre.
 - **Help Me Choose:** *Pick for Me* (a five-question quiz with a slot-machine reveal, trailer and re-roll) or *This or That* (two at a time; it learns what you're drawn to until one is left).
-- **Watch Challenges:** curated lists such as the 10 greatest sci-fi films, 7 days of horror, Nolan, Kubrick, Tarantino, Ghibli and Pixar, ticked off automatically from your history (Trakt included).
+- **Watch Challenges:** curated lists such as the 10 greatest sci-fi films, 7 days of horror, Nolan, Kubrick, Tarantino, Ghibli and Pixar, ticked off automatically from your history (Trakt included). Eight are on the go at once; finish one and it moves to Completed while a new one takes its slot, dealt from Trakt's popular public lists once Zylo's own run low.
 - **Time Machine:** any year from 1950: its biggest films, TV, anime, faces, music and news, and hidden gems.
 - **Blind Date:** a film picked for you with only clues. Commit, then it's revealed.
 - **Calendar:** new episodes and films over the next four weeks, with reminders on the day.

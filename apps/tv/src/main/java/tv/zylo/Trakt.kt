@@ -195,6 +195,13 @@ object Trakt {
 
   fun listItems(store: Store, l: TraktList) = refs(JSONArray(paged(store, "/users/${l.user}/lists/${l.id}/items/movie,show")))
 
+  /** Trakt's most-liked public lists short enough to finish (6–20 titles). Needs only the Client ID, no sign-in. */
+  fun popularLists(store: Store) = arr(call(store, "/lists/popular?limit=100", auth = false)).objects().mapNotNull { it.optJSONObject("list") }
+    .filter { it.optInt("item_count") in 6..20 }
+    .mapNotNull { o -> o.optJSONObject("ids")?.optInt("trakt")?.takeIf { it > 0 }?.let { TraktList(o.optString("name"), o.optJSONObject("user")?.optString("username").orEmpty(), it.toString(), o.optInt("item_count")) } }
+
+  fun publicListItems(store: Store, id: String) = refs(arr(call(store, "/lists/$id/items/movie,show?limit=100", auth = false)))
+
   /** Turn refs into cards via TMDB (cached), a few at a time. */
   fun items(t: Tmdb, refs: List<Ref>, max: Int = 60): List<Item> = runBlocking(Dispatchers.IO) {
     val gate = Semaphore(6)

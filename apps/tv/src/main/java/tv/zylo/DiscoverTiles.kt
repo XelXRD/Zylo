@@ -127,7 +127,7 @@ private fun BoxScope.Trick(store: Store, name: String, f: Float, focused: Boolea
     }
     // Your challenge posters, lit where you've watched them.
     "Watch Challenges" -> {
-      val list = remember { CHALLENGES.firstNotNullOfOrNull { c -> Challenges.cached(store, c)?.takeIf { it.isNotEmpty() } } }
+      val list = remember { Challenges.active(store).firstNotNullOfOrNull { c -> Challenges.cached(store, c)?.takeIf { it.isNotEmpty() } } }
       if (list != null) {
         val lit = remember(list) { list.filter { seenBefore(store, it) }.map { it.key }.toSet() }
         Mosaic(list, lit, emptySet(), Modifier.fillMaxSize().graphicsLayer { val z = 1f + 0.05f * f; scaleX = z; scaleY = z })

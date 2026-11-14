@@ -6,6 +6,7 @@ import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.grid.GridCells
+import androidx.compose.foundation.lazy.grid.GridItemSpan
 import androidx.compose.foundation.lazy.grid.LazyVerticalGrid
 import androidx.compose.foundation.lazy.grid.itemsIndexed
 import androidx.compose.foundation.lazy.itemsIndexed
@@ -252,17 +253,72 @@ val CHALLENGES = listOf(
     listOf("ko", "fr", "it", "ja", "es", "de", "sv", "fa", "hi", "pt").mapNotNull { l -> runCatching { t.list("/discover/movie?with_original_language=$l&vote_count.gte=1000&sort_by=vote_average.desc", "movie").firstOrNull() }.getOrNull() }
   },
   Challenge("80s", "📼", "Best of the 80s", "Ten essentials from the decade") { it.list("/discover/movie?primary_release_date.gte=1980-01-01&primary_release_date.lte=1989-12-31&vote_count.gte=3000&sort_by=vote_average.desc", "movie").take(10) },
+  Challenge("fincher", "🔍", "The David Fincher Files", "Every film, in order") { directed(it, "David Fincher") },
+  Challenge("villeneuve", "🏜️", "Denis Villeneuve in Order", "From Incendies to Dune") { directed(it, "Denis Villeneuve") },
+  Challenge("wes", "🎨", "The Wes Anderson Collection", "Symmetry, in order") { directed(it, "Wes Anderson") },
+  Challenge("70s", "🕺", "Best of the 70s", "Ten essentials from the decade") { it.list("/discover/movie?primary_release_date.gte=1970-01-01&primary_release_date.lte=1979-12-31&vote_count.gte=2000&sort_by=vote_average.desc", "movie").take(10) },
+  Challenge("90s", "📟", "Best of the 90s", "Ten essentials from the decade") { it.list("/discover/movie?primary_release_date.gte=1990-01-01&primary_release_date.lte=1999-12-31&vote_count.gte=5000&sort_by=vote_average.desc", "movie").take(10) },
+  Challenge("animation10", "✏️", "Ten Animated Greats", "Drawn, painted, stop-motion") { it.list("/discover/movie?with_genres=16&vote_count.gte=3000&sort_by=vote_average.desc", "movie").take(10) },
 )
 
+/**
+ * Eight challenges are on the go at once. Finish one and it moves to Completed, and the next from the pool takes its
+ * slot: Zylo's own first, then Trakt's popular public lists once those run low (Client ID only, no sign-in).
+ */
 object Challenges {
+  const val SLOTS = 8
+
   /** A challenge's list is fixed the first time it's opened, so the goalposts don't move. */
   fun items(store: Store, c: Challenge): List<Item> {
-    store.str("challenge:${c.id}").takeIf { it.isNotEmpty() }?.let { s -> return JSONArray(s).objects().map { Item.from(it) } }
+    cached(store, c)?.let { return it }
     val got = c.load(Tmdb(store.tmdb))
     if (got.isNotEmpty()) store.put("challenge:${c.id}", JSONArray(got.map { it.toJson() }).toString())
     return got
   }
   fun cached(store: Store, c: Challenge) = store.str("challenge:${c.id}").takeIf { it.isNotEmpty() }?.let { s -> JSONArray(s).objects().map { Item.from(it) } }
+
+  private fun ids(store: Store, k: String) = store.str(k).split('|').filter { it.isNotEmpty() }
+  private fun traktSaved(store: Store) = runCatching { JSONArray(store.str("challenge_trakt").ifEmpty { "[]" }).objects() }.getOrDefault(emptyList())
+
+  /** Trakt lists dealt so far are kept, so a finished one still has its name. */
+  private fun pool(store: Store) = CHALLENGES + traktSaved(store).map { o ->
+    val id = o.optString("id")
+    Challenge("trakt:$id", "📋", o.optString("name"), "From ${o.optString("user")}'s list on Trakt") { t -> Trakt.items(t, Trakt.publicListItems(store, id)) }
+  }
+
+  /** The slots, each finished or unusable one replaced in place by the next undealt challenge. */
+  fun active(store: Store): List<Challenge> {
+    val byId = pool(store).associateBy { it.id }
+    val filled = deal(ids(store, "challenge_slots"), byId.keys.toList(), ids(store, "challenge_done").toSet() + ids(store, "challenge_skip"))
+    store.put("challenge_slots", filled.joinToString("|"))
+    return filled.mapNotNull { byId[it] }
+  }
+
+  /** Keeps each slot where it is; a gone (or no longer known) one is replaced in place by the pool's next undealt id. */
+  fun deal(slots: List<String>, pool: List<String>, gone: Set<String>, n: Int = SLOTS): List<String> {
+    val next = pool.filter { it !in gone && it !in slots }.iterator()
+    val filled = slots.mapNotNull { if (it in gone || it !in pool) (if (next.hasNext()) next.next() else null) else it }.toMutableList()
+    while (filled.size < n && next.hasNext()) filled += next.next()
+    return filled
+  }
+
+  /** Finished ones, most recent first. */
+  fun done(store: Store): List<Challenge> = pool(store).associateBy { it.id }.let { p -> ids(store, "challenge_done").mapNotNull { p[it] } }
+  fun finish(store: Store, id: String) { if (id !in ids(store, "challenge_done")) store.put("challenge_done", (listOf(id) + ids(store, "challenge_done")).joinToString("|")) }
+  /** A Trakt list that came out empty here (only episodes, or nothing this profile's rating allows). */
+  fun skip(store: Store, id: String) = store.put("challenge_skip", (ids(store, "challenge_skip") + id).joinToString("|"))
+
+  /** When fewer than a screenful are left undealt, deal more from Trakt's popular lists. At most daily. */
+  fun topUp(store: Store) {
+    if (store.str("trakt_client").isEmpty() || System.currentTimeMillis() - store.long("challenge_trakt_at") < 86_400_000L) return
+    val taken = ids(store, "challenge_done").toSet() + ids(store, "challenge_skip") + ids(store, "challenge_slots")
+    if (pool(store).count { it.id !in taken } >= SLOTS) return
+    val saved = traktSaved(store)
+    val known = saved.map { it.optString("id") }.toSet()
+    val fresh = Trakt.popularLists(store).filter { it.id !in known }.map { JSONObject().put("id", it.id).put("name", it.name).put("user", it.user) }
+    store.put("challenge_trakt", JSONArray(saved + fresh).toString())
+    store.putLong("challenge_trakt_at", System.currentTimeMillis())
+  }
 }
 
 @Composable
@@ -270,44 +326,76 @@ fun ChallengesPage(store: Store, nav: Nav) {
   var open by remember { mutableStateOf<Challenge?>(null) }
   val c = open
   androidx.activity.compose.BackHandler(c != null) { open = null }
+  var active by remember { mutableStateOf(Challenges.active(store)) }
+  var done by remember { mutableStateOf(Challenges.done(store)) }
   // Every challenge's list, so each tile can show its posters. Lists are fixed once built (see Challenges.items).
-  var lists by remember { mutableStateOf(CHALLENGES.associate { it.id to Challenges.cached(store, it) }) }
-  LaunchedEffect(Unit) {
-    CHALLENGES.filter { lists[it.id] == null }.forEach { ch ->
-      val got = withContext(Dispatchers.IO) { runCatching { Challenges.items(store, ch) }.getOrNull() }?.takeIf { it.isNotEmpty() }
-      if (got != null) lists = lists + (ch.id to got)
+  var lists by remember { mutableStateOf((active + done).associate { it.id to Challenges.cached(store, it) }) }
+  // Each time the grid shows: move finished challenges down, deal replacements into their slots, build their lists.
+  LaunchedEffect(c == null) {
+    if (c != null) return@LaunchedEffect
+    val tried = mutableSetOf<String>()
+    var toppedUp = false
+    while (true) {
+      active.forEach { ch -> lists[ch.id]?.let { l -> if (l.isNotEmpty() && l.all { seenBefore(store, it) }) Challenges.finish(store, ch.id) } }
+      active = Challenges.active(store); done = Challenges.done(store)
+      val missing = active.filter { lists[it.id] == null && it.id !in tried }
+      if (missing.isEmpty()) {
+        if (toppedUp) break
+        toppedUp = true
+        withContext(Dispatchers.IO) { runCatching { Challenges.topUp(store) } }
+        continue
+      }
+      missing.forEach { ch ->
+        tried += ch.id
+        val got = withContext(Dispatchers.IO) { runCatching { Challenges.items(store, ch) }.getOrNull() }
+        if (!got.isNullOrEmpty()) lists = lists + (ch.id to got)
+        else if (got != null && ch.id.startsWith("trakt:")) Challenges.skip(store, ch.id)
+      }
     }
   }
   if (c == null) {
     val first = remember { FocusRequester() }
     LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
     val seen = remember(lists) { lists.mapValues { (_, l) -> l.orEmpty().filter { seenBefore(store, it) }.map { it.key }.toSet() } }
+    @Composable fun Tile(ch: Challenge, focusFirst: Boolean) {
+      val list = lists[ch.id]
+      val lit = seen[ch.id].orEmpty()
+      val fresh = remember(list) { list?.let { Lights.fresh(store, "tile:${ch.id}", lit) }.orEmpty() }
+      ZSurface({ open = ch }, Modifier.then(if (focusFirst) Modifier.focusRequester(first) else Modifier).height(200.dp), container = Z.Card) {
+        Column(Modifier.fillMaxSize()) {
+          if (list == null) Box(Modifier.fillMaxWidth().height(116.dp).background(Z.Elevated))
+          else Mosaic(list, lit, fresh, Modifier.fillMaxWidth().height(116.dp))
+          Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.SpaceBetween) {
+            Text(ch.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
+            when {
+              list.isNullOrEmpty() -> Text(ch.line, style = MaterialTheme.typography.bodySmall, color = Z.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
+              lit.size == list.size -> StatusChip("Complete", Z.Success)
+              else -> Text("${lit.size} of ${list.size} watched", style = MaterialTheme.typography.labelMedium, color = Z.Text2)
+            }
+          }
+        }
+      }
+    }
     Column(Modifier.fillMaxSize().padding(horizontal = Z.Pad, vertical = 36.dp)) {
       Text("Watch Challenges", style = MaterialTheme.typography.displaySmall)
-      val finished = CHALLENGES.count { ch -> lists[ch.id]?.let { it.isNotEmpty() && seen[ch.id]?.size == it.size } == true }
       Text(
-        "Every poster starts in grey. Watch it, here or on Trakt, and it lights up." + if (finished > 0) "  $finished of ${CHALLENGES.size} complete." else "",
+        "Every poster starts in grey. Watch it, here or on Trakt, and it lights up. Finish a challenge and a new one takes its place.",
         Modifier.padding(top = 6.dp, bottom = 20.dp), style = MaterialTheme.typography.bodyLarge, color = Z.Text2,
       )
       LazyVerticalGrid(GridCells.Fixed(4), contentPadding = PaddingValues(bottom = 36.dp), horizontalArrangement = Arrangement.spacedBy(14.dp), verticalArrangement = Arrangement.spacedBy(14.dp)) {
-        itemsIndexed(CHALLENGES) { i, ch ->
-          val list = lists[ch.id]
-          val lit = seen[ch.id].orEmpty()
-          val fresh = remember(list) { list?.let { Lights.fresh(store, "tile:${ch.id}", lit) }.orEmpty() }
-          ZSurface({ open = ch }, Modifier.then(if (i == 0) Modifier.focusRequester(first) else Modifier).height(200.dp), container = Z.Card) {
-            Column(Modifier.fillMaxSize()) {
-              if (list == null) Box(Modifier.fillMaxWidth().height(116.dp).background(Z.Elevated))
-              else Mosaic(list, lit, fresh, Modifier.fillMaxWidth().height(116.dp))
-              Column(Modifier.fillMaxSize().padding(horizontal = 12.dp, vertical = 10.dp), verticalArrangement = Arrangement.SpaceBetween) {
-                Text(ch.name, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis)
-                when {
-                  list == null -> Text(ch.line, style = MaterialTheme.typography.bodySmall, color = Z.Muted, maxLines = 1, overflow = TextOverflow.Ellipsis)
-                  lit.size == list.size -> StatusChip("Complete", Z.Success)
-                  else -> Text("${lit.size} of ${list.size} watched", style = MaterialTheme.typography.labelMedium, color = Z.Text2)
-                }
-              }
-            }
+        itemsIndexed(active, key = { _, ch -> ch.id }) { i, ch -> Tile(ch, i == 0) }
+        if (active.isEmpty()) item(span = { GridItemSpan(maxLineSpan) }) {
+          Text(
+            if (store.str("trakt_client").isEmpty()) "You've finished every challenge. Add a Trakt Client ID in Settings > Integrations and Zylo will deal new ones from Trakt's most popular lists."
+            else "You've finished every challenge for now. New ones arrive as Trakt's popular lists change.",
+            style = MaterialTheme.typography.bodyLarge, color = Z.Text2,
+          )
+        }
+        if (done.isNotEmpty()) {
+          item(span = { GridItemSpan(maxLineSpan) }) {
+            Text("Completed  ·  ${done.size}", Modifier.padding(top = 22.dp), style = MaterialTheme.typography.titleLarge)
           }
+          itemsIndexed(done, key = { _, ch -> "done:" + ch.id }) { i, ch -> Tile(ch, active.isEmpty() && i == 0) }
         }
       }
     }

@@ -577,4 +577,11 @@ class ExtrasTest {
     runCatching { Busy.run("Test") { error("boom") } }
     assertTrue(Busy.now.isEmpty()) // gone even when the job fails
   }
+
+  @Test fun finishedChallengeIsReplacedInItsSlot() {
+    val pool = listOf("a", "b", "c", "d", "e")
+    assertEquals(listOf("a", "b", "c"), Challenges.deal(emptyList(), pool, emptySet(), 3))
+    assertEquals(listOf("a", "d", "c"), Challenges.deal(listOf("a", "b", "c"), pool, setOf("b"), 3))
+    assertEquals(listOf("e", "c"), Challenges.deal(listOf("d", "a", "c"), pool, setOf("a", "b", "d"), 3)) // pool runs dry: slot dropped
+  }
 }
