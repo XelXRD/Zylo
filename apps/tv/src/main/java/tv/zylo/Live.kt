@@ -501,14 +501,18 @@ private fun Cell(text: String, modifier: Modifier, live: Boolean, past: Boolean,
 private fun CategoryPicker(categories: List<Category>, current: Category?, close: () -> Unit, pick: (Category) -> Unit) {
   BackHandler(onBack = close)
   val first = remember { FocusRequester() }
+  val all = listOf(FAVS, ALL) + categories
+  // Open scrolled to the current category: a row further down wasn't composed yet, the focus request failed
+  // silently, and focus stayed on the guide behind the menu.
+  val list = rememberLazyListState(initialFirstVisibleItemIndex = all.indexOfFirst { it.id == (current ?: ALL).id }.coerceAtLeast(0))
   LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
   Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.7f))) {
     // Focus can't leave the menu while it's open: pick a category or press Back.
     Column(Modifier.padding(start = Z.Pad, top = 84.dp).width(360.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(vertical = 14.dp)
       .focusGroup().focusProperties { onExit = { cancelFocusChange() } }) {
       Text("Categories", Modifier.padding(start = 20.dp, bottom = 8.dp), style = MaterialTheme.typography.titleLarge)
-      LazyColumn(contentPadding = PaddingValues(horizontal = 10.dp)) {
-        itemsIndexed(listOf(FAVS, ALL) + categories) { _, c ->
+      LazyColumn(state = list, contentPadding = PaddingValues(horizontal = 10.dp)) {
+        itemsIndexed(all) { _, c ->
           val selected = c.id == (current ?: ALL).id
           ZSurface({ pick(c) }, (if (selected) Modifier.focusRequester(first) else Modifier).fillMaxWidth().padding(vertical = 2.dp), selected = selected) {
             Text(c.name, Modifier.padding(horizontal = 12.dp, vertical = 10.dp), style = MaterialTheme.typography.labelLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)

@@ -739,6 +739,23 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
   BackHandler(timing) { timing = false; view?.requestFocus() }
   BackHandler(error != null) { nav.back() } // one Back from an error: straight to the list
 
+  // While a panel of ours is up, the player can't hold focus: it kept it (or took it back with the controls),
+  // so the D-pad moved the hidden controls behind Up Next instead of its buttons. It takes focus back after.
+  val overlay by remember { derivedStateOf { (upNext && !dismissed && next != null) || skip != null || timing || error != null } }
+  LaunchedEffect(overlay) {
+    val v = view ?: return@LaunchedEffect
+    if (overlay) {
+      v.hideController()
+      v.isFocusable = false
+      v.descendantFocusability = android.view.ViewGroup.FOCUS_BLOCK_DESCENDANTS
+      v.clearFocus()
+    } else {
+      v.isFocusable = true
+      v.descendantFocusability = android.view.ViewGroup.FOCUS_AFTER_DESCENDANTS
+      v.requestFocus()
+    }
+  }
+
   Box(Modifier.fillMaxSize().background(Color.Black)) {
     AndroidView(
       factory = {
@@ -761,7 +778,7 @@ fun PlayerPage(store: Store, s: Screen.Play, nav: Nav) {
             controls = v == View.VISIBLE
             // The controls hide with their button focused, and focus wandered off the player: OK did nothing after
             // the first time. Take it back (unless Skip, Up Next or subtitle timing has it).
-            if (v != View.VISIBLE && skip == null && !upNext && !timing) post { requestFocus() }
+            if (v != View.VISIBLE && !overlay) post { requestFocus() }
           })
           zyloFocus(this)
           findViewById<DefaultTimeBar>(androidx.media3.ui.R.id.exo_progress)?.apply {
