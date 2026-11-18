@@ -1,5 +1,5 @@
 {
-  "version": "0.31.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.31.0.apk",
-  "notes": "What's new in 0.31.0 — Watch Challenges rotate\n\n• Finished challenges now move to a new \"Completed\" section at the bottom of Watch Challenges, and a new challenge takes their place in the same spot.\n• Eight challenges are on the go at once.\n• Six new built-in challenges: The David Fincher Files, Denis Villeneuve in Order, The Wes Anderson Collection, Best of the 70s, Best of the 90s and Ten Animated Greats.\n• When Zylo's own challenges run low, new ones come from Trakt's most popular public lists (6–20 titles). Only a Trakt Client ID is needed, not a sign-in.\n• Trakt lists that have nothing playable (only episodes, or nothing a kids profile's rating allows) are skipped automatically.\n• Each profile now has its own active and completed challenges.\n• If you were working on Best of the 80s or Around the World, they're now further down the queue and will come back when a slot opens. Your progress on them is kept."
+  "version": "0.31.1",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.31.1.apk",
+  "notes": "What's new in 0.31.1 — Fixes\n\n• Up Next: Play Now and Keep Watching can be selected again. The remote was moving the hidden player controls behind the card instead.\n• Live TV: the Categories menu now opens on your current category and lets you pick from it, even when that category is far down the list."
 }
