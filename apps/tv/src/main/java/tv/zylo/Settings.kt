@@ -606,9 +606,56 @@ private fun LiveTvSettings(store: Store) {
       Toggle("Channel logos from tv-logos", "Clean, matching logos from the free tv-logos collection (github.com/tv-logo/tv-logos), where it has the channel. Others keep your provider's logo.", Logos.on) {
         Logos.set(store, !Logos.on)
       }
+      LiveCaptionsSetting(store)
       BetterGuide(store)
     }
   }
+}
+
+/**
+ * Settings > Live TV > Subtitles made from the audio: switched on, it first says what it will download, from where and
+ * how much, and downloads only once you agree. Off again keeps the download (to switch back on at once) until removed.
+ */
+@Composable
+private fun LiveCaptionsSetting(store: Store) {
+  if (LiveCaptions.abi == null) return // no library for this TV's processor
+  val ctx = LocalContext.current
+  var asking by remember { mutableStateOf(false) }
+  var problem by remember { mutableStateOf<String?>(null) }
+  val ready = LiveCaptions.ready()
+  Toggle("Subtitles made from the audio (English)",
+    "For channels that send no subtitles: written on this TV as the programme plays, and nothing is sent anywhere. Choose them while watching (hold OK, then Subtitles). " +
+      if (ready) "Downloaded." else "Needs a one-off download of about ${LiveCaptions.downloadMb} MB.", LiveCaptions.on) {
+    problem = null
+    when {
+      LiveCaptions.on -> LiveCaptions.set(store, false)
+      ready -> LiveCaptions.set(store, true)
+      LiveCaptions.progress == null -> asking = true
+    }
+  }
+  if (asking) {
+    val download = remember { FocusRequester() }
+    LaunchedEffect(Unit) { delay(60); runCatching { download.requestFocus() } }
+    Column(Modifier.fillMaxWidth(0.8f).background(Z.Card, Z.Small).padding(16.dp)) {
+      Text("Download about ${LiveCaptions.downloadMb} MB?", style = MaterialTheme.typography.titleMedium)
+      Text("Once only: the sherpa-onnx speech recogniser (from GitHub) and an English speech model (from Hugging Face). " +
+        "Each file is checked before it's used. After that, subtitles are made on the TV and the audio never leaves it.",
+        Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
+      Row(Modifier.padding(top = 12.dp), horizontalArrangement = Arrangement.spacedBy(10.dp)) {
+        ZButton("Download", {
+          asking = false
+          LiveCaptions.download(store) { err ->
+            problem = err
+            if (err == null) toast(ctx, "Subtitles are ready. While watching, hold OK, then Subtitles > Made from the audio.")
+          }
+        }, Modifier.focusRequester(download), primary = true)
+        ZButton("Not Now", { asking = false })
+      }
+    }
+  }
+  LiveCaptions.progress?.let { Text("Downloading subtitles: $it…", style = MaterialTheme.typography.bodySmall, color = Z.Text2) }
+  problem?.let { Text(it, Modifier.fillMaxWidth(0.8f), style = MaterialTheme.typography.bodySmall, color = Z.Error) }
+  if (ready && !LiveCaptions.on) ConfirmButton("Remove Download (frees about ${LiveCaptions.downloadMb} MB)", { LiveCaptions.remove(store); problem = null })
 }
 
 /** Settings > Live TV > Better TV guide: the provider's full guide plus free per-country guides from epgshare01. */

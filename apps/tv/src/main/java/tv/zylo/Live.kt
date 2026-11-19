@@ -1204,12 +1204,28 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
       override fun onTransferEnd(source: androidx.media3.datasource.DataSource, dataSpec: androidx.media3.datasource.DataSpec, isNetwork: Boolean) {}
     }
   }
+  // The audio as it's decoded, for subtitles made on the TV (Settings > Live TV): while they show, sound and picture
+  // are held back a few seconds so each line is written before it's said. Idle otherwise.
+  val tap = remember { LiveCaptions.Tap() }
   val player = remember {
     ExoPlayer.Builder(ctx).setMediaSourceFactory(DefaultMediaSourceFactory(ctx).setDataSourceFactory(DefaultHttpDataSource.Factory().setUserAgent(UA).setAllowCrossProtocolRedirects(true).setTransferListener(counter)))
       // Up to 90 s held ahead, so a short pause on live carries on where it stopped.
       .setLoadControl(DefaultLoadControl.Builder().setBufferDurationsMs(15_000, 90_000, 2_500, 5_000).build())
+      .setRenderersFactory(object : androidx.media3.exoplayer.DefaultRenderersFactory(ctx) {
+        override fun buildAudioSink(context: android.content.Context, enableFloatOutput: Boolean, enableAudioTrackPlaybackParams: Boolean): androidx.media3.exoplayer.audio.AudioSink =
+          androidx.media3.exoplayer.audio.DefaultAudioSink.Builder(context).setAudioProcessorChain(LiveCaptions.Chain(tap)).build()
+      })
       .build().apply { playWhenReady = true }
   }
+  // Subtitles from the audio: on for this player when you chose them (and kept on, channel to channel, until you don't).
+  var captioner by remember { mutableStateOf<LiveCaptions.Captioner?>(null) }
+  fun captions(on: Boolean) {
+    captioner?.stop(); tap.listener = null; captioner = null
+    if (on && LiveCaptions.on) captioner = LiveCaptions.Captioner(tap).start().also { tap.listener = it }
+    store.put("live_captions_show", if (on) "on" else "")
+  }
+  LaunchedEffect(Unit) { if (LiveCaptions.on && store.str("live_captions_show") == "on") captions(true) }
+  DisposableEffect(Unit) { onDispose { captioner?.stop(); tap.listener = null } }
   DisposableEffect(Unit) {
     val l = object : Player.Listener {
       override fun onPlayerError(e: PlaybackException) {
@@ -1378,6 +1394,13 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
     }
     if (typed.isNotEmpty()) Text(typed, Modifier.align(Alignment.TopEnd).padding(36.dp).background(Z.Bg.copy(alpha = 0.85f), Z.Medium).padding(horizontal = 22.dp, vertical = 10.dp),
       style = MaterialTheme.typography.displaySmall)
+    // Subtitles made from the audio: like broadcast ones, white on a dark band, lifted above the banner when it shows.
+    captioner?.let { cc ->
+      val text = if (cc.starting) "Starting subtitles…" else cc.lines
+      if (text.isNotBlank()) Text(text, Modifier.align(Alignment.BottomCenter).padding(bottom = if (showBanner || (paused && past == null)) 190.dp else 48.dp)
+        .widthIn(max = 900.dp).background(Color.Black.copy(alpha = 0.72f), Z.Small).padding(horizontal = 16.dp, vertical = 8.dp),
+        style = MaterialTheme.typography.titleLarge, color = Color.White, textAlign = TextAlign.Center, maxLines = 3, overflow = TextOverflow.Ellipsis)
+    }
     if (mini) MiniGuide(s, x, channel, { mini = false }) { c, cat, list ->
       mini = false
       // Picked from another category: it's the list now, and the guide comes back on this channel.
@@ -1392,7 +1415,8 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
           // Switch now; if it won't start, the next one down takes over as usual.
           options = false
           if (v.id != (version ?: channel).id) { tried.clear(); retries = 0; started = false; failure = null; error = null; version = v }
-        } } } }) { options = false }
+        } } } },
+        made = if (LiveCaptions.on && past == null) captioner != null else null, setMade = { captions(it) }) { options = false }
     }
   }
 }
@@ -1479,7 +1503,8 @@ private fun MiniGuide(s: LiveState, x: Providers, current: Channel, close: () ->
 /** Hold OK (or Menu) while watching: pause, favourite, and the channel's audio and subtitle tracks. Back closes. */
 @Composable
 private fun LiveOptions(player: ExoPlayer, tracks: Tracks, paused: Boolean, catchUp: Boolean, fav: Boolean, pause: () -> Unit, favourite: () -> Unit,
-  versions: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {}, close: () -> Unit) {
+  versions: androidx.compose.foundation.lazy.LazyListScope.() -> Unit = {},
+  made: Boolean? = null, setMade: (Boolean) -> Unit = {}, close: () -> Unit) { // made: subtitles from the audio (null: not set up)
   BackHandler(onBack = close)
   val first = remember { FocusRequester() }
   LaunchedEffect(Unit) { delay(60); runCatching { first.requestFocus() } }
@@ -1504,10 +1529,12 @@ private fun LiveOptions(player: ExoPlayer, tracks: Tracks, paused: Boolean, catc
         if (audio.sumOf { it.length } <= 1) item { Text("This channel sends one audio track.", style = MaterialTheme.typography.bodySmall, color = Z.Text2) }
         else audio.forEach { g -> items(g.length) { i -> OptionRow(trackName(g.getTrackFormat(i), i + 1), g.isTrackSelected(i)) { choose(g, i) } } }
         item { OptionHeading("Subtitles") }
-        if (text.isEmpty()) item { Text("This channel sends no subtitles.", style = MaterialTheme.typography.bodySmall, color = Z.Text2) }
+        if (text.isEmpty() && made == null) item { Text("This channel sends no subtitles. Settings > Live TV can make them from the audio.", style = MaterialTheme.typography.bodySmall, color = Z.Text2) }
         else {
-          item { OptionRow("Off", text.none { it.isSelected }, ::subsOff) }
-          text.forEach { g -> items(g.length) { i -> OptionRow(trackName(g.getTrackFormat(i), i + 1), g.isTrackSelected(i)) { choose(g, i) } } }
+          item { OptionRow("Off", text.none { it.isSelected } && made != true) { subsOff(); setMade(false) } }
+          // Made on the TV from what's being said: for channels whose own subtitles don't come through.
+          if (made != null) item { OptionRow("Made from the audio (English)", made) { subsOff(); setMade(true); close() } }
+          text.forEach { g -> items(g.length) { i -> OptionRow(trackName(g.getTrackFormat(i), i + 1), g.isTrackSelected(i)) { setMade(false); choose(g, i) } } }
         }
       }
     }

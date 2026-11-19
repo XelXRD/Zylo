@@ -145,6 +145,8 @@ class MainActivity : ComponentActivity() {
     ChannelCache.dir = filesDir
     Logos.dir = filesDir
     Logos.load(store)
+    LiveCaptions.dir = filesDir
+    LiveCaptions.load(store)
     TmdbDisk.dir = java.io.File(cacheDir, "tmdb").apply { mkdirs() }
     Trakt.io.launch { runCatching { TmdbDisk.prune() } }
     val ui = UiState(store)
