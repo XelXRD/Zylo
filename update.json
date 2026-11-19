@@ -1,5 +1,5 @@
 {
-  "version": "0.31.1",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.31.1.apk",
-  "notes": "What's new in 0.31.1 — Fixes\n\n• Up Next: Play Now and Keep Watching can be selected again. The remote was moving the hidden player controls behind the card instead.\n• Live TV: the Categories menu now opens on your current category and lets you pick from it, even when that category is far down the list."
+  "version": "0.32.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.32.0.apk",
+  "notes": "What's new in 0.32.0 — Live TV, rebuilt\n\n• More than one provider: add them in Settings > Live TV and they show as one guide.\n• One entry per channel: HD, FHD, 4K, HEVC and RAW copies, from any of your providers, are combined, and categories with the same name merge. Names lose their country tags and quality labels.\n• Choose a version: hold OK on a channel or show (or in the player's options) to see every version with its provider, quality and measured bitrate. Pick one to play it, or hold OK to always play it first.\n• Best first: Play starts with the highest-bitrate version (4K, RAW, Full HD, HD, SD) and moves down if one won't start.\n• Drops are handled: a stream that stalls reconnects by itself, then tries the next version.\n• In the player: audio and subtitle tracks, pause live TV, and change category from the channel list.\n• In the guide: hide categories, Recent channels, reorder favourites, programme details, Back to Now.\n• Optional channel logos from tv-logos (Settings > Live TV).\n• Fixes: Back now closes menus, and the selector moves properly between buttons and lists."
 }
