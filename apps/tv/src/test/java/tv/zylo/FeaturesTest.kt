@@ -241,6 +241,133 @@ class XtreamTest {
     assertEquals("http://tv.example:8080/live/alex/p%40ss/55.ts", Xtream(x.server, "alex", "p@ss", listOf("ts")).streamUrl(ch[0]))
   }
 
+  @Test fun tidiesCountryTagsAndVersions() {
+    assertEquals("UK" to "Sport", LiveTidy.tag("UK | Sport"))
+    assertEquals("AR" to "NEWS", LiveTidy.tag("|AR| NEWS"))
+    assertEquals("USA" to "Movies", LiveTidy.tag("USA: Movies"))
+    assertEquals("DE" to "Kids", LiveTidy.tag("DE - Kids"))
+    assertEquals(null to "Sky Sports", LiveTidy.tag("Sky Sports"))
+    assertEquals(null to "UK|", LiveTidy.tag("UK|")) // nothing after the tag: left alone
+
+    fun ch(id: Int, name: String) = Channel(id, id, name, null, "1")
+    val list = listOf(ch(1, "UK: BBC One SD"), ch(2, "Sky News"), ch(3, "UK: BBC One FHD"), ch(4, "UK: BBC One ᴴᴰ"), ch(5, "US: BBC One HD"), ch(6, "UK: BBC One 4K"))
+    // One BBC One per country, its highest-quality copy (4K) standing in; the US one is another channel. Order is the list's own.
+    assertEquals(listOf(6, 2, 5), LiveTidy.combine(list).map { it.id })
+    assertEquals(listOf(6, 4, 1), LiveTidy.versions(list, list[2]).map { it.id }) // 4K, HD, SD around Full HD
+    // Highest bitrate first: resolution, then RAW and 50/60 fps up, HEVC down.
+    assertEquals(listOf("SKY 4K", "SKY FHD RAW", "SKY FHD 50fps", "SKY FHD", "SKY FHD HEVC", "SKY HD", "SKY", "SKY SD"),
+      listOf("SKY SD", "SKY FHD HEVC", "SKY", "SKY HD", "SKY FHD", "SKY 4K", "SKY FHD RAW", "SKY FHD 50fps").sortedByDescending { LiveTidy.rank(it) })
+    // RAW (the broadcaster's untouched feed) outranks re-encoded Full HD and HD; SD wins over a bigger word in the name.
+    assertEquals(listOf("SKY 4K", "SKY ᴿᴬᵂ", "SKY FHD", "SKY ᴴᴰ ʰᵉᵛᶜ", "SKY SD ᴿᴬᵂ", "8K: SKY SD"),
+      listOf("SKY ᴴᴰ ʰᵉᵛᶜ", "8K: SKY SD", "SKY FHD", "SKY SD ᴿᴬᵂ", "SKY ᴿᴬᵂ", "SKY 4K").sortedByDescending { LiveTidy.rank(it) })
+    LiveTidy.screen4k = false // a 1080p TV: 4K drops below RAW
+    assertTrue(LiveTidy.rank("SKY 4K") < LiveTidy.rank("SKY RAW"))
+    LiveTidy.screen4k = true
+    // Superscript labels count too, and names lose them.
+    assertEquals("SKY CINEMA ACTION ◉", LiveTidy.title("UK: SKY CINEMA ACTION ᴴᴰ/ᴿᴬᵂ ◉"))
+    assertEquals("24/7", LiveTidy.title("24/7 ᴴᴰ/ᴿᴬᵂ"))
+    assertEquals(LiveTidy.key("UK: Sky Cinema Action ʰᵉᵛᶜ"), LiveTidy.key("UK| SKY CINEMA ACTION ᶠᴴᴰ"))
+    // Only real countries keep channels apart: UK, GB and EN are one; VIP or no tag means your own country.
+    LiveTidy.home = "UK"
+    assertEquals(LiveTidy.key("UK: SKY SPORTS NEWS HEVC 4K"), LiveTidy.key("GB| Sky Sports News FHD"))
+    assertTrue(LiveTidy.key("UK: SKY SPORTS NEWS") != LiveTidy.key("DE: SKY SPORTS NEWS"))
+    // VIP or no tag joins the one country that has the name, whatever the TV's region (an emulator set to the US
+    // kept "VIP: SKY SPORTS MAIN EVENT" apart from "UK: Sky Sports Main Event").
+    fun c(id: Int, name: String) = Channel(id, id, name, null, "1")
+    LiveTidy.home = "US"
+    val pool = listOf(c(1, "VIP: SKY SPORTS MAIN EVENT ᴴᴰ"), c(2, "UK: Sky Sports Main Event FHD 50fps"), c(3, "Sky Sports Main Event"), c(8, "NOW: SKY SPORTS MAIN EVENT"),
+      c(4, "VIP: TLC"), c(5, "UK: TLC"), c(6, "DE: TLC"), c(7, "US: TLC HD"))
+    assertEquals(listOf(2, 3), LiveTidy.versions(pool, pool[0]).map { it.id })
+    assertEquals(listOf(7), LiveTidy.versions(pool, pool[4]).map { it.id }) // several countries have TLC: yours wins
+    LiveTidy.home = "UK"
+    // From real lists: other scripts are names too; regions and services aren't your country; three-letter codes match two.
+    assertTrue(LiveTidy.key("24/7| عودة غوار") != LiveTidy.key("24/7| النمر"))
+    assertTrue(LiveTidy.key("апостроф HD UA") != LiveTidy.key("армія UA"))
+    assertTrue(LiveTidy.key("ASIA| SPORTS") != LiveTidy.key("UK | SPORTS"))
+    assertTrue(LiveTidy.key("JOYN: TLC ᴿᴬᵂ") != LiveTidy.key("UK: TLC 4K"))
+    assertEquals(LiveTidy.key("BR: ESPN HD"), LiveTidy.key("BRA: ESPN"))
+    assertEquals(LiveTidy.key("HR: NOVA TV"), LiveTidy.key("CRO | Nova TV HD"))
+    assertTrue(LiveTidy.key("AR: MBC 1") != LiveTidy.key("ARG: MBC 1")) // AR is Arabic in these lists, not Argentina
+    assertEquals("HD HEVC", LiveTidy.qualityLabel("VIP: SKY SPORTS BOX OFFICE ᴴᴰ ʰᵉᵛᶜ"))
+    assertEquals("RAW", LiveTidy.qualityLabel("VIP: SKY SPORTS BOX OFFICE ᴿᴬᵂ RAW"))
+    assertEquals("Standard", LiveTidy.qualityLabel("UK: ITV GRANADA ◉"))
+    // Same-name categories merge (HD and HEVC packs, or two providers); one on its own keeps its id.
+    val merged = LiveTidy.mergeCategories(listOf(Category("1", "UK| SKY CINEMA ᴴᴰ/ᴿᴬᵂ"), Category("2", "UK| SKY CINEMA ʰᵉᵛᶜ"), Category("3~9", "UK: Sky Cinema"), Category("4", "UK| NEWS")))
+    assertEquals(2, merged.size)
+    assertEquals(listOf("1", "2", "3~9"), merged[0].ids)
+    assertEquals("UK | SKY CINEMA", merged[0].name)
+    assertEquals("4", merged[1].id)
+    assertTrue(LiveTidy.hidden(Category("9", "AR | Sport"), setOf("pre:AR")))
+    assertTrue(LiveTidy.hidden(Category("9", "Sport"), setOf("cat:9")))
+    assertEquals(false, LiveTidy.hidden(Category("9", "UK | Sport"), setOf("pre:AR")))
+
+    assertTrue(LiveTidy.header("#### SKY CINEMA HD/4K ####"))
+    assertTrue(LiveTidy.header(" ===== NEWS ====="))
+    assertEquals(false, LiveTidy.header("UK: SKY CINEMA COMEDY"))
+    assertEquals(false, LiveTidy.header("#1 Hits")) // one # is a name, not a heading
+    assertEquals("SKY CINEMA COMEDY", ch(7, "UK: SKY CINEMA COMEDY").label)
+  }
+
+  @Test fun versionOrderUsesMeasuredBitrateAndPins() {
+    LiveTidy.home = "UK"
+    fun ch(id: Int, name: String) = Channel(id, id, name, null, "1")
+    val all = listOf(ch(91, "UK: TNT 1 HD"), ch(92, "VIP: TNT 1 ᴴᴰ"), ch(93, "UK: TNT 1 SD"), ch(94, "UK: TNT 1 4K"))
+    LiveStats.put(91, LiveStats.Measured(1080, "H.264", 4_000))
+    LiveStats.put(92, LiveStats.Measured(1080, "H.264", 8_200))
+    // The label leads (4K, then HD, then SD); between the two HDs, the one measured faster goes first.
+    assertEquals(listOf(94, 92, 91, 93), versionChain(all, all[0]).map { it.id })
+    assertEquals("1080p · H.264 · 8.2 Mb/s", LiveStats.describe(92))
+    LiveStats.pin(all[0], all[2]) // "the SD one always works on my line"
+    assertEquals(listOf(93, 94, 92, 91), versionChain(all, all[1]).map { it.id }) // pinned for the channel, whichever entry
+    LiveStats.pin(all[0], null)
+    assertEquals(94, versionChain(all, all[0]).first().id)
+    // A version that didn't start goes to the back for a while; one that works again comes back.
+    LiveStats.failed(94)
+    assertEquals(listOf(92, 91, 93, 94), versionChain(all, all[0]).map { it.id })
+    assertEquals("Didn't start just now", LiveStats.describe(94))
+    LiveStats.worked(94)
+    assertEquals(94, versionChain(all, all[0]).first().id)
+    // Measured beats estimated: a RAW copy that turned out to send 3 Mb/s drops below an unmeasured Full HD one.
+    val raw = ch(95, "UK: TNT 1 RAW")
+    assertEquals(95, versionChain(listOf(raw, ch(96, "UK: TNT 1 FHD")), raw).first().id)
+    LiveStats.put(95, LiveStats.Measured(1080, "H.264", 3_000))
+    assertEquals(96, versionChain(listOf(raw, ch(96, "UK: TNT 1 FHD")), raw).first().id)
+    assertEquals("Estimated ~7 Mb/s", LiveStats.estimate("UK: TNT 1 FHD"))
+    // Next to nothing arriving: the provider's off-air slate.
+    LiveStats.put(93, LiveStats.Measured(1080, "H.264", 0))
+    assertEquals("No picture when last played", LiveStats.describe(93))
+  }
+
+  @Test fun tvLogosMatchChannelNames() {
+    // Real file names from tv-logo/tv-logos countries/united-kingdom.
+    val idx = Logos.indexOf(listOf("sky-sports-main-event-uk.png", "sky-sports-main-event-hz-uk.png", "sky-sports-main-event-icon-uk.png",
+      "itv-1-uk.png", "sky-sports-plus-uk.png", "bbc-one-uk.png", "0_all_logos_mosaic.md", "hd"))
+    assertEquals("sky-sports-main-event-uk.png", idx[Logos.squash(LiveTidy.title("VIP: SKY SPORTS MAIN EVENT ᴴᴰ"))])
+    assertEquals("itv-1-uk.png", idx[Logos.squash(LiveTidy.title("UK: ITV1 FHD"))])
+    assertEquals("sky-sports-plus-uk.png", idx[Logos.squash(LiveTidy.title("UK: Sky Sports + HD"))])
+    assertEquals("bbc-one-uk.png", idx[Logos.squash(LiveTidy.title("UK: BBC One ◉"))])
+    assertEquals(4, idx.size) // the wide, icon and non-image entries are left out
+  }
+
+  @Test fun secondProviderKeepsItsIdsApart() {
+    val web = { u: String -> when {
+      "get_live_categories" in u -> """[{"category_id":"3","category_name":"UK | Sport"}]"""
+      else -> """[{"num":101,"name":"Sky Sports","stream_id":55,"category_id":"3"}]"""
+    } }
+    val second = Xtream("http://other.example", "a", "b", listOf("ts"), slot = 2)
+    val c = second.channels(null, web).single()
+    assertTrue(c.id < 0)
+    assertEquals(2, c.slot)
+    assertEquals(55, c.stream)
+    assertEquals("2~3", c.category)
+    assertEquals(listOf(Category("2~3", "UK | Sport")), second.categories(web))
+    assertEquals("http://other.example/live/a/b/55.ts", second.streamUrl(c))
+    val p = Providers(listOf(x, second))
+    assertEquals(second, p.of(c))
+    assertEquals(x, p.of(Channel(55, 1, "BBC One", null, "1"))) // the first provider's ids are as they were
+    assertEquals("other.example", p.from(c))
+  }
+
   @Test fun catchUp() {
     val c = Channel(55, 1, "BBC One", null, "1", archive = 7)
     val now = 1762617600000L // 16:00 UTC, 8 Nov 2026

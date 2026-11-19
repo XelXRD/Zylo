@@ -215,8 +215,8 @@ object Epg {
 
   /** The sources chosen in Settings > Live TV. */
   fun sources(store: Store): List<Pair<String, String>> {
-    val x = Xtream.from(store)
-    val provider = if (x != null && store.str("epg_provider") != "off") listOf("your provider's guide" to x.xmltvUrl()) else emptyList()
+    val xs = Xtream.accounts(store)
+    val provider = if (store.str("epg_provider") != "off") xs.map { (if (xs.size > 1) "${it.name}'s guide" else "your provider's guide") to it.xmltvUrl() } else emptyList()
     return provider + store.str("epg_share").split(',').filter { it.isNotBlank() }.map { "epgshare01 $it" to shareUrl(it) }
   }
 

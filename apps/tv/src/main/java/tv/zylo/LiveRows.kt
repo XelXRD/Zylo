@@ -116,7 +116,7 @@ fun LiveHitRow(store: Store, title: String, hits: List<LiveHit>, focus: FocusMem
         ZSurface({ openHit(ctx, store, h, nav) }, Modifier.focusMemory(focus, "live/${h.key}").width(300.dp), container = Z.Card) {
           Row(Modifier.padding(12.dp), verticalAlignment = Alignment.CenterVertically) {
             Box(Modifier.size(52.dp), contentAlignment = Alignment.Center) {
-              val logo = h.channel?.logo
+              val logo = h.channel?.let(Logos::of)
               if (logo != null) AsyncImage(logo, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit)
               else Text(if (h.event != null) "⚽" else "TV", style = MaterialTheme.typography.titleMedium)
             }

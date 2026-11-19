@@ -20,7 +20,7 @@ Everything is set up on the TV, under **Settings** (the gear in the top bar). A 
 | **Syncler packages** | Optional, more sources | Settings › Addons, same as above | A Syncler Express package or vendor link |
 | **Plex** | Optional: your own library as a source | Settings › Media Servers › Plex | Sign in with the code shown at [plex.tv/link](https://plex.tv/link); your server is found automatically |
 | **Jellyfin** | Optional: your own library as a source | Settings › Media Servers › Jellyfin | Your server's address, username and password |
-| **Live TV (Xtream Codes)** | Optional | Settings › Live TV | The server address, username and password from your provider (or paste their M3U link and Zylo reads them from it) |
+| **Live TV (Xtream Codes)** | Optional | Settings › Live TV | The server address, username and password from each provider (or paste their M3U link and Zylo reads them from it). Add as many providers as you have: they show as one guide |
 | **Better TV guide** | Optional | Settings › Live TV › Better Guide | Nothing to sign up for: choose your regions from the free [epgshare01](https://epgshare01.online) guides |
 
 Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSkip), Time Machine's music and news (Wikipedia), updates (this repository).
@@ -67,9 +67,18 @@ Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSk
 - **Zylo Wrapped:** your year from Trakt: hours watched, films, episodes, biggest binge, top genres, busiest month.
 
 ### Live TV
-- **Xtream Codes** provider with categories, a programme guide, favourites (hold OK), reminders and catch-up.
+- **Xtream Codes** providers (one or several, shown as one guide) with categories, a programme guide, favourites (hold OK on a channel), reminders and catch-up. Settings › Live TV shows when an account expires soon, renames providers, and refreshes channels on demand.
+- **Tidy categories:** country tags ("UK|") are shown small beside the name, with how many channels each holds. Hold OK on a category to hide it, or every category with its tag; hidden ones leave All Channels too and wait under Hidden (or bring them all back in Settings › Live TV). Channel names lose the tag too, and the provider's heading rows ("#### SKY CINEMA ####") are left out.
+- **Recent** channels next to Favourites, and **Start on your last channel** (Settings › Live TV).
+- **Favourites in your order:** in Favourites, hold OK on a channel to move it up or down, or remove it.
+- **One entry per channel, one category per name:** HD, FHD, 4K, HEVC and RAW copies, and the same channel from different providers, become one entry; categories with the same name (an HD and an HEVC pack, or two providers') become one. Names lose their quality labels, and country tags are matched as countries (UK, GB and EN are one; a channel tagged VIP or not at all joins the country that has the same channel). Play starts with the highest bitrate a version's label promises (4K about 16 Mb/s, or 8 on a 1080p TV; RAW, the broadcaster's untouched feed, about 10; Full HD 7; HD 4.5; SD 2; 50/60 fps more, HEVC a little less), and once a version has been measured its real bitrate counts instead; a version that won't start hands over to the next one down at once. Settings › Live TV can turn it off.
+- **Programme details:** hold OK on a show for its full description, with Watch, Watch from the Start, Remind Me and Favourite.
+- **Choose a version:** hold OK on a channel or a show for every version of it (provider, quality, and the resolution, codec and bitrate Zylo measured when it last played). OK plays that one; holding OK on a version pins it to play first for that channel (again for automatic). The player's hold-OK options have the same list, to switch mid-programme. Versions that didn't start go to the back for half an hour; an off-air slate shows as "No picture when last played".
+- **Channel logos from tv-logos** (Settings › Live TV): clean, matching logos from the free [tv-logos](https://github.com/tv-logo/tv-logos) collection, matched by channel name and country; channels it doesn't have keep the provider's logo. A country's list is fetched the first time one of its channels is shown, then kept for a week.
+- **Back to Now:** after paging the guide earlier or later, Back (or the Back to Now button) returns to the present.
 - **Better guide** from your provider plus free epgshare01 guides, refreshed daily.
-- **Player:** Up/Down change channel, Left for the last channel, number keys, OK for the info bar then the channel list.
+- **Player:** Up/Down change channel, Left for the last channel, number keys, OK for the info bar then the channel list (Left there for another category). Hold OK (or Menu) for audio tracks, subtitles, pause and favourite. Play/Pause pauses live TV for about a minute and a half.
+- **Drops are handled:** a stream that stalls or drops reconnects by itself (three tries), then moves to the channel's other versions, from any provider, before showing an error. If one provider is down, the others' channels still load.
 - **Sports:** fixtures from ESPN with where to watch, matched to your channels from the guide; tap Watch to go straight there.
 - Hidden on kids profiles.
 

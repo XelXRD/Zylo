@@ -59,7 +59,7 @@ fun ReminderAlert(store: Store, ui: UiState, nav: Nav) {
   fun close() { Reminders.dismiss(store, r); ui.live.reminders = Reminders.all(store); due = null }
   Box(Modifier.fillMaxSize(), contentAlignment = Alignment.TopEnd) {
     Column(Modifier.padding(top = 30.dp, end = Z.Pad).width(420.dp).background(Z.Surface, Z.Large).padding(22.dp)
-      .focusGroup().focusProperties { onExit = { cancelFocusChange() } }) {
+      .panel(::close)) {
       Text(if (System.currentTimeMillis() < r.start) "STARTING NOW" else "ON NOW", style = MaterialTheme.typography.labelLarge, color = Z.Red)
       Text(r.title, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.titleLarge, maxLines = 2, overflow = TextOverflow.Ellipsis)
       Text(r.channel.name, style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 1)

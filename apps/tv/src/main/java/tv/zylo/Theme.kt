@@ -6,6 +6,8 @@ import androidx.compose.foundation.Canvas
 import androidx.compose.foundation.Image
 import androidx.compose.foundation.background
 import androidx.compose.ui.input.key.*
+import androidx.compose.foundation.focusGroup
+import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.composed
 import androidx.compose.foundation.gestures.BringIntoViewSpec
 import androidx.compose.foundation.gestures.LocalBringIntoViewSpec
@@ -366,3 +368,17 @@ fun RestoreFocus(m: FocusMemory, ready: Boolean) = LaunchedEffect(ready) {
     runCatching { m.requester.requestFocus() }
   }
 }
+
+/**
+ * Keeps focus inside a panel (while [trapped]), and Back closes it.
+ * - The properties come before the group: after it, they applied to each focusable inside instead, so focus couldn't
+ *   move between them (from one button or list to the next).
+ * - Back is caught here: on a TV, Compose first spends Back on moving focus out of the group, and a trapped group
+ *   counts that as done, so a BackHandler never heard it.
+ */
+fun Modifier.panel(close: () -> Unit, trapped: () -> Boolean = { true }): Modifier = onPreviewKeyEvent { e ->
+  if (e.key != Key.Back) return@onPreviewKeyEvent false
+  if (e.type == KeyEventType.KeyUp) close()
+  true
+}.focusProperties { onExit = { if (trapped()) cancelFocusChange() } }.focusGroup()
+

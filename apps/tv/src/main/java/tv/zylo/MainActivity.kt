@@ -143,6 +143,8 @@ class MainActivity : ComponentActivity() {
     Dom.app = applicationContext
     Epg.dir = filesDir
     ChannelCache.dir = filesDir
+    Logos.dir = filesDir
+    Logos.load(store)
     TmdbDisk.dir = java.io.File(cacheDir, "tmdb").apply { mkdirs() }
     Trakt.io.launch { runCatching { TmdbDisk.prune() } }
     val ui = UiState(store)

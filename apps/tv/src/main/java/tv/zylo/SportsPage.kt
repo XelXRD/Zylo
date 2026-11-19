@@ -88,7 +88,7 @@ private fun dayLabel(t: Long, now: Long): String {
 }
 
 @Composable
-fun SportsPage(store: Store, x: Xtream, live: LiveState, nav: Nav) {
+fun SportsPage(store: Store, x: Providers, live: LiveState, nav: Nav) {
   val s = live.sched
   val ctx = LocalContext.current
   val scope = rememberCoroutineScope()
@@ -278,7 +278,7 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
   LaunchedEffect(Unit) { delay(80); runCatching { first.requestFocus() } }
   Box(Modifier.fillMaxSize().background(Z.Bg.copy(alpha = 0.75f)), contentAlignment = Alignment.CenterEnd) {
     Column(Modifier.padding(top = 84.dp, end = Z.Pad, bottom = 24.dp).width(440.dp).fillMaxHeight().background(Z.Surface, Z.Large).padding(18.dp)
-      .focusGroup().focusProperties { onExit = { cancelFocusChange() } }) { // pick a channel or press Back
+      .panel({ s.linking = null })) { // pick a channel or press Back
       Text("Link ${w.label}", style = MaterialTheme.typography.titleLarge, maxLines = 1, overflow = TextOverflow.Ellipsis)
       Text("Which of your channels is it? Closest names first; Zylo remembers your choice for every event on it.", Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
       Row(Modifier.padding(vertical = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -291,7 +291,7 @@ private fun ChannelPicker(store: Store, w: WatchOption, s: SportsState) {
         items(ranked, key = { it.id }) { c ->
           ZSurface({ Sports.link(store, w.label, c); s.focused?.let { SeenOn.forget(store, it) }; s.linking = null; s.links++ }, Modifier.fillMaxWidth()) {
             Row(Modifier.padding(horizontal = 10.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-              Box(Modifier.size(34.dp, 24.dp)) { c.logo?.let { AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) } }
+              Box(Modifier.size(34.dp, 24.dp)) { Logos.of(c)?.let { AsyncImage(it, null, Modifier.fillMaxSize(), contentScale = ContentScale.Fit) } }
               Spacer(Modifier.width(10.dp))
               Text(c.name, style = MaterialTheme.typography.bodyMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
             }

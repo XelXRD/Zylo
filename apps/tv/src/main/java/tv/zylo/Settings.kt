@@ -515,7 +515,10 @@ private fun MediaServers(store: Store, open: ((@Composable (close: () -> Unit) -
   }
 }
 
-/** Settings > Live TV: an Xtream Codes account (server, username, password — or the provider's M3U link, which has all three). */
+/**
+ * Settings > Live TV: your Xtream Codes accounts (server, username, password — or the provider's M3U link, which has all
+ * three). Several providers show as one guide: the same channel from two becomes one entry, each tried if one won't play.
+ */
 @Composable
 private fun LiveTvSettings(store: Store) {
   val ctx = LocalContext.current
@@ -523,8 +526,8 @@ private fun LiveTvSettings(store: Store) {
   var tick by remember { mutableIntStateOf(0) }
   var busy by remember { mutableStateOf(false) }
   var message by remember { mutableStateOf<String?>(null) }
-  val x = remember(tick) { Xtream.from(store) }
-  val info = remember(tick) { runCatching { JSONObject(store.str("xc_info")).optJSONObject("user_info") }.getOrNull() }
+  val accounts = remember(tick) { Xtream.accounts(store) }
+  val x = accounts.firstOrNull()
   fun connect(server: String, user: String, pass: String) = scope.launch {
     busy = true
     message = null
@@ -532,33 +535,76 @@ private fun LiveTvSettings(store: Store) {
     busy = false
     tick++
   }
+  fun add() = ask(ctx, "Server address or M3U link", store.str("xc_last")) { input ->
+    if (input.isBlank()) return@ask
+    store.put("xc_last", input.trim())
+    val (server, user, pass) = Xtream.parse(input)
+    if (user != null && pass != null) connect(server, user, pass)
+    else ask(ctx, "Username", "") { u -> ask(ctx, "Password", "", secret = true) { p -> connect(server, u, p) } }
+  }
   Column(Modifier.verticalScroll(rememberScrollState()), verticalArrangement = Arrangement.spacedBy(12.dp)) {
-    Header("Live TV", "Watch your TV provider's channels with a programme guide. Zylo uses the Xtream Codes details your provider gave you.")
-    val details = info?.let { i ->
-      listOfNotNull(
-        i.optString("exp_date").toLongOrNull()?.let { "expires " + java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.UK).format(java.util.Date(it * 1000)) },
-        i.optString("max_connections").takeIf { it.isNotEmpty() && it != "0" }?.let { "$it connection" + if (it == "1") "" else "s" },
+    Header("Live TV", "Watch your TV providers' channels with a programme guide. Zylo uses the Xtream Codes details each provider gave you.")
+    if (accounts.isEmpty()) {
+      AccountRow("XC", "Xtream Codes", message ?: "Enter the server address, username and password, or paste the M3U link (it includes all three).",
+        message != null, if (busy) "Checking…" else "Not connected", if (busy) Z.Info else Z.Muted) {
+        ZButton("Connect", ::add, primary = false)
+      }
+    }
+    val now = System.currentTimeMillis()
+    accounts.forEach { a ->
+      val info = runCatching { JSONObject(a.info).optJSONObject("user_info") }.getOrNull()
+      val expires = a.expires
+      val details = listOfNotNull(
+        expires?.let { (if (it < now) "expired " else "expires ") + java.text.SimpleDateFormat("d MMM yyyy", java.util.Locale.UK).format(java.util.Date(it)) },
+        info?.optString("max_connections")?.takeIf { it.isNotEmpty() && it != "0" }?.let { "$it connection" + if (it == "1") "" else "s" },
       ).joinToString(", ")
-    }.orEmpty()
-    AccountRow("XC", "Xtream Codes", message ?: if (x != null) "Connected to ${x.server.substringAfter("://")} as ${x.user}" + (if (details.isNotEmpty()) " ($details)." else ".")
-      else "Enter the server address, username and password, or paste the M3U link (it includes all three).",
-      message != null, when { busy -> "Checking…"; x != null -> "Connected"; else -> "Not connected" }, when { busy -> Z.Info; x != null -> Z.Success; else -> Z.Muted }) {
-      if (x == null) ZButton("Connect", {
-        ask(ctx, "Server address or M3U link", store.str("xc_last")) { input ->
-          if (input.isBlank()) return@ask
-          store.put("xc_last", input.trim())
-          val (server, user, pass) = Xtream.parse(input)
-          if (user != null && pass != null) connect(server, user, pass)
-          else ask(ctx, "Username", "") { u -> ask(ctx, "Password", "", secret = true) { p -> connect(server, u, p) } }
-        }
-      }, primary = false)
-      else ConfirmButton("Disconnect", { Xtream.disconnect(store); message = null; tick++ })
+      // Running out soon is worth knowing before the channels stop.
+      val (status, color) = when {
+        expires != null && expires < now -> "Expired" to Z.Error
+        expires != null && expires < now + 14 * 86_400_000L -> "Expires soon" to Z.Warning
+        else -> "Connected" to Z.Success
+      }
+      AccountRow(a.name.filter { it.isLetterOrDigit() }.take(2).uppercase().ifEmpty { "XC" }, a.name,
+        "Connected to ${a.server.substringAfter("://")} as ${a.user}" + (if (details.isNotEmpty()) " ($details)." else "."), false, status, color) {
+        if (accounts.size > 1) ZButton("Rename", { ask(ctx, "Name for this provider", a.name) { n -> Xtream.rename(store, a.slot, n); tick++ } })
+        ConfirmButton(if (accounts.size > 1) "Remove" else "Disconnect", { Xtream.disconnect(store, a.slot); message = null; tick++ })
+      }
+    }
+    if (accounts.isNotEmpty()) {
+      message?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = Z.Error) }
+      Row(horizontalArrangement = Arrangement.spacedBy(10.dp), verticalAlignment = Alignment.CenterVertically) {
+        ZButton(if (busy) "Checking…" else "Add Another Provider", { if (!busy) add() })
+        ZButton("Refresh Channels", { Xtream.changed(store); toast(ctx, "Live TV will fetch your channels again when you open it.") })
+      }
+      Text(if (accounts.size > 1) "Your providers show as one guide. A channel both have is one entry, with every version from both: the best plays first, and the next is tried if it won't start."
+        else "With more than one provider, they show as one guide, and a channel both have is tried on the other if one won't play.",
+        Modifier.fillMaxWidth(0.8f), style = MaterialTheme.typography.bodySmall, color = Z.Text2)
     }
     Text("Live TV appears in the top bar. It isn't shown on kids profiles.", style = MaterialTheme.typography.bodySmall, color = Z.Muted)
     if (x != null) {
       var preview by remember { mutableStateOf(store.str("live_preview") != "off") }
       Toggle("Preview channels in the guide", "The channel you rest on plays, muted, above the guide. Uses one of your provider's connections.", preview) {
         preview = !preview; store.put("live_preview", if (preview) "" else "off")
+      }
+      var combine by remember { mutableStateOf(store.str("live_combine") != "off") }
+      Toggle("Combine versions and categories", "One entry per channel when it's listed several times (HD, FHD, 4K, HEVC, or by more than one provider), and one category per name. Names drop their quality labels. The highest quality plays first; if it won't start, the next one down is tried.", combine) {
+        combine = !combine; store.put("live_combine", if (combine) "" else "off")
+      }
+      var resume by remember { mutableStateOf(store.str("live_resume") == "on") }
+      Toggle("Start on your last channel", "The first time you open Live TV after starting Zylo, the channel you last watched plays straight away.", resume) {
+        resume = !resume; store.put("live_resume", if (resume) "on" else "")
+      }
+      // Hidden categories wait at the very bottom of a list that can run to hundreds: bringing them back is easier here.
+      var hidden by remember { mutableIntStateOf(Xtream.hidden(store).size) }
+      if (hidden > 0) Row(Modifier.fillMaxWidth(0.8f).background(Z.Card, Z.Small).padding(horizontal = 16.dp, vertical = 12.dp), verticalAlignment = Alignment.CenterVertically) {
+        Column(Modifier.weight(1f)) {
+          Text("Hidden categories", style = MaterialTheme.typography.titleMedium)
+          Text(if (hidden == 1) "1 hidden (a whole country tag counts as one)" else "$hidden hidden (a whole country tag counts as one)", style = MaterialTheme.typography.bodySmall, color = Z.Text2)
+        }
+        ZButton("Show All Again", { Xtream.setHidden(store, emptySet()); hidden = 0; toast(ctx, "Every category is showing again") })
+      }
+      Toggle("Channel logos from tv-logos", "Clean, matching logos from the free tv-logos collection (github.com/tv-logo/tv-logos), where it has the channel. Others keep your provider's logo.", Logos.on) {
+        Logos.set(store, !Logos.on)
       }
       BetterGuide(store)
     }
