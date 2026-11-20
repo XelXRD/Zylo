@@ -23,6 +23,7 @@ import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.input.key.*
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.draw.alpha
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.tv.material3.*
@@ -211,11 +212,14 @@ private fun Result(store: Store, type: String, answers: List<Answer>, nav: Nav, 
     spinning = false
   }
   fun roll(step: Int) { if (!spinning) { index = (index + step + d.size) % d.size; rolls++ } }
-  val details by produceState<org.json.JSONObject?>(null, item) { value = withContext(Dispatchers.IO) { runCatching { t.details(item.type, item.id) }.getOrNull() } }
+  // Cleared on each roll: produceState keeps its last value, which put the previous pick's trailer under this one.
+  val details by produceState<org.json.JSONObject?>(null, item) { value = null; value = withContext(Dispatchers.IO) { runCatching { t.details(item.type, item.id) }.getOrNull() } }
   val trailer = Tmdb.trailer(details)
   val look = rememberLook(store, item)
   val watch = remember { FocusRequester() }
-  LaunchedEffect(Unit) { delay(80); runCatching { watch.requestFocus() } }
+  // The buttons are made again each time a pick lands (they're hidden while the reel spins): focus goes back to them, or
+  // the next press was only spent finding focus instead of re-rolling.
+  LaunchedEffect(spinning) { if (!spinning) { delay(60); runCatching { watch.requestFocus() } } }
 
   Box(Modifier.fillMaxSize().onPreviewKeyEvent { e ->
     if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
@@ -247,11 +251,14 @@ private fun Result(store: Store, type: String, answers: List<Answer>, nav: Nav, 
         }
       }
     }
-    // The trailer, in a pop-out window.
-    if (!spinning) Column(Modifier.align(Alignment.TopEnd).padding(top = 64.dp, end = Z.Pad).width(450.dp)) {
-      Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(Z.Large).background(Color.Black), contentAlignment = Alignment.Center) {
-        if (trailer != null) key(item.key) { Trailer(trailer, Modifier.fillMaxSize(), sound = store.trailerSound) }
-        else Text(if (details == null) "Loading trailer…" else "No trailer for this one.", color = Z.Muted)
+    // The trailer, in a pop-out window. It loads while the reel spins (out of sight), so it's playing as the pick lands;
+    // until then the window shows the pick's artwork, never an empty black box.
+    Column(Modifier.align(Alignment.TopEnd).padding(top = 64.dp, end = Z.Pad).width(450.dp).alpha(if (spinning) 0f else 1f)) {
+      Box(Modifier.fillMaxWidth().aspectRatio(16f / 9f).clip(Z.Large).background(Z.Card), contentAlignment = Alignment.Center) {
+        AsyncImage(img(item.backdrop, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        var refused by remember(item.key) { mutableStateOf(false) }
+        if (trailer != null && !refused) Trailer(trailer, Modifier.fillMaxSize(), sound = store.trailerSound, onFailed = { refused = true }, owner = item.key)
+        else if (details != null) Text(if (refused) "This trailer can't play here" else "No trailer for this one", Modifier.background(Z.Bg.copy(alpha = 0.85f), Z.Small).padding(horizontal = 12.dp, vertical = 6.dp), color = Z.Text2)
       }
       Text("TRAILER", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelMedium, color = Z.Muted)
     }

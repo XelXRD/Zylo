@@ -295,12 +295,15 @@ object LiveCaptions {
         }.getOrNull()
         main.post { starting = false; if (recognizer == null) lines = "Subtitles couldn't start on this TV." }
         recognizer ?: return@Thread
-        val stream: OnlineStream = recognizer.createStream()
+        var stream: OnlineStream = recognizer.createStream()
         var shown = ""
         var generation = -1
+        var rate = 0
         while (!stopped) {
           val c = queue.poll(200, java.util.concurrent.TimeUnit.MILLISECONDS) ?: continue
-          if (c.generation != generation) { generation = c.generation; recognizer.reset(stream); last = ""; shown = "" } // seek or new stream
+          // Seek or new channel: a fresh stream. sherpa-onnx keeps its resampler for a stream's life and exits the whole
+          // app if the sample rate changes (one channel at 48 kHz, the next at 44.1), so reset() isn't enough.
+          if (c.generation != generation || c.rate != rate) { generation = c.generation; rate = c.rate; stream.release(); stream = recognizer.createStream(); last = ""; shown = "" }
           stream.acceptWaveform(c.samples, c.rate)
           while (recognizer.isReady(stream)) recognizer.decode(stream)
           val now = recognizer.getResult(stream).text.trim()

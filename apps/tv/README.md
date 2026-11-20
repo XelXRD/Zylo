@@ -33,7 +33,7 @@ Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSk
 
 ### Watching
 - **Home** with a featured hero (trailer plays after a moment, a new set of titles every 4 hours), Continue Watching (where you stopped plus the next episode of every series you're watching), Starting Soon and On Live TV Now, My List, your Trakt watchlist and recommendations, Because You Watched / Because You Liked, Comfort Rewatch, Under 90 Minutes, Hidden Gems, Something Different, trending and top rated rows.
-- **Previews:** rest on a poster and it widens into a card with artwork, then a muted trailer.
+- **Previews:** the row you're in grows, and the poster you're on opens into a wide still with its logo, what it is underneath; rest on it and a muted trailer plays.
 - **Rows** keep the focused title at the left; the row you're on sits in the middle of the screen; Up and Down keep your position; every row ends in **Show More**.
 - **Movies, Series and Anime** grids with Popular / Top Rated / New and genre filters. Anime series live only in the Anime section.
 - **Title pages:** Play / Resume, Choose Source, My List, Trailer, Mark as Watched; Episodes, Overview, Cast & Crew and More Like This tabs; thumbs up or down.

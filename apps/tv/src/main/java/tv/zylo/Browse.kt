@@ -157,7 +157,7 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
     }
   }
   Box(Modifier.fillMaxSize()) {
-    if (featured != null) HeroBackdrop(store, s, featured, Modifier.fillMaxSize().alpha(artAlpha))
+    if (featured != null) HeroBackdrop(store, s, featured, active = s.heroFocused || (nav.ui.navFocused && artAlpha == 1f), Modifier.fillMaxSize().alpha(artAlpha))
     // The focused row moves to the middle of the screen (Alex: a focal point, never cut off at the bottom). In the hero
     // the page stays at the top. Rows supply their own sideways behaviour (PivotRow).
     // The top item fades out over [over] of scrolling, so nothing of it is left to show through under the top bar.
@@ -197,19 +197,19 @@ private fun RowsState.moveHero(step: Int) {
 }
 
 /**
- * The featured title's artwork, full-bleed behind the page (and the top bar). While the hero has focus, its trailer
- * starts after Z.HeroTrailerDelay and the next title follows when it ends; with no trailer it moves on after a while.
+ * The featured title's artwork, full-bleed behind the page (and the top bar). While the hero is in view with focus on
+ * it or the top bar, its trailer loads at once (it shows as soon as it's playing) and the next title follows when it
+ * ends; with no trailer it moves on after a while.
  */
 @Composable
-private fun HeroBackdrop(store: Store, s: RowsState, item: Item, modifier: Modifier) {
+private fun HeroBackdrop(store: Store, s: RowsState, item: Item, active: Boolean, modifier: Modifier) {
   val look = rememberLook(store, item)
   val trailer = Tmdb.trailer(look?.details)
   var trailerOn by remember(item) { mutableStateOf(false) }
-  LaunchedEffect(item, s.heroFocused, trailer) {
+  LaunchedEffect(item, active, trailer) {
     trailerOn = false
     s.heroPlaying = false
-    if (!s.heroFocused) return@LaunchedEffect
-    delay(Z.HeroTrailerDelay)
+    if (!active) return@LaunchedEffect
     if (trailer != null && store.previews) trailerOn = true
     else { delay(8_000); s.moveHero(1) }
   }
@@ -218,7 +218,7 @@ private fun HeroBackdrop(store: Store, s: RowsState, item: Item, modifier: Modif
       AsyncImage(url, null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
     }
     if (trailerOn) key(trailer) {
-      Trailer(trailer!!, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { s.heroPlaying = it }, onEnded = { s.moveHero(1) }, onFailed = { s.moveHero(1) })
+      Trailer(trailer!!, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { s.heroPlaying = it }, onEnded = { s.moveHero(1) }, onFailed = { s.moveHero(1) }, owner = item.key)
     }
     // Readability without a panel: a vignette from the left where the text sits, and a long fade into the rows below.
     Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.92f), 0.42f to Z.Bg.copy(alpha = 0.55f), 0.75f to Color.Transparent)))
@@ -343,27 +343,38 @@ fun latestReleases(t: Tmdb): List<Item> {
   return (t.list(path, "movie") + runCatching { t.list("$path&page=2", "movie") }.getOrDefault(emptyList())).distinctBy { it.key } // ~40 to choose from
 }
 
+/**
+ * A shelf of posters. The row holding focus is the big row: its posters grow (160x240), the focused one opens straight
+ * away into a wide still with its title logo, and what it is (meta and a two-line synopsis) sits under the row, off the
+ * artwork. Every other row stays small, so the eye always knows which one it's in.
+ */
 @Composable
 fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: Nav, default: Boolean) = Column {
   val more = s.specsByTitle[name]?.takeIf { it.load == null && it.path.isNotEmpty() }
+  val active = s.focused?.startsWith("$name/") == true
+  val height = if (active) BigCard else 186.dp
   Text(name, Modifier.padding(start = Z.Pad, top = 10.dp), style = MaterialTheme.typography.titleLarge)
   PivotRow {
   LazyRow(
     state = s.rowLists.getOrPut(name) { LazyListState() },
-    contentPadding = PaddingValues(start = Z.Pad, end = 400.dp, top = 14.dp, bottom = 14.dp), // end room so the last card can reach the pivot
+    contentPadding = PaddingValues(start = Z.Pad, end = 600.dp, top = 14.dp, bottom = 14.dp), // end room so the last card can reach the pivot
     horizontalArrangement = Arrangement.spacedBy(14.dp),
   ) {
     itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
       val k = "$name/${item.key}"
       PreviewCard(
-        store, item, s.expanded == k, Modifier.sameColumn(s, name, i).focusMemory(s.focus, k, default && i == 0),
+        store, item, wide = s.focused == k, height = height, trailer = s.expanded == k,
+        Modifier.sameColumn(s, name, i).focusMemory(s.focus, k, default && i == 0),
         onFocus = { f -> if (f) s.focused = k else if (s.focused == k) s.focused = null },
       ) { nav.push(Screen.Title(item)) }
     }
     // End of a row: the whole list, page after page.
     more?.let { spec ->
       item("more") {
-        ZSurface({ nav.push(Screen.More(spec.title, spec.path, spec.type)) }, Modifier.sameColumn(s, name, items.size).focusMemory(s.focus, "$name/more").width(124.dp).height(186.dp), container = Z.Card) {
+        val k = "$name/more"
+        ZSurface({ nav.push(Screen.More(spec.title, spec.path, spec.type)) }, Modifier.sameColumn(s, name, items.size).focusMemory(s.focus, k)
+          .onFocusChanged { f -> if (f.isFocused) s.focused = k else if (s.focused == k) s.focused = null }
+          .width(height * 2 / 3).height(height), container = Z.Card) {
           Column(Modifier.fillMaxSize(), verticalArrangement = Arrangement.Center, horizontalAlignment = Alignment.CenterHorizontally) {
             Glyph(Icons.Filled.Add, 28.dp)
             Text("Show more", Modifier.padding(top = 8.dp), style = MaterialTheme.typography.labelLarge)
@@ -373,7 +384,25 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
     }
   }
   }
+  // What the focused title is, under the row (the card itself stays clean artwork).
+  if (active) {
+    val item = items.find { s.focused == "$name/${it.key}" }
+    Crossfade(item, Modifier.padding(start = Z.Pad, bottom = 14.dp).widthIn(max = 640.dp).height(70.dp), animationSpec = tween(ms(180), easing = Z.EaseOut), label = "rowInfo") { shown ->
+      if (shown != null) Column {
+        val look = rememberLook(store, shown)
+        Row(verticalAlignment = Alignment.CenterVertically) {
+          MetaLine(Tmdb.meta(shown, look?.details), color = Z.Text.copy(alpha = 0.8f))
+          Spacer(Modifier.width(14.dp))
+          Rating(shown.rating)
+        }
+        Text(shown.overview, Modifier.padding(top = 6.dp), style = MaterialTheme.typography.bodyMedium, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+      }
+    }
+  }
 }
+
+/** Card height in the row that has focus (posters 2:3, the focused one 16:9). */
+private val BigCard = 240.dp
 
 /** Up/Down to the card directly below/above on screen (rows scroll independently, so not the same index). */
 private fun Modifier.sameColumn(s: RowsState, row: String, i: Int) =
@@ -382,8 +411,8 @@ private fun Modifier.sameColumn(s: RowsState, row: String, i: Int) =
     val step = when (e.key) { Key.DirectionDown -> 1; Key.DirectionUp -> -1; else -> return@onPreviewKeyEvent false }
     val target = s.order.getOrNull(s.order.indexOf(row) + step) ?: return@onPreviewKeyEvent false // hero, Continue Watching: as before
     val here = s.rowLists[row]?.layoutInfo?.visibleItemsInfo?.find { it.index == i } ?: return@onPreviewKeyEvent false
-    val x = here.offset + here.size / 2
-    val below = s.rowLists[target]?.layoutInfo?.visibleItemsInfo?.minByOrNull { kotlin.math.abs(it.offset + it.size / 2 - x) }
+    // By left edges: the focused card may be wide, and what's directly above or below it lines up with its left edge.
+    val below = s.rowLists[target]?.layoutInfo?.visibleItemsInfo?.minByOrNull { kotlin.math.abs(it.offset - here.offset) }
       ?: return@onPreviewKeyEvent false // not laid out yet: the normal move
     runCatching { s.card(target, below.index).requestFocus() }.isSuccess // off screen (detached): the normal move
   }
@@ -426,38 +455,35 @@ fun PivotRow(content: @Composable () -> Unit) {
   CompositionLocalProvider(LocalBringIntoViewSpec provides spec, content = content)
 }
 
-/** Poster that widens into a 16:9 preview (artwork, then muted trailer) once focus rests on it. OK opens the title. */
+/**
+ * A poster in a row. [wide]: focused in the big row, so it opens at once into a 16:9 still with its title logo; the
+ * muted [trailer] starts there once focus has rested. OK opens the title.
+ */
 @Composable
-fun PreviewCard(store: Store, item: Item, expanded: Boolean, modifier: Modifier, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
+fun PreviewCard(store: Store, item: Item, wide: Boolean, height: androidx.compose.ui.unit.Dp, trailer: Boolean, modifier: Modifier, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
   // Grows smoothly, shrinks at once: an animated shrink drags the next card sideways while the row scrolls.
-  val width by animateDpAsState(if (expanded) 330.dp else 124.dp, if (expanded) tween(ms(280), easing = Z.EaseInOut) else snap(), label = "card")
-  val look = rememberLook(store, item, enabled = expanded)
-  val d = look?.details
-  var grown by remember { mutableStateOf(false) } // the trailer only starts once the card is full size
-  val growMs = ms(300).toLong()
-  LaunchedEffect(expanded) {
-    grown = false
-    if (expanded) { delay(growMs); grown = true }
-  }
+  val target = if (wide) height * 16 / 9 else height * 2 / 3
+  val width by animateDpAsState(target, if (wide) tween(ms(240), easing = Z.EaseOut) else snap(), label = "card")
+  val look = rememberLook(store, item, enabled = wide)
   var playing by remember { mutableStateOf(false) }
   val overlay by animateFloatAsState(if (playing) 0f else 1f, tween(ms(220), easing = Z.EaseOut), label = "overlay")
-  ZCard(onClick, modifier.width(width).height(186.dp).onFocusChanged { onFocus(it.isFocused) }) {
-    Crossfade(expanded, animationSpec = tween(ms(220), easing = Z.EaseOut), label = "preview") { open ->
+  ZCard(onClick, modifier.width(width).height(height).onFocusChanged { onFocus(it.isFocused) }) {
+    Crossfade(wide, animationSpec = tween(ms(180), easing = Z.EaseOut), label = "preview") { open ->
       Box(Modifier.fillMaxSize()) {
         if (!open) {
           Artwork(img(item.poster, "w342"), item.title)
           Marks(store, item)
         } else {
-          AsyncImage(img(item.backdrop ?: item.poster, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-          val trailer = Tmdb.trailer(d)
-          if (trailer != null && grown && store.previews) Trailer(trailer, Modifier.fillMaxSize(), store.trailerSound, onPlaying = { playing = it })
-          // Details over the artwork; they fade away once the trailer is playing so it fills the whole card.
-          Box(Modifier.fillMaxSize().alpha(overlay).background(Brush.verticalGradient(0.3f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.92f))))
-          Column(Modifier.align(Alignment.BottomStart).padding(12.dp).alpha(overlay)) {
-            TitleLogo(look, item.title, MaterialTheme.typography.titleMedium.copy(color = Z.Text), 170.dp, 44.dp)
-            MetaLine(listOfNotNull(item.rating.takeIf { it > 0 }?.let { "%.1f TMDB".format(it) }) + Tmdb.meta(item, d), Modifier.padding(top = 3.dp))
-            Text(item.overview, Modifier.padding(top = 4.dp), style = MaterialTheme.typography.bodySmall, color = Z.Text2, maxLines = 2, overflow = TextOverflow.Ellipsis)
+          // A clean background (fanart's thumbs have the title printed on them, which the logo would repeat).
+          AsyncImage(look?.background ?: img(item.backdrop ?: item.poster, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+          val clip = Tmdb.trailer(look?.details)
+          if (clip != null && trailer && store.previews) Trailer(clip, Modifier.fillMaxSize(), store.trailerSound, onPlaying = { playing = it }, owner = item.key)
+          // Only the title on the artwork, on a short fade; it steps aside once the trailer is playing.
+          Box(Modifier.fillMaxSize().alpha(overlay).background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))))
+          Box(Modifier.align(Alignment.BottomStart).padding(16.dp).alpha(overlay)) {
+            TitleLogo(look, item.title, MaterialTheme.typography.headlineSmall.copy(color = Z.Text), 220.dp, 64.dp)
           }
+          Marks(store, item)
         }
       }
     }

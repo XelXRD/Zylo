@@ -1,6 +1,12 @@
 // Detail page, Choose Source and the player.
 package tv.zylo
 
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.input.key.Key
+import androidx.compose.ui.input.key.key
+import androidx.compose.ui.input.key.type
+import androidx.compose.ui.input.key.KeyEventType
+import androidx.compose.ui.input.key.onPreviewKeyEvent
 import android.content.Context
 import android.content.Intent
 import android.net.Uri
@@ -71,6 +77,9 @@ import org.json.JSONObject
 
 @Composable
 fun TitlePage(store: Store, item: Item, nav: Nav) {
+  // Opened from its playing trailer (Home's hero or a card, Pick for Me): that very player is this page's now, still
+  // playing. Taken before anything else, as the page it came from lets go of it straight after.
+  val carried = remember(item.key) { TrailerHandoff.claim(item.key) }
   val t = remember { Tmdb(store.tmdb) }
   val ctx = LocalContext.current
   val focus = remember { nav.ui.titles.getOrPut(item.key) { FocusMemory() } }
@@ -114,6 +123,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
       LaunchedEffect(Unit) { delay(80); runCatching { back.requestFocus() } }
       ZButton("Go Back", { nav.back() }, Modifier.padding(top = 24.dp).focusRequester(back), primary = true)
     }
+    LaunchedEffect(Unit) { carried?.second?.destroy() } // not for this profile: nor is its trailer
     return
   }
   val hasCast = d?.optJSONObject("credits")?.optJSONArray("cast")?.length()?.let { it > 0 } == true
@@ -126,16 +136,34 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val playLabel = (if (resuming) "Resume" else "Play") + if (tv) " S$playSeason E$playEpisode" else ""
 
   var popup by remember { mutableStateOf(false) } // trailer pop-out
+  // The trailer behind the page: carried on from where you opened it, else starting here. Gone when it ends, or while the
+  // pop-out (with sound) is open.
+  val behind = carried?.first ?: trailer?.takeIf { store.previews }
+  var carryOn by remember { mutableStateOf(true) }
+  var trailerOn by remember { mutableStateOf(false) }
+  // While it plays, the page steps back after a few seconds untouched so the trailer has the screen; any button brings it
+  // back (that press only wakes it, so nothing happens by surprise). Back still goes back.
+  var touched by remember { mutableIntStateOf(0) }
+  var resting by remember { mutableStateOf(false) }
+  LaunchedEffect(trailerOn, touched, popup) { resting = false; if (trailerOn && !popup) { delay(5_000); resting = true } }
+  val pageAlpha by animateFloatAsState(if (resting) 0f else 1f, tween(ms(if (resting) 700 else 200), easing = Z.EaseOut), label = "page")
   BackHandler(popup) { popup = false }
   val scroll = rememberScrollState()
   val scope = rememberCoroutineScope()
   val selectedTab = remember { FocusRequester() }
-  Box(Modifier.fillMaxSize()) {
+  Box(Modifier.fillMaxSize().onPreviewKeyEvent { e ->
+    if (e.type != KeyEventType.KeyDown) return@onPreviewKeyEvent false
+    val wake = resting && e.key != Key.Back
+    touched++
+    wake
+  }) {
     AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    // Text runs well past the middle, so the scrim holds dark further across than a hero's does.
-    Box(Modifier.fillMaxSize().background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.96f), 0.55f to Z.Bg.copy(alpha = 0.86f), 0.8f to Z.Bg.copy(alpha = 0.55f), 1f to Z.Bg.copy(alpha = 0.25f))))
-    Box(Modifier.fillMaxSize().background(Brush.verticalGradient(0.4f to Color.Transparent, 0.85f to Z.Bg)))
-    Column(Modifier.fillMaxSize().verticalScroll(scroll).padding(start = Z.Pad, end = Z.Pad, top = 36.dp, bottom = 40.dp)) {
+    if (behind != null && carryOn && !popup) Trailer(behind, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { trailerOn = it },
+      onEnded = { carryOn = false }, onFailed = { carryOn = false }, owner = item.key, adopt = carried?.second)
+    // Text runs well past the middle, so the scrim holds dark further across than a hero's does. It goes with the page.
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = pageAlpha }.background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.96f), 0.55f to Z.Bg.copy(alpha = 0.86f), 0.8f to Z.Bg.copy(alpha = 0.55f), 1f to Z.Bg.copy(alpha = 0.25f))))
+    Box(Modifier.fillMaxSize().graphicsLayer { alpha = pageAlpha }.background(Brush.verticalGradient(0.4f to Color.Transparent, 0.85f to Z.Bg)))
+    Column(Modifier.fillMaxSize().graphicsLayer { alpha = pageAlpha }.verticalScroll(scroll).padding(start = Z.Pad, end = Z.Pad, top = 36.dp, bottom = 40.dp)) {
       Row {
         Artwork(img(item.poster, "w342"), item.title, Modifier.width(168.dp).aspectRatio(2f / 3f).clip(Z.Medium))
         Spacer(Modifier.width(32.dp))

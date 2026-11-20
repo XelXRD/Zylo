@@ -11,6 +11,7 @@ import androidx.activity.compose.BackHandler
 import androidx.activity.compose.setContent
 import androidx.compose.animation.core.animateFloatAsState
 import androidx.compose.animation.core.tween
+import androidx.compose.animation.core.snap
 import androidx.compose.foundation.background
 import androidx.compose.foundation.focusGroup
 import androidx.compose.foundation.layout.*
@@ -338,31 +339,82 @@ fun rememberForeground(): Boolean {
 /**
  * YouTube trailer through the official IFrame Player API, in a WebView that never takes focus. Muted unless
  * Settings > Playback > Trailer sound is on. Fades in once it is really playing (onPlaying lets the card hide its
- * text); gone when it ends, after 10 s without starting, or when the app is in the background.
+ * text); gone when it ends, after 15 s without starting, or when the app is in the background.
+ * [owner]: the title it belongs to, so opening that title can take over this very player ([TrailerHandoff.claim]) and
+ * the trailer runs on into the title page without stopping or loading again; [adopt] is that player.
  */
-@SuppressLint("SetJavaScriptEnabled")
 @Composable
 fun Trailer(
   youtubeKey: String, modifier: Modifier, sound: Boolean,
   cover: Boolean = false, // crop to fill a box wider than 16:9 (the Home hero) instead of fitting it exactly
   onPlaying: (Boolean) -> Unit = {}, onEnded: () -> Unit = {}, onFailed: () -> Unit = {},
+  owner: String? = null, adopt: WebView? = null,
+) = key(youtubeKey) { TrailerView(youtubeKey, modifier, sound, cover, onPlaying, onEnded, onFailed, owner, adopt) } // another video: a new player (the WebView loads once)
+
+/** What the page in the WebView reports; whoever shows the player now listens (it moves from page to page). */
+private class TrailerBridge {
+  var shown = false
+  var onState: (Int) -> Unit = {}
+  var onFailed: () -> Unit = {}
+  private val main = android.os.Handler(android.os.Looper.getMainLooper())
+  @JavascriptInterface fun state(s: Int) = main.post { shown = s == 1; onState(s) }
+  // YouTube refused it (removed, private, or its owner doesn't allow it outside YouTube): give up now, not in 15 s.
+  @JavascriptInterface fun failed() = main.post { onFailed() }
+}
+
+/**
+ * The trailer player that's on screen for a title, so opening that title can take it over: the same WebView moves to
+ * the title page and keeps playing. [claim] happens as the title page is composed, before the page it came from lets go.
+ */
+object TrailerHandoff {
+  private var live: Triple<String, String, WebView>? = null // (owner, YouTube key, player)
+  private var claimed: WebView? = null
+  fun register(owner: String, youtubeKey: String, view: WebView) { live = Triple(owner, youtubeKey, view) }
+  /** [owner]'s trailer and the player it's in right now, if any: the player is the caller's from now on. */
+  fun claim(owner: String): Pair<String, WebView>? =
+    live?.takeIf { it.first == owner && it.third.parent != null }?.let { (_, k, v) -> claimed = v; k to v }
+  /** Let go of a player when its page goes: false when another page has just taken it over (don't destroy it). */
+  fun release(view: WebView): Boolean {
+    if (claimed === view) { claimed = null; return false }
+    if (live?.third === view) live = null
+    return true
+  }
+}
+
+@SuppressLint("SetJavaScriptEnabled")
+@Composable
+private fun TrailerView(
+  youtubeKey: String, modifier: Modifier, sound: Boolean, cover: Boolean,
+  onPlaying: (Boolean) -> Unit, onEnded: () -> Unit, onFailed: () -> Unit, owner: String?, adopt: WebView?,
 ) {
-  var playing by remember { mutableStateOf(false) }
+  val adopted = remember { adopt }
+  val bridge = remember { adopted?.tag as? TrailerBridge ?: TrailerBridge() }
+  var playing by remember { mutableStateOf(bridge.shown) }
   var ended by remember { mutableStateOf(false) }
+  var gaveUp by remember { mutableStateOf(false) }
+  val failed by rememberUpdatedState(onFailed)
+  DisposableEffect(bridge) {
+    bridge.onState = { s -> if (s == 1) playing = true else if (s == 0) { playing = false; ended = true } else if (s == 2) playing = false }
+    bridge.onFailed = { if (!playing) { gaveUp = true; failed() } }
+    onDispose { bridge.onState = {}; bridge.onFailed = {} }
+  }
   LaunchedEffect(playing) { onPlaying(playing) }
   LaunchedEffect(ended) { if (ended) onEnded() }
   DisposableEffect(Unit) { onDispose { onPlaying(false) } }
-  var gaveUp by remember { mutableStateOf(false) }
   LaunchedEffect(Unit) {
     delay(15_000) // longer than YouTube needs to load, start past the opening cards and settle (see trailerHtml)
-    if (!playing) { gaveUp = true; onFailed() }
+    if (!playing) { gaveUp = true; failed() }
   }
-  val alpha by animateFloatAsState(if (playing) 1f else 0f, tween(ms(250)), label = "trailer")
+  // Taken over already playing: no fade, it was on screen a moment ago.
+  val alpha by animateFloatAsState(if (playing) 1f else 0f, if (adopted != null) snap() else tween(ms(250)), label = "trailer")
   if (!rememberForeground() || gaveUp) return
   AndroidView(
     modifier = modifier.alpha(alpha),
     factory = { ctx ->
-      WebView(ctx).apply {
+      adopted?.apply {
+        (parent as? ViewGroup)?.removeView(this)
+        evaluateJavascript("setCover($cover)", null) // the same video, framed for its new box
+      } ?: WebView(ctx).apply {
         isFocusable = false
         isFocusableInTouchMode = false
         descendantFocusability = ViewGroup.FOCUS_BLOCK_DESCENDANTS
@@ -370,46 +422,48 @@ fun Trailer(
         settings.javaScriptEnabled = true
         settings.mediaPlaybackRequiresUserGesture = false
         webChromeClient = WebChromeClient()
-        addJavascriptInterface(object {
-          @JavascriptInterface fun state(s: Int) = post { if (s == 1) playing = true else if (s == 0) { playing = false; ended = true } else if (s == 2) playing = false }
-        }, "Zylo")
+        tag = bridge
+        addJavascriptInterface(bridge, "Zylo")
         // An https base URL gives YouTube the referrer it requires for embeds.
         loadDataWithBaseURL("https://zylo.tv/", trailerHtml(youtubeKey, sound, cover), "text/html", "utf-8", null)
-      }
+      }.also { v -> owner?.let { TrailerHandoff.register(it, youtubeKey, v) } }
     },
-    onRelease = { it.destroy() },
+    onRelease = { if (TrailerHandoff.release(it)) it.destroy() },
   )
 }
 
 // YouTube's own interface never shows inside Zylo. The player is drawn ~24% larger than the box and centred, so the
 // channel badge and watermark in the corners fall outside it; playback starts a few seconds in (past rating cards and
-// studio idents); Zylo only reports "playing" once the title bar YouTube shows at the start has gone, so the artwork stays
-// over it until then (silent, so sound never plays over a still picture); and it stops a few seconds before the end,
-// before the suggested-videos screen.
+// studio idents); Zylo only reports "playing" once the controls YouTube lays over the first ~3 s of playback (title bar,
+// play icon, "More videos", its logo) have gone, so the artwork stays over them until then (silent, so sound never plays
+// over a still picture); and it stops a few seconds before the end, before the suggested-videos screen. Checked on
+// MuMu, Nov 2026: at 1.6 s and 2.5 s the controls still showed; that hidden time can't come down.
 private const val TRAILER_START = 4
 private const val TRAILER_SETTLE = 3.5
 private const val TRAILER_TAIL = 3
 
 private fun trailerHtml(key: String, sound: Boolean, cover: Boolean) = """
 <!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1">
-<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}${
-  if (cover) "#p,iframe{position:fixed;left:50%;top:50%;width:max(124vw,220.4vh)!important;height:max(69.75vw,124vh)!important;transform:translate(-50%,-50%);border:0;pointer-events:none}"
-  else "#p,iframe{position:fixed;top:-12%;left:-12%;width:124%!important;height:124%!important;border:0;pointer-events:none}"
-}</style>
-</head><body><div id="p"></div>
+<style>html,body{margin:0;padding:0;width:100%;height:100%;background:#000;overflow:hidden}
+#p,iframe{position:fixed;top:-12%;left:-12%;width:124%!important;height:124%!important;border:0;pointer-events:none}
+body.cover #p,body.cover iframe{left:50%;top:50%;width:max(124vw,220.4vh)!important;height:max(69.75vw,124vh)!important;transform:translate(-50%,-50%)}</style>
+</head><body class="${if (cover) "cover" else ""}"><div id="p"></div>
 <script>
-var player,shown=false,timer=null;
+var player,shown=false,timer=null,began=-1;
 function check(){
   if(!player||!player.getCurrentTime)return;
   var t=player.getCurrentTime(),d=player.getDuration();
-  if(!shown&&player.getPlayerState()==1&&t>=$TRAILER_START+$TRAILER_SETTLE){shown=true;Zylo.state(1)${if (sound) ";soundUp()" else ""}}
+  if(player.getPlayerState()==1&&t>=$TRAILER_START-0.5&&began<0)began=t;
+  if(!shown&&player.getPlayerState()==1&&began>=0&&t>=began+$TRAILER_SETTLE){shown=true;Zylo.state(1)${if (sound) ";soundUp()" else ""}}
   if(shown&&d>0&&d-t<=$TRAILER_TAIL){shown=false;clearInterval(timer);player.pauseVideo();Zylo.state(0)}
 }
 function onYouTubeIframeAPIReady(){player=new YT.Player('p',{width:'100%',height:'100%',videoId:'$key',playerVars:{autoplay:1,mute:1,controls:0,rel:0,playsinline:1,iv_load_policy:3,disablekb:1,fs:0,cc_load_policy:0,start:$TRAILER_START,origin:'https://zylo.tv'},
-events:{onReady:function(e){e.target.mute();nocc();e.target.playVideo();timer=setInterval(check,250)},
+events:{onError:function(e){Zylo.failed()},onReady:function(e){e.target.mute();nocc();e.target.playVideo();timer=setInterval(check,250)},
 onStateChange:function(e){if(e.data==1)nocc();if(e.data==0){shown=false;Zylo.state(0)}else if(e.data==2&&shown){shown=false;Zylo.state(2)}}}})}
 // Silent while the artwork still covers the video; the sound comes up with the picture, over half a second.
 function soundUp(){var v=0;player.setVolume(0);player.unMute();var f=setInterval(function(){v+=10;player.setVolume(v);if(v>=100)clearInterval(f)},50)}
+// Moved to another box (a card's trailer carried on into its title page): framed for it, still playing.
+function setCover(c){document.body.className=c?'cover':''}
 function nocc(){try{player.unloadModule('captions');player.unloadModule('cc')}catch(x){}}
 </script><script src="https://www.youtube.com/iframe_api"></script></body></html>
 """

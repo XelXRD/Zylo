@@ -1268,16 +1268,20 @@ fun LivePlayer(store: Store, s: LiveState, nav: Nav) {
     player.prepare()
     player.playWhenReady = true
     s.playing = index
-    if (channel.id !in s.guide) s.guide[channel.id] = withContext(Dispatchers.IO) { bestGuide(x, channel) }
-    // Loading with no error (the provider stopped sending) counts as a drop too: after 15 s, or 10 s for a version that
-    // hasn't shown a picture yet, so a dead one hands over to the next sooner.
+    // Not playing when it should be, with no error (the provider stopped sending, or the player sat waiting), counts as
+    // a drop too: after 15 s, or 10 s for a version that hasn't shown a picture yet, so a dead one hands over sooner.
+    // Any state counts, not just loading: a player left idle or ready-but-still was what kept "Trying…" up for good.
     var stuck = 0
     while (true) {
       delay(1_000)
-      stuck = if (player.playbackState == Player.STATE_BUFFERING && player.playWhenReady) stuck + 1 else 0
+      val waiting = player.playWhenReady && !player.isPlaying && error == null &&
+        player.playbackSuppressionReason == Player.PLAYBACK_SUPPRESSION_REASON_NONE
+      stuck = if (waiting) stuck + 1 else 0
       if (stuck >= (if (started) 15 else 10)) { stuck = 0; fail("STALLED") }
     }
   }
+  // The guide on its own, so a slow provider never holds up the watch above.
+  LaunchedEffect(channel.id) { if (channel.id !in s.guide) s.guide[channel.id] = withContext(Dispatchers.IO) { bestGuide(x, channel) } }
   LaunchedEffect(channel.id, past) { if (past == null) s.recent = Xtream.addRecent(store, channel) } // reconnects don't count
   // Measuring: 20 s in (past the first rush that fills the buffer), what arrives over the next 20 s is the stream's
   // bitrate. Saved with the picture height and codec, for the version lists and to order versions with the same label.
