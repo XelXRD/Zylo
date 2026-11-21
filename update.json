@@ -1,5 +1,5 @@
 {
-  "version": "0.33.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.33.0.apk",
-  "notes": "What's new in 0.33.0 — Live TV subtitles made from the audio\n\n• For channels that send no subtitles: turn on Settings > Live TV > Subtitles made from the audio. It asks first, then downloads about 110 MB once.\n• While watching, hold OK, then Subtitles > Made from the audio (English). They stay on from channel to channel until you turn them off.\n• Written on your TV as the programme plays. The audio never leaves it.\n• In step with the speech: while subtitles show, the picture and sound run 3 seconds behind, so each line is ready as it's said.\n• Remove Download in Settings frees the space again."
+  "version": "0.34.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.34.0.apk",
+  "notes": "What's new in 0.34.0 — A bigger focused row, and trailers that carry on\n\n• On Home, the row you're on grows, and the poster you're on opens wide with its trailer and a short summary underneath.\n• Trailers start sooner, on Home and in Pick for Me, and Pick for Me always plays the trailer for the film it picked.\n• Open a film or show while its trailer plays and the trailer carries on from the same moment.\n• While a trailer plays on a film's page, the page fades away after a few seconds. Press any button to bring it back.\n• Live TV: no more crash when changing channel with subtitles on, and a stream that stalls now moves to another one sooner instead of getting stuck."
 }
