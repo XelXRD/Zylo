@@ -53,6 +53,7 @@ sealed interface Screen {
   data object Search : Screen
   data class Title(val item: Item) : Screen
   data class More(val title: String, val path: String, val type: String?) : Screen
+  data class Grid(val title: String, val items: List<Item>) : Screen
   data class Person(val id: Int, val name: String) : Screen
   data class Rabbit(val item: Item) : Screen
   data object Calendar : Screen
@@ -81,22 +82,21 @@ sealed interface Screen {
 enum class Section(val label: String) { Home("Home"), Movies("Movies"), Series("Series"), Anime("Anime"), Live("Live TV"), Discover("Discover"), MyList("My List") }
 
 /** State that outlives a screen, so rows, scroll and focus are where you left them when you come back. */
-class UiState(store: Store) {
+class UiState(private val store: Store) {
   var section by mutableStateOf(Section.Home)
   var stayInNav by mutableStateOf(true) // just opened, or switched section from the top bar: leave focus there
   val home = RowsState({ homeRows(store) }, ::latestReleases)
   val discover = RowsState({ DISCOVER_ROWS })
   val browse = mapOf(Section.Movies to BrowseState("movie"), Section.Series to BrowseState("tv"), Section.Anime to BrowseState("tv", anime = true))
   val live = LiveState()
-  val myList = FocusMemory()
+  val myLists = RowsState({ myListRows(store) }, empty = "Nothing saved yet. Choose My List on any film or series to save it here.")
   val search = FocusMemory()
   val titles = HashMap<String, FocusMemory>()
   val content = FocusRequester() // the current page, so Down from the top bar always lands back in it
   val navActive = FocusRequester() // the current section in the top bar
   var navFocused by mutableStateOf(false)
   var rate by mutableStateOf<Item?>(null) // a film just finished: ask for a thumbs up or down
-  val profile = store.profile
-  var listTab by mutableStateOf("mine")
+  val profile get() = store.profile // read fresh: a new picture or name shows on return from Settings
 }
 
 class Nav(private val stack: SnapshotStateList<Screen>, private val store: Store, val ui: UiState) {
@@ -178,6 +178,7 @@ class MainActivity : ComponentActivity() {
             Screen.Settings -> SettingsGate(store, nav) { SettingsScreen(store) }
             Screen.Search -> SearchPage(store, nav, ui.search)
             is Screen.More -> MorePage(store, s, nav)
+            is Screen.Grid -> GridPage(store, s, nav)
             is Screen.Person -> PersonPage(store, s, nav)
             is Screen.Rabbit -> RabbitHolePage(store, s.item, nav)
             Screen.Calendar -> CalendarPage(store, nav)
@@ -240,7 +241,10 @@ fun Main(store: Store, nav: Nav, ui: UiState) {
       when (val s = ui.section) {
         Section.Home -> RowsPage(store, ui.home, nav, restore, hero = true)
         Section.Discover -> RowsPage(store, ui.discover, nav, restore, title = "Discover", rowsFirst = false, extras = { DiscoverFront(store, nav, ui.discover) })
-        Section.MyList -> MyListPage(store, nav, ui.myList, restore)
+        Section.MyList -> {
+          remember { ui.myLists.loadedFor = "" } // every visit: what you've saved since shows up
+          RowsPage(store, ui.myLists, nav, restore, title = "My Lists")
+        }
         Section.Live -> LivePage(store, ui.live, nav, restore)
         else -> BrowsePage(store, ui.browse.getValue(s), nav, s.label, restore)
       }

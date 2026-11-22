@@ -25,18 +25,19 @@ Everything is set up on the TV, under **Settings** (the gear in the top bar). A 
 
 Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSkip), Time Machine's music and news (Wikipedia), updates (this repository).
 
-**Profiles and PINs:** Settings › Profiles. Each profile has its own history, lists and sign-ins; set a kids profile's rating limit, and give grown-up profiles a 4-digit PIN.
+**Profiles and PINs:** Settings › Profiles. Each profile has its own history, lists, sign-ins and picture; set a kids profile's rating limit, and give grown-up profiles a 4-digit PIN.
 
 **Your keys stay on the TV.** Zylo has no server: keys and sign-ins are stored in the app and only sent to the service they belong to.
 
 ## Features
 
 ### Watching
-- **Home** with a featured hero (trailer plays after a moment, a new set of titles every 4 hours), Continue Watching (where you stopped plus the next episode of every series you're watching), Starting Soon and On Live TV Now, My List, your Trakt watchlist and recommendations, Because You Watched / Because You Liked, Comfort Rewatch, Under 90 Minutes, Hidden Gems, Something Different, trending and top rated rows.
+- **Home** with a featured hero (its trailer plays once you're in it, not while you're in the top bar; a new set of titles every 4 hours), Continue Watching (where you stopped plus the next episode of every series you're watching), Starting Soon and On Live TV Now, My List, your Trakt watchlist and recommendations, Because You Watched / Because You Liked, Comfort Rewatch, Under 90 Minutes, Hidden Gems, Something Different, **Top 10 Films Today** and **Top 10 Series Today** (ranked, with the big outlined numbers), and top rated rows.
 - **Previews:** the row you're in grows, and the poster you're on opens into a wide still with its logo, what it is underneath; rest on it and a muted trailer plays.
 - **Rows** keep the focused title at the left; the row you're on sits in the middle of the screen; Up and Down keep your position; every row ends in **Show More**.
 - **Movies, Series and Anime** grids with Popular / Top Rated / New and genre filters. Anime series live only in the Anime section.
-- **Title pages:** Play / Resume, Choose Source, My List, Trailer, Mark as Watched; Episodes, Overview, Cast & Crew and More Like This tabs; thumbs up or down.
+- **Title pages:** Play / Resume (which picks a source or opens the list, as set in Settings › Playback), My List, Mark as Watched; the trailer plays behind the page; Episodes, Overview, Cast & Crew and More Like This tabs; thumbs up or down.
+- **My Lists:** every list as a row, like Home: Zylo's My List, your Trakt watchlist and lists, AniList / MyAnimeList lists. Long lists end in Show More, which opens the whole list as a grid.
 - **Cast & crew pages:** everything a person has been in, with what you've seen ticked.
 - **One search** for films, series, anime, your live channels, the TV guide and today's fixtures.
 
@@ -83,9 +84,9 @@ Needs nothing from you: sports fixtures (ESPN), Skip Intro times (IntroDB, AniSk
 - Hidden on kids profiles.
 
 ### Your accounts
-- **Trakt:** watch history, progress and paused titles sync in; playback scrobbles; watchlist, your lists, ratings and Mark as Watched go back up. **My List** can save to Zylo, your Trakt watchlist or any of your Trakt lists.
+- **Trakt:** watch history, progress and paused titles sync in; playback scrobbles; watchlist, your lists, ratings and Mark as Watched go back up. With Trakt connected, **My List** asks which Trakt list to save to (your watchlist or one of your lists).
 - **AniList and MyAnimeList:** anime progress moves forward as you watch; their lists appear in My Lists.
-- **Profiles** with their own history, lists, sign-ins and languages; **kids profiles** filtered by rating (U, PG, 12, 15); **4-digit PINs** on grown-up profiles and on Settings from a kids profile.
+- **Profiles** with their own history, lists, sign-ins, languages and **pictures** (17 Zylo character avatars, or your initial); **kids profiles** filtered by rating (U, PG, 12, 15); **4-digit PINs** on grown-up profiles and on Settings from a kids profile.
 
 ### Everything else
 - **Guided setup** on first launch: TMDB, accounts, debrid, addons, Live TV.

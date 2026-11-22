@@ -1,0 +1,5 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The Z, centred with room around it, for the app icon and the Android 12+ splash. The insets keep the mark at its
+     own 3:2 shape (an even inset stretched it square) and inside the circle both of those crop to. -->
+<inset xmlns:android="http://schemas.android.com/apk/res/android" android:drawable="@drawable/zylo_mark"
+    android:insetLeft="25%" android:insetRight="25%" android:insetTop="33.3%" android:insetBottom="33.3%" />

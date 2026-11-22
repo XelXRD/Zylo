@@ -237,11 +237,11 @@ fun ConfirmButton(text: String, onConfirm: () -> Unit, modifier: Modifier = Modi
 }
 
 @Composable
-fun ZCard(onClick: () -> Unit, modifier: Modifier = Modifier, content: @Composable () -> Unit) = Card(
+fun ZCard(onClick: () -> Unit, modifier: Modifier = Modifier, zoom: Boolean = true, content: @Composable () -> Unit) = Card(
   onClick, modifier,
   shape = CardDefaults.shape(Z.Medium),
   colors = CardDefaults.colors(containerColor = Z.Card),
-  scale = CardDefaults.scale(focusedScale = if (LocalReduceMotion.current) 1f else 1.08f, pressedScale = Z.Press),
+  scale = CardDefaults.scale(focusedScale = if (LocalReduceMotion.current || !zoom) 1f else 1.08f, pressedScale = Z.Press),
   // A clean light edge on focus (inset so it sits on the artwork, not around it) plus a deep soft shadow for lift.
   border = CardDefaults.border(focusedBorder = Border(BorderStroke(2.dp, Color.White.copy(alpha = 0.92f)), inset = 0.dp, shape = Z.Medium)),
   glow = CardDefaults.glow(focusedGlow = Glow(Color.Black.copy(alpha = 0.9f), 18.dp)),

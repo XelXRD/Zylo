@@ -34,7 +34,6 @@ import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.draw.shadow
 import androidx.compose.ui.focus.FocusRequester
-import androidx.compose.ui.focus.focusProperties
 import androidx.compose.ui.focus.focusRequester
 import androidx.compose.ui.focus.focusRestorer
 import androidx.compose.ui.focus.onFocusChanged
@@ -135,9 +134,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   val resuming = if (tv) next?.resume == true else latest?.started == true
   val playLabel = (if (resuming) "Resume" else "Play") + if (tv) " S$playSeason E$playEpisode" else ""
 
-  var popup by remember { mutableStateOf(false) } // trailer pop-out
-  // The trailer behind the page: carried on from where you opened it, else starting here. Gone when it ends, or while the
-  // pop-out (with sound) is open.
+  // The trailer behind the page: carried on from where you opened it, else starting here. Gone when it ends.
   val behind = carried?.first ?: trailer?.takeIf { store.previews }
   var carryOn by remember { mutableStateOf(true) }
   var trailerOn by remember { mutableStateOf(false) }
@@ -145,9 +142,8 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
   // back (that press only wakes it, so nothing happens by surprise). Back still goes back.
   var touched by remember { mutableIntStateOf(0) }
   var resting by remember { mutableStateOf(false) }
-  LaunchedEffect(trailerOn, touched, popup) { resting = false; if (trailerOn && !popup) { delay(5_000); resting = true } }
+  LaunchedEffect(trailerOn, touched) { resting = false; if (trailerOn) { delay(5_000); resting = true } }
   val pageAlpha by animateFloatAsState(if (resting) 0f else 1f, tween(ms(if (resting) 700 else 200), easing = Z.EaseOut), label = "page")
-  BackHandler(popup) { popup = false }
   val scroll = rememberScrollState()
   val scope = rememberCoroutineScope()
   val selectedTab = remember { FocusRequester() }
@@ -158,7 +154,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
     wake
   }) {
     AsyncImage(look?.background ?: img(item.backdrop, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-    if (behind != null && carryOn && !popup) Trailer(behind, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { trailerOn = it },
+    if (behind != null && carryOn) Trailer(behind, Modifier.fillMaxSize(), store.trailerSound, cover = true, onPlaying = { trailerOn = it },
       onEnded = { carryOn = false }, onFailed = { carryOn = false }, owner = item.key, adopt = carried?.second)
     // Text runs well past the middle, so the scrim holds dark further across than a hero's does. It goes with the page.
     Box(Modifier.fillMaxSize().graphicsLayer { alpha = pageAlpha }.background(Brush.horizontalGradient(0f to Z.Bg.copy(alpha = 0.96f), 0.55f to Z.Bg.copy(alpha = 0.86f), 0.8f to Z.Bg.copy(alpha = 0.55f), 1f to Z.Bg.copy(alpha = 0.25f))))
@@ -176,9 +172,7 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
           // Any action button focused: the page goes back to the very top so all the details show.
           Row(Modifier.padding(top = 20.dp).onFocusChanged { if (it.hasFocus) scope.launch { scroll.animateScrollTo(0) } }, horizontalArrangement = Arrangement.spacedBy(10.dp)) {
             ZButton(playLabel, { nav.push(Screen.Sources(item, playSeason, playEpisode, autoplay = true)) }, Modifier.focusMemory(focus, "play", default = true), primary = true, icon = Icons.Filled.PlayArrow)
-            ZButton("Choose Source", { nav.push(Screen.Sources(item, playSeason, playEpisode)) }, Modifier.focusMemory(focus, "source"))
             MyListButton(store, item, Modifier.focusMemory(focus, "list"))
-            if (trailer != null) ZButton("Trailer", { popup = true }, Modifier.focusMemory(focus, "trailer"))
             if (!tv) {
               val watched = remember(tick) { store.watched(progressKey(item, null, null)) }
               ZButton(if (watched) "Watched" else "Mark as Watched", {
@@ -229,7 +223,6 @@ fun TitlePage(store: Store, item: Item, nav: Nav) {
         }
       }
     }
-    if (popup && trailer != null) TrailerPopup(trailer, item.title) { popup = false }
   }
 }
 
@@ -286,29 +279,6 @@ private fun Overview(d: JSONObject, tv: Boolean) {
       Row {
         Text(k, Modifier.width(130.dp), style = MaterialTheme.typography.labelLarge, color = Z.Text2)
         Text(v!!, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-      }
-    }
-  }
-}
-
-/** The trailer in a window over the page, with sound. Back or Close shuts it; it closes itself when the trailer ends. */
-@Composable
-private fun TrailerPopup(key: String, title: String, close: () -> Unit) {
-  val button = remember { FocusRequester() }
-  var failed by remember { mutableStateOf(false) }
-  LaunchedEffect(Unit) { delay(60); runCatching { button.requestFocus() } }
-  Box(Modifier.fillMaxSize().background(Color.Black.copy(alpha = 0.88f)), contentAlignment = Alignment.Center) {
-    Column(horizontalAlignment = Alignment.CenterHorizontally) {
-      Box(Modifier.width(740.dp).aspectRatio(16f / 9f).clip(Z.Medium).background(Color.Black), contentAlignment = Alignment.Center) {
-        Text(if (failed) "This trailer couldn't play here." else "Loading trailer…", color = Z.Text2)
-        if (!failed) Trailer(key, Modifier.fillMaxSize(), sound = true, onEnded = close, onFailed = { failed = true })
-      }
-      Row(Modifier.padding(top = 16.dp).width(740.dp), verticalAlignment = Alignment.CenterVertically) {
-        Text(title, Modifier.weight(1f), style = MaterialTheme.typography.titleMedium, maxLines = 1, overflow = TextOverflow.Ellipsis)
-        // Focus stays on Close while the window is open, so the page underneath can't be moved about.
-        ZButton("Close", close, Modifier.focusRequester(button).focusProperties {
-          left = FocusRequester.Cancel; right = FocusRequester.Cancel; up = FocusRequester.Cancel; down = FocusRequester.Cancel
-        })
       }
     }
   }

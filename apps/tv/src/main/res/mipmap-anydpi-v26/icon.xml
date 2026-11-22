@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!-- The app icon (Settings, app lists): sharp at any size. Android 7 uses mipmap-xhdpi/icon.png. -->
+<adaptive-icon xmlns:android="http://schemas.android.com/apk/res/android">
+  <background android:drawable="@color/zylo_bg" />
+  <foreground android:drawable="@drawable/icon_mark" />
+  <monochrome android:drawable="@drawable/icon_mark" />
+</adaptive-icon>

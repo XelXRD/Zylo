@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+  <!-- Android 12+ shows the launching activity's icon on its splash screen. That icon is the wide banner (for Fire TV's
+       tile), which sat small in a white square there, so the splash shows the Z mark on Zylo's background instead. -->
+  <style name="Zylo" parent="@android:style/Theme.Black.NoTitleBar.Fullscreen">
+    <item name="android:windowSplashScreenBackground">@color/zylo_bg</item>
+    <item name="android:windowSplashScreenAnimatedIcon">@drawable/icon_mark</item>
+    <item name="android:windowSplashScreenIconBackgroundColor">@color/zylo_bg</item>
+  </style>
+</resources>

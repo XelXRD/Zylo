@@ -129,8 +129,11 @@ fun progressKey(item: Item, season: Int?, episode: Int?) = "${item.type}:${item.
 
 // --- Storage ------------------------------------------------------------------------
 
-/** [kids]: a kids profile's highest allowed rating, as an index into Ratings.LEVELS; null for a normal profile. */
-data class Profile(val id: String, val name: String, val color: Int, val kids: Int? = null)
+/**
+ * [kids]: a kids profile's highest allowed rating, as an index into Ratings.LEVELS; null for a normal profile.
+ * [avatar]: a picture from [Avatars] ("" = the initial on [color]).
+ */
+data class Profile(val id: String, val name: String, val color: Int, val kids: Int? = null, val avatar: String = "")
 
 /** Age ratings, lowest first (UK, with US film and TV equivalents). Kids profiles hide anything above their level and anything unrated. */
 object Ratings {
@@ -188,6 +191,8 @@ class Store(private val open: (String) -> SharedPreferences) {
 
   fun setKids(id: String, level: Int?) = saveProfiles(profiles.map { if (it.id == id) it.copy(kids = level) else it })
 
+  fun setAvatar(id: String, avatar: String) = saveProfiles(profiles.map { if (it.id == id) it.copy(avatar = avatar) else it })
+
   fun renameProfile(id: String, name: String) = saveProfiles(profiles.map { if (it.id == id && name.isNotBlank()) it.copy(name = name.trim()) else it })
 
   /** Removes the profile and everything it saved. The main profile and the one in use can't be removed. */
@@ -201,14 +206,14 @@ class Store(private val open: (String) -> SharedPreferences) {
   fun switchProfile(id: String) = g.edit().putString("profile", id).commit()
 
   private fun saveProfiles(list: List<Profile>) =
-    g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color).apply { it.kids?.let { k -> put("kids", k) } } }).toString()).apply()
+    g.edit().putString("profiles", JSONArray(list.map { JSONObject().put("id", it.id).put("name", it.name).put("color", it.color).put("avatar", it.avatar).apply { it.kids?.let { k -> put("kids", k) } } }).toString()).apply()
 
   companion object {
     private val PROFILE_KEYS = listOf("progress", "mylist", "trakt_", "status_trakt", "anilist_", "status_anilist", "mal_", "status_mal", "src:", "sublang", "audiolang", "anime_dub", "thumbs", "outbox", "synclog", "xc_favs", "xc_recent", "reminders", "lit:", "challenge_")
     val AVATARS = listOf(0xFF9A4155, 0xFF2F6F73, 0xFFB7791F, 0xFF3D5A80, 0xFF6B8F71, 0xFF8C5A3C).map { it.toInt() }
 
     private fun profilesIn(g: SharedPreferences): List<Profile> =
-      JSONArray(g.getString("profiles", "[]")).objects().map { Profile(it.getString("id"), it.optString("name"), it.optInt("color", AVATARS[0]), if (it.has("kids")) it.optInt("kids") else null) }
+      JSONArray(g.getString("profiles", "[]")).objects().map { Profile(it.getString("id"), it.optString("name"), it.optInt("color", AVATARS[0]), if (it.has("kids")) it.optInt("kids") else null, it.optString("avatar")) }
         .ifEmpty { listOf(Profile("main", "Me", AVATARS[0])) }
   }
 
@@ -440,7 +445,8 @@ class Tmdb(private val key: String) {
 }
 
 /** A row of titles: a TMDB list path, or a custom loader (Trakt, anime trackers). */
-class RowSpec(val title: String, val path: String, val type: String?, val load: ((Tmdb) -> List<Item>)? = null)
+/** [ranked]: a Top 10, drawn with its rank beside each title. */
+class RowSpec(val title: String, val path: String, val type: String?, val ranked: Boolean = false, val load: ((Tmdb) -> List<Item>)? = null)
 
 /** A kids profile's Home: family and children's titles up to its rating (lists are filtered again in Tmdb.safe). */
 fun kidsRows(level: Int): List<RowSpec> {
@@ -464,7 +470,9 @@ fun homeRows(store: Store): List<RowSpec> {
   ) else emptyList()
   val popular = if (store.str("trakt_client").isNotEmpty()) listOf(RowSpec("Popular on Trakt", "", null) { Trakt.items(it, Trakt.trending(store)) }) else emptyList()
   return trakt + listOf(
-    RowSpec("Trending Movies", "/trending/movie/week", "movie"),
+    // What everyone's watching today (TMDB trending, worldwide): ranked, no Show More.
+    RowSpec("Top 10 Films Today", "", null, ranked = true) { it.list("/trending/movie/day", "movie").take(10) },
+    RowSpec("Top 10 Series Today", "", null, ranked = true) { it.list("/trending/tv/day", "tv").take(10) },
     RowSpec("Popular Series", "/tv/popular", "tv"),
   ) + listOfNotNull(
     last?.let { RowSpec("Because You Watched ${it.title}", "/${it.type}/${it.id}/recommendations", null) },
@@ -474,6 +482,23 @@ fun homeRows(store: Store): List<RowSpec> {
     RowSpec("New Episodes This Week", "/tv/on_the_air", "tv"),
     RowSpec("Top Rated Films", "/movie/top_rated", "movie"),
   ) + popular
+}
+
+/** My Lists: one row per list. Zylo's own, your Trakt watchlist and lists (yours and liked), anime tracker lists. */
+fun myListRows(store: Store): List<RowSpec> {
+  val trakt = if (Trakt.connected(store)) {
+    val seen = mutableSetOf("My List", "Trakt Watchlist")
+    listOf(RowSpec("Trakt Watchlist", "", null) { Trakt.items(it, Trakt.watchlist(store), 200) }) +
+      runCatching { Trakt.lists(store) }.getOrDefault(emptyList()).map { l ->
+        // Row titles must be unique (a liked list can share a name with one of yours).
+        val title = if (seen.add(l.name)) l.name else "${l.name} · ${l.user}"
+        RowSpec(title, "", null) { Trakt.items(it, Trakt.listItems(store, l), 200) }
+      }
+  } else emptyList()
+  val anime = Anime.NAMES.filterKeys { Anime.connected(store, it) }.flatMap { (t, name) ->
+    listOf(RowSpec("$name · Watching", "", null) { Anime.items(Dom.app, store, t, "watching") }, RowSpec("$name · Plan to Watch", "", null) { Anime.items(Dom.app, store, t, "planning") })
+  }
+  return listOf(RowSpec("My List", "", null) { store.myList }) + trakt + anime
 }
 
 /** Rows by feel rather than genre. "Something Different" is a new genre each launch. */
