@@ -1,5 +1,5 @@
 {
-  "version": "0.35.0",
-  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.35.0.apk",
-  "notes": "What's new in 0.35.0 — Top 10, My Lists as rows, and profile pictures\n\n• Home has Top 10 Films Today and Top 10 Series Today, ranked with big outlined numbers.\n• My Lists shows every list as a row, like Home. Show More opens the whole list as a grid.\n• With Trakt connected, My List asks which Trakt list to save to.\n• Title pages are simpler: just Play, which picks a source for you or opens the list, as set in Settings › Playback. The trailer plays behind the page, so there's no Trailer button.\n• Pick a picture for your profile in Settings › Profiles: 17 Zylo characters to choose from.\n• Trailers on Home wait until you're in the featured title, not while you're in the top bar.\n• Fixes: the app icon in TV Settings, the Fire TV tile now fills the space, a cleaner launch screen, and even spacing next to the title you're on."
+  "version": "0.36.0",
+  "apk": "https://raw.githubusercontent.com/XelXRD/Zylo/main/releases/zylo-tv-0.36.0.apk",
+  "notes": "What's new in 0.36.0 — Smoother menus\n\n• Moving around Home, Discover and My Lists is much quicker on every device.\n• Every row is now the same size, so the page no longer jumps as you move between rows.\n• The title you're on opens into its wide picture once you stop on it, so scrolling along a row stays quick.\n• Trailers wait a moment longer before they start: just under a second on a row, a second and a half in the featured title.\n• A smaller, faster app: the download is about a third of the size it was."
 }
