@@ -69,7 +69,9 @@ object Z {
   val Pad = 48.dp // TV overscan-safe side margin
   const val Fast = 180
   const val Normal = 240
-  const val PreviewDelay = 400L // focus rest before a focused card's trailer starts loading (passing through never does)
+  const val OpenDelay = 300L // focus rest before a row card opens wide and loads its still (passing through never does)
+  const val PreviewDelay = 800L // focus rest before an opened card's trailer starts loading
+  const val HeroTrailerDelay = 1_500L // in the Home hero before its trailer starts loading
 
   // Motion: strong custom curves (the stock ones are too soft to read as intentional). Keep UI motion under 300 ms;
   // focus moves on a remote are repeated hundreds of times, so they get the shortest, simplest motion of all.

@@ -129,16 +129,16 @@ components:
     rounded: "{rounded.medium}"
     width: "124dp"
     height: "186dp"
-  poster-card-big-row:
+  poster-card-row:
     backgroundColor: "{colors.seat-graphite}"
     rounded: "{rounded.medium}"
-    width: "160dp"
-    height: "240dp"
+    width: "133dp"
+    height: "200dp"
   preview-card-expanded:
     backgroundColor: "{colors.seat-graphite}"
     rounded: "{rounded.medium}"
-    width: "427dp"
-    height: "240dp"
+    width: "356dp"
+    height: "200dp"
   list-surface:
     backgroundColor: "transparent"
     textColor: "{colors.aisle-grey}"
@@ -252,7 +252,7 @@ The canvas is a 16:9 TV at 1080p, laid out in dp. Every screen keeps a **48dp ov
 - **Hero** on Home is a full-bleed backdrop with 440dp of info area, anchored bottom-left. The title or logo block is 48% of the width, with buttons 18dp below and 12dp apart, and the page dots below that.
 - **Top bar** floats over content, with 14dp above and 22dp below the items, inside a fade.
 - **Scrolling** brings the focused item into view with only a 24dp lead and trail. It never jumps to a fixed focal point.
-- **Skeletons** match the shape of what's loading (124×186dp posters and 160×16dp headings) and are still, with no shimmer.
+- **Skeletons** match the shape of what's loading (133×200dp row posters and 160×16dp headings) and are still, with no shimmer.
 
 ## Elevation & Depth
 
@@ -286,10 +286,10 @@ Firm, compact and remote-legible.
 - **Filter chips** (the Movies, Series and Anime filter rows) use the list-surface treatment, separated into groups by 1×26dp hairline dividers.
 
 ### Cards / Containers
-- **Poster card:** 2:3, 124×186dp in rows, Seat Graphite behind artwork and medium corners. The title is drawn under the image in Dim Grey, so a missing or slow image never leaves a blank card.
+- **Poster card:** 2:3, 133×200dp in rows, Seat Graphite behind artwork and medium corners. The title is drawn under the image in Dim Grey, so a missing or slow image never leaves a blank card.
 - **Focus:** scales to 1.08, gets a 2dp white edge (92%) inset on the artwork, and the focus-lift glow.
 - **Marks:** a 3dp Zylo Red progress bar on a 25% white track along the bottom edge when part-watched. A 22dp Screening Room circle with a 14dp tick sits bottom-right when watched.
-- **Big row:** the row holding focus grows: its posters become 160×240dp, and the focused one opens at once (240ms, ease out) into a 427×240dp 16:9 still. The still is a clean background (never fanart's titled thumbs) with only the title logo on a short bottom fade; the metadata line, rating and a two-line overview sit under the row (70dp, up to 640dp wide), crossfading as focus moves. A muted trailer starts loading once focus has rested 400ms. Shrinking is instant, because an animated shrink drags the row sideways. Every other row stays 124×186.
+- **Rows:** every Home and Discover row is the same height: 133×200dp posters. (A row that grew on focus moved the page while it was scrolling to centre it, and lagged on every device.) Once focus rests on a poster for 300ms it opens (240ms, ease out) into a 356×200dp 16:9 still: TMDB's w780 backdrop, with only the title logo on a short bottom fade. The metadata line, rating and a two-line overview sit under the row (70dp, up to 640dp wide; the space opens with focus, the words follow when the card opens). Passing along a row loads nothing. A muted trailer starts loading once focus has rested 800ms. Shrinking is instant, because an animated shrink drags the row sideways. Cost rule: a single D-pad press redraws only the card it leaves and the card it enters, and starts no loading.
 - **Panels:** House Dark with large corners and 24dp padding.
 
 ### Dialogs and text entry
@@ -320,10 +320,10 @@ Firm, compact and remote-legible.
 - Genre rows follow; Home's trending rows aren't repeated.
 
 ### Hero (signature)
-The Home hero is a full-bleed backdrop behind horizontal and vertical Screening Room scrims, with a title logo or Display Large title, a metadata line, Play and secondary buttons, and page dots (the active dot is Screen White and the rest are 30%). The trailer starts loading as soon as the hero is in view with focus on it or the top bar (no rest wait). The set of hero titles changes every 4 hours.
+The Home hero is a full-bleed backdrop behind horizontal and vertical Screening Room scrims, with a title logo or Display Large title, a metadata line, Play and secondary buttons, and page dots (the active dot is Screen White and the rest are 30%). With focus in the hero, the trailer starts loading after a 1.5s rest (creating the player briefly stalls the screen); from the top bar the artwork moves on without one. The set of hero titles changes every 4 hours.
 
 ### Trailers
-- Trailers are YouTube embeds, but YouTube's interface never shows: the player is drawn 24% larger than its box so corner badges fall outside, starts 4s in (past rating cards), stays under the artwork, silent, until 3.5s of playback (YouTube's title bar has gone), then the sound fades up with the picture, drops captions, and hands back to the artwork 3s before the end. Those first 3.5s can't be shortened: YouTube's own controls (title bar, play icon, More videos, logo) sit over them. Opening a title while its trailer plays (the Home hero, a big-row card, Pick for Me) moves that same player onto the title page (`TrailerHandoff`): it never stops or reloads, it just fills the screen. Without one, the title page starts its own trailer behind the page. While a trailer plays there, the page (text, buttons and scrims) fades out after 5s untouched (700ms) so the trailer has the screen; the first press of any button only brings it back (200ms), and Back still goes back. Pick for Me loads its trailer while the reel spins and shows the pick's artwork in the window until it plays. Countdowns, reactions, recaps, featurettes and similar aren't used as trailers.
+- Trailers are YouTube embeds, but YouTube's interface never shows: the player is drawn 24% larger than its box so corner badges fall outside, starts 4s in (past rating cards), stays under the artwork, silent, until 3.5s of playback (YouTube's title bar has gone), then the sound fades up with the picture, drops captions, and hands back to the artwork 3s before the end. Those first 3.5s can't be shortened: YouTube's own controls (title bar, play icon, More videos, logo) sit over them. Opening a title while its trailer plays (the Home hero, an opened row card, Pick for Me) moves that same player onto the title page (`TrailerHandoff`): it never stops or reloads, it just fills the screen. Without one, the title page starts its own trailer behind the page. While a trailer plays there, the page (text, buttons and scrims) fades out after 5s untouched (700ms) so the trailer has the screen; the first press of any button only brings it back (200ms), and Back still goes back. Pick for Me loads its trailer while the reel spins and shows the pick's artwork in the window until it plays. Countdowns, reactions, recaps, featurettes and similar aren't used as trailers.
 
 ### Player
 - Controls take Zylo's focus (Focus Graphite with a 2dp white edge, 10dp corners), never Media3's default highlight.

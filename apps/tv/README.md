@@ -100,9 +100,9 @@ Design tokens (colours, type scale, radii, timings) are in `Theme.kt` (`object Z
 
 ## Build
 
-Needs JDK 17+ and the Android SDK (Android Studio installs both). `./gradlew assembleDebug` (Windows: `gradlew.bat assembleDebug`), then the APK is in `build/outputs/apk/debug/`. Tests: `./gradlew testDebugUnitTest`.
+Needs JDK 17+ and the Android SDK (Android Studio installs both). `./gradlew assembleRelease` (Windows: `gradlew.bat assembleRelease`), then the APK is in `build/outputs/apk/release/`. Ship that one: it's shrunk and optimised by R8 and runs noticeably smoother than the debug build (`assembleDebug`, for development). Tests: `./gradlew testDebugUnitTest`.
 
-Signed with `debug.keystore` (same key as earlier builds), so it installs over them. Install with `adb install -r zylo-tv-debug.apk`, or copy it to the Shield and open it with a file manager.
+Signed with `debug.keystore` (same key as earlier builds), so it installs over them. Install with `adb install -r zylo-tv-release.apk`, or copy it to the Shield and open it with a file manager.
 
 ## Not yet
 

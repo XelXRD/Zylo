@@ -52,6 +52,8 @@ import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.graphics.drawscope.Stroke
 import androidx.compose.ui.layout.ContentScale
+import androidx.compose.ui.semantics.contentDescription
+import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.layout.FirstBaseline
 import androidx.compose.ui.layout.layout
 import androidx.compose.ui.unit.em
@@ -65,6 +67,7 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.async
 import kotlinx.coroutines.awaitAll
 import kotlinx.coroutines.delay
+import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import kotlinx.coroutines.withContext
 import java.text.SimpleDateFormat
@@ -96,6 +99,7 @@ class RowsState(private val specs: () -> List<RowSpec>, private val hero: ((Tmdb
   fun card(row: String, i: Int) = cards.getOrPut("$row#$i") { FocusRequester() }
   val focus = FocusMemory()
   var focused by mutableStateOf<String?>(null) // card that has focus now
+  var opened by mutableStateOf<String?>(null) // card that focus has rested on briefly: shown wide
   var expanded by mutableStateOf<String?>(null) // card that has been focused long enough to preview
 
   suspend fun load(t: Tmdb, key: String) = withContext(Dispatchers.IO) {
@@ -129,11 +133,18 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   // The app stays open for days on a TV: new hero titles every 4 hours.
   if (hero) LaunchedEffect(Unit) { while (true) { delay(4 * 3_600_000L); s.reshuffle() } }
   // Preview timer: restarts on every focus move, so scrolling quickly through a row never starts a trailer.
-  LaunchedEffect(s.focused) {
-    s.expanded = null
-    val k = s.focused ?: return@LaunchedEffect
-    delay(Z.PreviewDelay)
-    s.expanded = k
+  // Watched as a flow, not a LaunchedEffect key: a key is read here, so every focus move would redraw the whole page.
+  LaunchedEffect(s) {
+    snapshotFlow { s.focused }.collectLatest { k ->
+      s.opened = null
+      s.expanded = null
+      if (k == null) return@collectLatest
+      // Passing along a row costs nothing: a card only opens, and loads its artwork, once focus stops on it.
+      delay(Z.OpenDelay)
+      s.opened = k
+      delay(Z.PreviewDelay - Z.OpenDelay)
+      s.expanded = k
+    }
   }
   RestoreFocus(s.focus, s.rows.isNotEmpty() && restore)
   if (s.rows.isEmpty()) return if (s.error != null) Loading(s.error) else RowsSkeleton(top = if (hero) 440.dp else 120.dp)
@@ -141,13 +152,14 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
   // Continue Watching: what you stopped partway through, plus the next episode of each series you're watching.
   LaunchedEffect(hero) { if (hero) s.nextUps = withContext(Dispatchers.IO) { runCatching { nextUps(store, Tmdb(key)) }.getOrDefault(s.nextUps) } }
   val inProgress = remember { if (hero) store.continueWatching() else emptyList() }
-  val watching = (inProgress.map { ContinueEntry(it.key, it.item, it.season, it.episode, listOfNotNull(it.season?.let { n -> "S$n E${it.episode}" }, it.left).joinToString("  ·  "), it.fraction, it.at) } +
+  // Kept between redraws: a new list each time makes every row below redraw with it.
+  val watching = remember(inProgress, s.nextUps) { (inProgress.map { ContinueEntry(it.key, it.item, it.season, it.episode, listOfNotNull(it.season?.let { n -> "S$n E${it.episode}" }, it.left).joinToString("  ·  "), it.fraction, it.at) } +
     s.nextUps.map { ContinueEntry("next/${it.item.key}", it.item, it.season, it.episode, "S${it.season} E${it.episode} · " + if (it.isNew) "New episode" else "Next episode", null, it.at, it.name, it.isNew) })
-    .sortedByDescending { it.at }
+    .sortedByDescending { it.at } }
   val mine = remember { if (hero) store.myList else emptyList() }
   // A thumbs down keeps a title out of the rows.
   val disliked = remember(s.rows) { Thumbs.disliked(store) }
-  val rows = (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows.map { (n, l) -> n to l.filter { it.key !in disliked } }
+  val rows = remember(mine, s.rows, disliked) { (if (mine.isNotEmpty()) listOf("My List" to mine) else emptyList()) + s.rows.map { (n, l) -> n to l.filter { it.key !in disliked } } }
   s.order = rows.map { it.first }
   val featured = if (hero) s.heroItems.getOrNull(s.heroIndex.coerceIn(0, (s.heroItems.size - 1).coerceAtLeast(0))) else null
   // Focus in the hero keeps the page at the very top, so the hero is never cut off.
@@ -163,8 +175,9 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
       else 1f - (s.list.firstVisibleItemScrollOffset / with(density) { 300.dp.toPx() }).coerceIn(0f, 1f)
     }
   }
+  val artFull by remember { derivedStateOf { artAlpha == 1f } } // changes once, not on every scroll frame
   Box(Modifier.fillMaxSize()) {
-    if (featured != null) HeroBackdrop(store, s, featured, active = s.heroFocused || (nav.ui.navFocused && artAlpha == 1f), Modifier.fillMaxSize().alpha(artAlpha))
+    if (featured != null) HeroBackdrop(store, s, featured, active = s.heroFocused || (nav.ui.navFocused && artFull), Modifier.fillMaxSize().graphicsLayer { alpha = artAlpha }) // read while drawing, so scrolling never rebuilds the page
     // The focused row moves to the middle of the screen (Alex: a focal point, never cut off at the bottom). In the hero
     // the page stays at the top. Rows supply their own sideways behaviour (PivotRow).
     // The top item fades out over [over] of scrolling, so nothing of it is left to show through under the top bar.
@@ -195,7 +208,7 @@ fun RowsPage(store: Store, s: RowsState, nav: Nav, restore: Boolean, hero: Boole
 fun RowsSkeleton(top: androidx.compose.ui.unit.Dp) = Column(Modifier.fillMaxSize().padding(start = Z.Pad, top = top), verticalArrangement = Arrangement.spacedBy(16.dp)) {
   repeat(2) {
     Skeleton(Modifier.width(160.dp).height(16.dp))
-    Row(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) { repeat(8) { Skeleton(Modifier.width(124.dp).height(186.dp)) } }
+    Row(Modifier.padding(bottom = 12.dp), horizontalArrangement = Arrangement.spacedBy(14.dp)) { repeat(8) { Skeleton(Modifier.width(RowCard * 2 / 3).height(RowCard)) } }
   }
 }
 
@@ -218,7 +231,8 @@ private fun HeroBackdrop(store: Store, s: RowsState, item: Item, active: Boolean
     s.heroPlaying = false
     if (!active) return@LaunchedEffect
     // From the top bar the artwork still moves on, but trailers wait until you're in the hero itself.
-    if (trailer != null && store.previews && s.heroFocused) trailerOn = true
+    // A short rest first: creating the player stalls the screen briefly, so it waits until you've stopped in the hero.
+    if (trailer != null && store.previews && s.heroFocused) { delay(Z.HeroTrailerDelay); trailerOn = true }
     else { delay(8_000); s.moveHero(1) }
   }
   Box(modifier) {
@@ -354,9 +368,9 @@ fun latestReleases(t: Tmdb): List<Item> {
 }
 
 /**
- * A shelf of posters. The row holding focus is the big row: its posters grow (160x240), the focused one opens straight
- * away into a wide still with its title logo, and what it is (meta and a two-line synopsis) sits under the row, off the
- * artwork. Every other row stays small, so the eye always knows which one it's in.
+ * A shelf of posters, every row the same height (a row that grew on focus moved the page while it was scrolling to centre
+ * it). Once focus rests on a poster it opens into a wide still with its title logo, and what it is (meta and a two-line
+ * synopsis) sits under the row, off the artwork.
  */
 @Composable
 fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: Nav, default: Boolean) = Column {
@@ -366,16 +380,19 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
   val all = items
   val items = if (more == null && all.size > RowCap) all.take(RowCap) else all
   val grid = more == null && all.size > RowCap
-  val active = s.focused?.startsWith("$name/") == true
-  val height = if (active) BigCard else 186.dp
+  // Only this row's own answer is watched, so a focus move redraws the row it left and the row it entered, not every row.
+  val active by remember(name) { derivedStateOf { s.focused?.startsWith("$name/") == true } }
+  val height = RowCard
   Text(name, Modifier.padding(start = Z.Pad, top = 10.dp), style = MaterialTheme.typography.titleLarge)
   // A Top 10 pivots on the focused title's rank, not its card, so the number stays on screen beside it.
   val measurer = androidx.compose.ui.text.rememberTextMeasurer()
-  val rankStyle = rankStyle(BigCard)
+  val rankStyle = rankStyle(RowCard)
   val overlap = with(LocalDensity.current) { RankOverlap.toPx() }
+  // Each rank's width, measured once rather than on every scroll.
+  val rankWidths = remember(ranked, items.size, rankStyle) { if (!ranked) emptyList() else (1..items.size).map { measurer.measure("$it", rankStyle, softWrap = false).size.width } }
   PivotRow(lead = {
     val i = items.indexOfFirst { s.focused == "$name/${it.key}" }
-    if (!ranked || i < 0) 0f else measurer.measure("${i + 1}", rankStyle, softWrap = false).size.width - overlap
+    rankWidths.getOrNull(i)?.let { it - overlap } ?: 0f
   }) {
   LazyRow(
     state = s.rowLists.getOrPut(name) { LazyListState() },
@@ -384,11 +401,14 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
   ) {
     itemsIndexed(items, key = { _, it -> it.key }) { i, item ->
       val k = "$name/${item.key}"
+      val lit by remember(k) { derivedStateOf { s.focused == k } } // only the card that gains or loses focus redraws
+      val wide by remember(k) { derivedStateOf { s.opened == k } }
+      val trailer by remember(k) { derivedStateOf { s.expanded == k } }
       // A Top 10: each card stands just over its rank (drawn after it, so the card overlaps the numeral's edge).
       Row(horizontalArrangement = Arrangement.spacedBy(if (ranked) -RankOverlap else 0.dp)) {
-        if (ranked) Rank(i + 1, height, lit = s.focused == k)
+        if (ranked) Rank(i + 1, height, lit = lit)
         PreviewCard(
-          store, item, wide = s.focused == k, height = height, trailer = s.expanded == k,
+          store, item, wide = wide, height = height, trailer = trailer,
           Modifier.sameColumn(s, name, i).focusMemory(s.focus, k, default && i == 0),
           onFocus = { f -> if (f) s.focused = k else if (s.focused == k) s.focused = null },
         ) { nav.push(Screen.Title(item)) }
@@ -410,9 +430,10 @@ fun PosterRow(store: Store, name: String, items: List<Item>, s: RowsState, nav: 
     }
   }
   }
-  // What the focused title is, under the row (the card itself stays clean artwork).
+  // What the focused title is, under the row (the card itself stays clean artwork). The space opens with focus; the words
+  // follow once the card opens, so passing through loads nothing.
   if (active) {
-    val item = items.find { s.focused == "$name/${it.key}" }
+    val item = items.find { s.opened == "$name/${it.key}" }
     Crossfade(item, Modifier.padding(start = Z.Pad, bottom = 14.dp).widthIn(max = 640.dp).height(70.dp), animationSpec = tween(ms(180), easing = Z.EaseOut), label = "rowInfo") { shown ->
       if (shown != null) Column {
         val look = rememberLook(store, shown)
@@ -460,8 +481,8 @@ private fun rankStyle(height: androidx.compose.ui.unit.Dp): androidx.compose.ui.
 /** Most titles a row shows before Show More (for rows that load a whole list at once). */
 private const val RowCap = 20
 
-/** Card height in the row that has focus (posters 2:3, the focused one 16:9). */
-private val BigCard = 240.dp
+/** Card height in every row (posters 2:3, the opened one 16:9). */
+private val RowCard = 200.dp
 
 /** Up/Down to the card directly below/above on screen (rows scroll independently, so not the same index). */
 private fun Modifier.sameColumn(s: RowsState, row: String, i: Int) =
@@ -527,8 +548,8 @@ fun PivotRow(lead: () -> Float = { 0f }, content: @Composable () -> Unit) {
 }
 
 /**
- * A poster in a row. [wide]: focused in the big row, so it opens at once into a 16:9 still with its title logo; the
- * muted [trailer] starts there once focus has rested. OK opens the title.
+ * A poster in a row. [wide]: focus has rested on it, so it opens into a 16:9 still with its title logo; the muted
+ * [trailer] starts there once focus has rested a little longer. OK opens the title.
  */
 @Composable
 fun PreviewCard(store: Store, item: Item, wide: Boolean, height: androidx.compose.ui.unit.Dp, trailer: Boolean, modifier: Modifier, onFocus: (Boolean) -> Unit, onClick: () -> Unit) {
@@ -539,25 +560,22 @@ fun PreviewCard(store: Store, item: Item, wide: Boolean, height: androidx.compos
   var playing by remember { mutableStateOf(false) }
   val overlay by animateFloatAsState(if (playing) 0f else 1f, tween(ms(220), easing = Z.EaseOut), label = "overlay")
   // No focus zoom: opening wide is the focus, and 8% of a 16:9 card overran the gap to the next title.
-  ZCard(onClick, modifier.width(width).height(height).onFocusChanged { onFocus(it.isFocused) }, zoom = false) {
-    Crossfade(wide, animationSpec = tween(ms(180), easing = Z.EaseOut), label = "preview") { open ->
-      Box(Modifier.fillMaxSize()) {
-        if (!open) {
-          Artwork(img(item.poster, "w342"), item.title)
-          Marks(store, item)
-        } else {
-          // A clean background (fanart's thumbs have the title printed on them, which the logo would repeat).
-          AsyncImage(look?.background ?: img(item.backdrop ?: item.poster, "w1280"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
-          val clip = Tmdb.trailer(look?.details)
-          if (clip != null && trailer && store.previews) Trailer(clip, Modifier.fillMaxSize(), store.trailerSound, onPlaying = { playing = it }, owner = item.key)
-          // Only the title on the artwork, on a short fade; it steps aside once the trailer is playing.
-          Box(Modifier.fillMaxSize().alpha(overlay).background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))))
-          Box(Modifier.align(Alignment.BottomStart).padding(16.dp).alpha(overlay)) {
-            TitleLogo(look, item.title, MaterialTheme.typography.headlineSmall.copy(color = Z.Text), 220.dp, 64.dp)
-          }
-          Marks(store, item)
+  ZCard(onClick, modifier.width(width).height(height).onFocusChanged { onFocus(it.isFocused) }.semantics { contentDescription = posterLabel(store, item) }, zoom = false) {
+    // One copy of the card, not a crossfade between two: the poster stays underneath while the still fades in over it.
+    Box(Modifier.fillMaxSize()) {
+      Artwork(img(item.poster, "w342"), item.title)
+      if (wide) {
+        // TMDB's w780 still: sharp at this size and quick to load (fanart's originals are full HD; they stay on the hero).
+        AsyncImage(img(item.backdrop ?: item.poster, "w780"), null, Modifier.fillMaxSize(), contentScale = ContentScale.Crop)
+        val clip = Tmdb.trailer(look?.details)
+        if (clip != null && trailer && store.previews) Trailer(clip, Modifier.fillMaxSize(), store.trailerSound, onPlaying = { playing = it }, owner = item.key)
+        // Only the title on the artwork, on a short fade; it steps aside once the trailer is playing.
+        Box(Modifier.fillMaxSize().graphicsLayer { alpha = overlay }.background(Brush.verticalGradient(0.35f to Color.Transparent, 1f to Color.Black.copy(alpha = 0.9f))))
+        Box(Modifier.align(Alignment.BottomStart).padding(16.dp).graphicsLayer { alpha = overlay }) {
+          TitleLogo(look, item.title, MaterialTheme.typography.headlineSmall.copy(color = Z.Text), 220.dp, 64.dp)
         }
       }
+      Marks(store, item)
     }
   }
 }

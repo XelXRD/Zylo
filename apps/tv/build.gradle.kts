@@ -20,7 +20,14 @@ android {
   }
   // Same key as the old WebView build, so this installs over it.
   signingConfigs { getByName("debug") { storeFile = file("debug.keystore"); storePassword = "android"; keyAlias = "zylo"; keyPassword = "android" } }
-  buildTypes { release { signingConfig = signingConfigs.getByName("debug") } }
+  buildTypes {
+    release {
+      signingConfig = signingConfigs.getByName("debug")
+      // R8: Compose runs noticeably smoother shrunk and optimised. Keep rules for JNI and the trailer bridge in proguard-rules.pro.
+      isMinifyEnabled = true
+      proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
+    }
+  }
   buildFeatures { compose = true; buildConfig = true }
   compileOptions { sourceCompatibility = JavaVersion.VERSION_17; targetCompatibility = JavaVersion.VERSION_17 }
 }
